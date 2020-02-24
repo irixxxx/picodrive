@@ -55,7 +55,7 @@ extern void *p32x_bios_g, *p32x_bios_m, *p32x_bios_s;
 #define POPT_EN_Z80         (1<< 2)
 #define POPT_EN_STEREO      (1<< 3)
 #define POPT_ALT_RENDERER   (1<< 4) // 00 00x0
-// unused                   (1<< 5)
+#define POPT_EN_YM2413      (1<< 5)
 // unused                   (1<< 6)
 #define POPT_ACC_SPRITES    (1<< 7)
 #define POPT_DIS_32C_BORDER (1<< 8) // 00 0x00
@@ -73,7 +73,6 @@ extern void *p32x_bios_g, *p32x_bios_m, *p32x_bios_s;
 #define POPT_EN_32X         (1<<20) // x0 0000
 #define POPT_EN_PWM         (1<<21)
 #define POPT_PWM_IRQ_OPT    (1<<22)
-#define POPT_EN_YM2413      (1<<23)
 
 #define PAHW_MCD  (1<<0)
 #define PAHW_32X  (1<<1)

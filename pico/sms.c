@@ -15,6 +15,13 @@
 #include "pico_int.h"
 #include "memory.h"
 #include "sound/sn76496.h"
+#include "sound/emu2413/emu2413.h"
+
+extern void YM2413_regWrite(unsigned reg);
+extern void YM2413_dataWrite(unsigned data);
+
+
+static unsigned short ymflag = 0xffff;
 
 static unsigned char vdp_data_read(void)
 {
@@ -100,6 +107,7 @@ static unsigned char z80_sms_in(unsigned short a)
   unsigned char d = 0;
 
   elprintf(EL_IO, "z80 port %04x read", a);
+  unsigned short origa = a;
   a &= 0xc1;
   switch (a)
   {
@@ -135,7 +143,21 @@ static unsigned char z80_sms_in(unsigned short a)
       d |= ~(PicoIn.pad[1] >> 2) & 0x0f;
       break;
   }
-
+  switch (origa)
+  {
+  case 0xf0:
+    // FM reg port
+    break;
+  case 0xf1:
+    // FM data port
+    break;
+  case 0xf2:
+    // bit 0 = 1 active FM Pac
+    if (PicoIn.opt & POPT_EN_YM2413){
+      d = ymflag;
+    }
+    break;
+  }
   elprintf(EL_IO, "ret = %02x", d);
   return d;
 }
@@ -143,6 +165,7 @@ static unsigned char z80_sms_in(unsigned short a)
 static void z80_sms_out(unsigned short a, unsigned char d)
 {
   elprintf(EL_IO, "z80 port %04x write %02x", a, d);
+  unsigned short origa = a;
   a &= 0xc1;
   switch (a)
   {
@@ -157,12 +180,30 @@ static void z80_sms_out(unsigned short a, unsigned char d)
       SN76496Write(d);
       break;
 
+
     case 0x80:
       vdp_data_write(d);
       break;
 
     case 0x81:
       vdp_ctl_write(d);
+      break;
+  }
+  switch(origa)
+  {
+    case 0xf0:
+      // FM reg port
+      YM2413_regWrite(d);
+      break;
+    case 0xf1:
+      // FM data port
+      YM2413_dataWrite(d);
+      break;
+    case 0xf2:
+      // bit 0 = 1 active FM Pac
+      if (PicoIn.opt & POPT_EN_YM2413){
+        ymflag = d;
+      }
       break;
   }
 }
@@ -212,6 +253,7 @@ void PicoResetMS(void)
 {
   z80_reset();
   PsndReset(); // pal must be known here
+  ymflag = 0xffff;
 }
 
 void PicoPowerMS(void)
@@ -294,6 +336,11 @@ void PicoFrameMS(void)
   for (y = 0; y < lines; y++)
   {
     pv->v_counter = Pico.m.scanline = y;
+
+    if(y%8 == 0){
+      PsndDoYM2413(Pico.m.scanline);
+    }
+
     if (y > 218)
       pv->v_counter = y - 6;
 
@@ -319,6 +366,7 @@ void PicoFrameMS(void)
         z80_int_assert(1);
       }
     }
+
 
     cycles_aim += cycles_line;
     cycles_done += z80_run((cycles_aim - cycles_done) >> 8) << 8;
