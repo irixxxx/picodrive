@@ -1,2 +1,2 @@
 #!/bin/bash
-./configure && make clean && make opk
+./configure && make clean && make
