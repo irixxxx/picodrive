@@ -439,6 +439,7 @@ struct PicoSound
   unsigned int dac_mult;                // z80 clocks per line in Q16
   unsigned int dac_pos;                 // last DAC position in Q16
   short psg_line;
+  short ym2413_line;
   unsigned int fm_mult;                 // samples per line in Q16
   unsigned int fm_pos;                  // last FM position in Q16
 };
