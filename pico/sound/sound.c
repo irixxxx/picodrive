@@ -13,6 +13,7 @@
 #include "../pico_int.h"
 #include "../cd/cue.h"
 #include "mix.h"
+#include "emu2413/emu2413.h"
 
 void (*PsndMix_32_to_16l)(short *dest, int *src, int count) = mix_32_to_16l_stereo;
 
@@ -27,6 +28,11 @@ short cdda_out_buffer[2*1152];
 
 // sn76496
 extern int *sn76496_regs;
+
+// ym2413
+#define YM2413_CLK 3579545
+static OPLL *opll;
+
 
 
 static void dac_recalculate(void)
@@ -78,6 +84,10 @@ void PsndRerate(int preserve_state)
   if (preserve_state) memcpy(state, sn76496_regs, 28*4); // remember old state
   SN76496_init(Pico.m.pal ? OSC_PAL/15 : OSC_NTSC/15, PicoIn.sndRate);
   if (preserve_state) memcpy(sn76496_regs, state, 28*4); // restore old state
+
+  opll = OPLL_new(YM2413_CLK, PicoIn.sndRate);
+  OPLL_setChipType(opll,0);
+  OPLL_reset(opll);
 
   if (state)
     free(state);
