@@ -1,2 +1,2 @@
 #!/bin/bash
-./configure && make clean && make
+./configure --platform=generic && make clean && make
