@@ -32,7 +32,7 @@ extern int *sn76496_regs;
 // ym2413
 #define YM2413_CLK 3579545
 static OPLL *opll;
-
+unsigned YM2413_reg;
 
 
 static void dac_recalculate(void)
@@ -194,6 +194,49 @@ PICO_INTERNAL void PsndDoPSG(int line_to)
   }
   SN76496Update(PicoIn.sndOut + pos, len, stereo);
 }
+PICO_INTERNAL void PsndDoYM2413(int line_to)
+{
+  int line_from = Pico.snd.psg_line;
+  int pos, pos1, len;
+
+  pos  = dac_info[line_from];
+  pos1 = dac_info[line_to + 1];
+  len = pos1 - pos;
+  if (len <= 0)
+    return;
+
+  Pico.snd.psg_line = line_to + 1;
+
+  if (!PicoIn.sndOut || !(PicoIn.opt & POPT_EN_YM2413))
+    return;
+
+  // fill buffer
+  if (PicoIn.opt & POPT_EN_STEREO) {
+    pos <<= 1;
+  }
+
+  if (PicoIn.opt & POPT_EN_YM2413){
+    short *buf = PicoIn.sndOut + pos;
+    for (int iI = 0; iI < len; iI++) {
+      int16_t getdata = OPLL_calc(opll);
+      *buf = getdata;  buf++;
+      if (PicoIn.opt & POPT_EN_STEREO) {
+        *buf = getdata;  buf++;
+      }
+    }
+  }
+}
+
+void YM2413_regWrite(unsigned data){
+  //YM2413_reg = data;
+  OPLL_writeIO(opll,0,data);
+}
+void YM2413_dataWrite(unsigned data){
+  //OPLL_writeReg(opll, YM2413_reg, data);
+  OPLL_writeIO(opll,1,data);
+}
+
+
 
 PICO_INTERNAL void PsndDoFM(int line_to)
 {
