@@ -31,7 +31,7 @@ extern int *sn76496_regs;
 
 // ym2413
 #define YM2413_CLK 3579545
-static OPLL *opll;
+static OPLL *opll = NULL;
 unsigned YM2413_reg;
 
 
@@ -85,9 +85,18 @@ void PsndRerate(int preserve_state)
   SN76496_init(Pico.m.pal ? OSC_PAL/15 : OSC_NTSC/15, PicoIn.sndRate);
   if (preserve_state) memcpy(sn76496_regs, state, 28*4); // restore old state
 
-  opll = OPLL_new(YM2413_CLK, PicoIn.sndRate);
-  OPLL_setChipType(opll,0);
-  OPLL_reset(opll);
+  if(opll != NULL){
+    OPLL_setRate(opll, PicoIn.sndRate);
+    OPLL_reset(opll);
+    //OPLL_delete(opll);
+    //opll = NULL;
+  }
+  else
+  {
+    opll = OPLL_new(YM2413_CLK, PicoIn.sndRate);
+    OPLL_setChipType(opll,0);
+  }
+  
 
   if (state)
     free(state);
