@@ -52,6 +52,18 @@ static void dac_recalculate(void)
 }
 
 
+PICO_INTERNAL void PsndInit(void)
+{
+  opll = OPLL_new(YM2413_CLK, PicoIn.sndRate);
+  OPLL_setChipType(opll,0);
+}
+
+PICO_INTERNAL void PsndExit(void)
+{
+  OPLL_delete(opll);
+  opll = NULL;
+}
+
 PICO_INTERNAL void PsndReset(void)
 {
   // PsndRerate calls YM2612Init, which also resets
@@ -88,13 +100,6 @@ void PsndRerate(int preserve_state)
   if(opll != NULL){
     OPLL_setRate(opll, PicoIn.sndRate);
     OPLL_reset(opll);
-    //OPLL_delete(opll);
-    //opll = NULL;
-  }
-  else
-  {
-    opll = OPLL_new(YM2413_CLK, PicoIn.sndRate);
-    OPLL_setChipType(opll,0);
   }
   
 

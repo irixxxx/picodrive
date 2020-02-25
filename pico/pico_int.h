@@ -884,6 +884,8 @@ PICO_INTERNAL_ASM void wram_2M_to_1M(unsigned char *m);
 PICO_INTERNAL_ASM void wram_1M_to_2M(unsigned char *m);
 
 // sound/sound.c
+PICO_INTERNAL void PsndInit(void);
+PICO_INTERNAL void PsndExit(void);
 PICO_INTERNAL void PsndReset(void);
 PICO_INTERNAL void PsndStartFrame(void);
 PICO_INTERNAL void PsndDoDAC(int cycle_to);
