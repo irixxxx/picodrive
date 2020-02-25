@@ -214,6 +214,7 @@ PICO_INTERNAL void PsndDoYM2413(int line_to)
 {
   int line_from = Pico.snd.ym2413_line;
   int pos, pos1, len;
+  int stereo = 0;
 
   pos  = dac_info[line_from];
   pos1 = dac_info[line_to + 1];
@@ -228,6 +229,7 @@ PICO_INTERNAL void PsndDoYM2413(int line_to)
 
   // fill buffer
   if (PicoIn.opt & POPT_EN_STEREO) {
+    stereo = 1;
     pos <<= 1;
   }
 
@@ -235,10 +237,9 @@ PICO_INTERNAL void PsndDoYM2413(int line_to)
     short *buf = PicoIn.sndOut + pos;
     for (int iI = 0; iI < len; iI++) {
       int16_t getdata = OPLL_calc(opll);
-      *buf = getdata;  buf++;
-      if (PicoIn.opt & POPT_EN_STEREO) {
-        *buf = getdata;  buf++;
-      }
+      *buf += getdata;
+  		if(stereo)  buf += 2; // only left for stereo, to be mixed to right later
+  		else buf++;
     }
   }
 }
@@ -427,6 +428,7 @@ PICO_INTERNAL void PsndGetSamplesMS(int y)
   int length = Pico.snd.len_use;
 
   PsndDoPSG(y - 1);
+  PsndDoYM2413(y - 1);
 
   // upmix to "stereo" if needed
   if (PicoIn.opt & POPT_EN_STEREO) {
