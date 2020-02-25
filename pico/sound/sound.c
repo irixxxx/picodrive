@@ -235,7 +235,8 @@ PICO_INTERNAL void PsndDoYM2413(int line_to)
 
   if (PicoIn.opt & POPT_EN_YM2413){
     short *buf = PicoIn.sndOut + pos;
-    for (int iI = 0; iI < len; iI++) {
+    int iI;
+    for (iI = 0; iI < len; iI++) {
       int16_t getdata = OPLL_calc(opll);
       *buf += getdata;
   		buf += stereo; // only left for stereo, to be mixed to right later
