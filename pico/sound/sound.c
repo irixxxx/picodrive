@@ -190,7 +190,7 @@ PICO_INTERNAL void PsndDoPSG(int line_to)
 {
   int line_from = Pico.snd.psg_line;
   int pos, pos1, len;
-  int stereo = 0;
+  int stereo = 1;
 
   pos  = dac_info[line_from];
   pos1 = dac_info[line_to + 1];
@@ -229,7 +229,7 @@ PICO_INTERNAL void PsndDoYM2413(int line_to)
 
   // fill buffer
   if (PicoIn.opt & POPT_EN_STEREO) {
-    stereo = 1;
+    stereo = 2;
     pos <<= 1;
   }
 
@@ -238,8 +238,7 @@ PICO_INTERNAL void PsndDoYM2413(int line_to)
     for (int iI = 0; iI < len; iI++) {
       int16_t getdata = OPLL_calc(opll);
       *buf += getdata;
-  		if(stereo)  buf += 2; // only left for stereo, to be mixed to right later
-  		else buf++;
+  		buf += stereo; // only left for stereo, to be mixed to right later
     }
   }
 }
