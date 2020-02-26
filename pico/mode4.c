@@ -175,10 +175,12 @@ static void draw_strip_low(const unsigned short *nametab, int dx, int cells, int
     }
 
     pack = *(unsigned int *)(PicoMem.vram + addr); /* Get 4 bitplanes / 8 pixels */
+    /*
     if (pack == 0) {
       blank = code;
       continue;
     }
+    */
     if (code & 0x0200) TileFlipM4Low(dx, pack, pal);
     else               TileNormM4Low(dx, pack, pal);
   }
