@@ -38,7 +38,7 @@ check_define()
 # setting options to "yes" or "no" will make that choice default,
 # "" means "autodetect".
 
-platform_list="generic pandora gp2x wiz caanoo opendingux gcw0 rpi1 rpi2"
+platform_list="generic pandora gp2x wiz caanoo opendingux gcw0 rg350 rpi1 rpi2"
 platform="generic"
 sound_driver_list="oss alsa sdl"
 sound_drivers=""
@@ -90,6 +90,12 @@ set_platform()
     sound_drivers="sdl"
     # both are really an opendingux
     platform="opendingux"
+    ;;
+  rg350)
+    sound_drivers="sdl"
+    # both are really an opendingux
+    platform="opendingux"
+    CFLAGS="$CFLAGS -D__RG350__"
     ;;
   pandora)
     sound_drivers="oss alsa"
