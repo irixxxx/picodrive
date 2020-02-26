@@ -190,7 +190,7 @@ static void draw_strip_high(const unsigned short *nametab, int dx, int cells, in
 {
   int oldcode = -1, blank = -1; // The tile we know is blank
   int addr = 0, pal = 0;
-  return;
+  
   // Draw tiles across screen:
   for (; cells > 0; dx += 8, tilex_ty_prio++, cells--)
   {
