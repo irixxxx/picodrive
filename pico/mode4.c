@@ -25,35 +25,62 @@ static int screen_offset;
     t = ((t >> (7-p)) | (t >> (14-p)) | (t >> (21-p)) | (t >> (28-p))) & 0x0f; \
     pd[x] = pal|t; \
   }
+#define PLANAR_PIXELH(x,p) \
+  t = pack & (0x80808080 >> p); \
+  t = ((t >> (7-p)) | (t >> (14-p)) | (t >> (21-p)) | (t >> (28-p))) & 0x0f; \
+  pd[x] = pal|t;
 
-static void TileNormM4(int sx, unsigned int pack, int pal)
+static void TileNormM4(int sx, unsigned int pack, int pal, int higher)
 {
   unsigned char *pd = Pico.est.HighCol + sx;
   unsigned int t;
-
-  PLANAR_PIXEL(0, 0)
-  PLANAR_PIXEL(1, 1)
-  PLANAR_PIXEL(2, 2)
-  PLANAR_PIXEL(3, 3)
-  PLANAR_PIXEL(4, 4)
-  PLANAR_PIXEL(5, 5)
-  PLANAR_PIXEL(6, 6)
-  PLANAR_PIXEL(7, 7)
+  if(higher == 0){
+    PLANAR_PIXEL(0, 0)
+    PLANAR_PIXEL(1, 1)
+    PLANAR_PIXEL(2, 2)
+    PLANAR_PIXEL(3, 3)
+    PLANAR_PIXEL(4, 4)
+    PLANAR_PIXEL(5, 5)
+    PLANAR_PIXEL(6, 6)
+    PLANAR_PIXEL(7, 7)
+  }
+  else{
+    PLANAR_PIXELH(0, 0)
+    PLANAR_PIXELH(1, 1)
+    PLANAR_PIXELH(2, 2)
+    PLANAR_PIXELH(3, 3)
+    PLANAR_PIXELH(4, 4)
+    PLANAR_PIXELH(5, 5)
+    PLANAR_PIXELH(6, 6)
+    PLANAR_PIXELH(7, 7)
+  }
 }
 
-static void TileFlipM4(int sx, unsigned int pack, int pal)
+static void TileFlipM4(int sx, unsigned int pack, int pal, int higher)
 {
   unsigned char *pd = Pico.est.HighCol + sx;
   unsigned int t;
 
-  PLANAR_PIXEL(0, 7)
-  PLANAR_PIXEL(1, 6)
-  PLANAR_PIXEL(2, 5)
-  PLANAR_PIXEL(3, 4)
-  PLANAR_PIXEL(4, 3)
-  PLANAR_PIXEL(5, 2)
-  PLANAR_PIXEL(6, 1)
-  PLANAR_PIXEL(7, 0)
+  if(higher == 0){
+    PLANAR_PIXEL(0, 7)
+    PLANAR_PIXEL(1, 6)
+    PLANAR_PIXEL(2, 5)
+    PLANAR_PIXEL(3, 4)
+    PLANAR_PIXEL(4, 3)
+    PLANAR_PIXEL(5, 2)
+    PLANAR_PIXEL(6, 1)
+    PLANAR_PIXEL(7, 0)
+  }
+  else{
+    PLANAR_PIXELH(0, 7)
+    PLANAR_PIXELH(1, 6)
+    PLANAR_PIXELH(2, 5)
+    PLANAR_PIXELH(3, 4)
+    PLANAR_PIXELH(4, 3)
+    PLANAR_PIXELH(5, 2)
+    PLANAR_PIXELH(6, 1)
+    PLANAR_PIXELH(7, 0)
+  }
 }
 
 static void draw_sprites(int scanline)
@@ -104,12 +131,12 @@ static void draw_sprites(int scanline)
   // now draw all sprites backwards
   for (--s; s >= 0; s--) {
     pack = *(unsigned int *)(PicoMem.vram + sprites_addr[s]);
-    TileNormM4(sprites_x[s], pack, 0x10);
+    TileNormM4(sprites_x[s], pack, 0x10,0);
   }
 }
 
 // tilex_ty_prio merged to reduce register pressure
-static void draw_strip(const unsigned short *nametab, int dx, int cells, int tilex_ty_prio)
+static void draw_strip(const unsigned short *nametab, int dx, int cells, int tilex_ty_prio,int higeher)
 {
   int oldcode = -1, blank = -1; // The tile we know is blank
   int addr = 0, pal = 0;
@@ -142,8 +169,8 @@ static void draw_strip(const unsigned short *nametab, int dx, int cells, int til
       blank = code;
       continue;
     }
-    if (code & 0x0200) TileFlipM4(dx, pack, pal);
-    else               TileNormM4(dx, pack, pal);
+    if (code & 0x0200) TileFlipM4(dx, pack, pal, higeher);
+    else               TileNormM4(dx, pack, pal, higeher);
   }
 }
 
@@ -180,7 +207,7 @@ static void DrawDisplayM4(int scanline)
 
   // low priority tiles
   if (!(pv->debug_p & PVD_KILL_B))
-    draw_strip(nametab, dx, cells, tilex | 0x0000 | (ty << 16));
+    draw_strip(nametab, dx, cells, tilex | 0x0000 | (ty << 16),0);
 
   // sprites
   if (!(pv->debug_p & PVD_KILL_S_LO))
@@ -188,7 +215,7 @@ static void DrawDisplayM4(int scanline)
 
   // high priority tiles (use virtual layer switch just for fun)
   if (!(pv->debug_p & PVD_KILL_A))
-    draw_strip(nametab, dx, cells, tilex | 0x1000 | (ty << 16));
+    draw_strip(nametab, dx, cells, tilex | 0x1000 | (ty << 16),1);
 
   if (pv->reg[0] & 0x20)
     // first column masked
