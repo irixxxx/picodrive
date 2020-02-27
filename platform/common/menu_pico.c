@@ -500,7 +500,7 @@ static menu_entry e_menu_adv_options[] =
 	mee_onoff     ("Emulate Z80",              MA_OPT2_ENABLE_Z80,    PicoIn.opt, POPT_EN_Z80),
 	mee_onoff     ("Emulate YM2612 (FM)",      MA_OPT2_ENABLE_YM2612, PicoIn.opt, POPT_EN_FM),
 	mee_onoff     ("Emulate SN76496 (PSG)",    MA_OPT2_ENABLE_SN76496,PicoIn.opt, POPT_EN_PSG),
-	mee_onoff     ("Emulate YM2413 (FM-PAC)",  MA_OPT2_ENABLE_YM2413 ,PicoIn.opt, POPT_EN_YM2413),
+	mee_onoff     ("Emulate YM2413 (FM)",      MA_OPT2_ENABLE_YM2413 ,PicoIn.opt, POPT_EN_YM2413),
 	mee_onoff     ("gzip savestates",          MA_OPT2_GZIP_STATES,   currentConfig.EmuOpt, EOPT_GZIP_SAVES),
 	mee_onoff     ("Don't save last used ROM", MA_OPT2_NO_LAST_ROM,   currentConfig.EmuOpt, EOPT_NO_AUTOSVCFG),
 	mee_onoff     ("Disable idle loop patching",MA_OPT2_NO_IDLE_LOOPS,PicoIn.opt, POPT_DIS_IDLE_DET),
