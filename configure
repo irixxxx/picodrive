@@ -62,7 +62,8 @@ CC="${CC-${CROSS_COMPILE}gcc}"
 CXX="${CXX-${CROSS_COMPILE}g++}"
 AS="${AS-${CROSS_COMPILE}as}"
 STRIP="${STRIP-${CROSS_COMPILE}strip}"
-test -n "$SDL_CONFIG" || SDL_CONFIG="`$CC $CFLAGS $LDFLAGS --print-sysroot 2> /dev/null || true`/usr/bin/sdl-config"
+SDLVERSION=sdl
+test -n "$PKG_CONFIG" || PKG_CONFIG="`$CC $CFLAGS $LDFLAGS --print-sysroot 2> /dev/null || true`/usr/bin/pkg-config"
 MAIN_LDLIBS="$LDLIBS -lm"
 config_mak="config.mak"
 
@@ -362,7 +363,7 @@ if [ "x$sound_drivers" = "x" ]; then
     sound_drivers="$sound_drivers alsa"
     MAIN_LDLIBS="-lasound $MAIN_LDLIBS"
   fi
-  if [ "$need_sdl" = "yes" ] || check_sdl `$SDL_CONFIG --cflags --libs`; then
+  if [ "$need_sdl" = "yes" ] || check_sdl `$PKG_CONFIG $SDLVERSION --cflags --libs`; then
     sound_drivers="$sound_drivers sdl"
     need_sdl="yes"
   fi
@@ -377,11 +378,10 @@ else
 fi
 
 if [ "$need_sdl" = "yes" ]; then
-  [ -x "$SDL_CONFIG" ] || \
-    fail "sdl-config is missing; please install libsdl (libsdl1.2-dev)"
-  CFLAGS="$CFLAGS `$SDL_CONFIG --cflags`"
-  MAIN_LDLIBS="`$SDL_CONFIG --libs` $MAIN_LDLIBS"
-  check_sdl `$SDL_CONFIG --libs` || fail "please install libsdl (libsdl1.2-dev)"
+  [ -x "$PKG_CONFIG" ] || fail "pkg-config is missing; please install $SDLVERSION"
+  CFLAGS="$CFLAGS `$PKG_CONFIG $SDLVERSION --cflags`"
+  MAIN_LDLIBS="`$PKG_CONFIG $SDLVERSION --libs` $MAIN_LDLIBS"
+  check_sdl `$PKG_CONFIG $SDLVERSION --libs` || fail "please install $SDLVERSION"
 fi
 
 if check_option -Wno-unused_result; then
