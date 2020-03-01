@@ -62,7 +62,7 @@ CC="${CC-${CROSS_COMPILE}gcc}"
 CXX="${CXX-${CROSS_COMPILE}g++}"
 AS="${AS-${CROSS_COMPILE}as}"
 STRIP="${STRIP-${CROSS_COMPILE}strip}"
-SDLVERSION=sdl2
+SDLVERSION=sdl
 test -n "$PKG_CONFIG" || PKG_CONFIG="`$CC $CFLAGS $LDFLAGS --print-sysroot 2> /dev/null || true`/usr/bin/pkg-config"
 MAIN_LDLIBS="$LDLIBS -lm"
 config_mak="config.mak"
@@ -378,6 +378,7 @@ else
 fi
 
 if [ "$need_sdl" = "yes" ]; then
+echo $PKG_CONFIG
   [ -x "$PKG_CONFIG" ] || fail "pkg-config is missing; please install $SDLVERSION"
   CFLAGS="$CFLAGS `$PKG_CONFIG $SDLVERSION --cflags`"
   MAIN_LDLIBS="`$PKG_CONFIG $SDLVERSION --libs` $MAIN_LDLIBS"
