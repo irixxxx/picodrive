@@ -170,35 +170,12 @@ static void z80_sms_out(unsigned short a, unsigned char d)
 {
   elprintf(EL_IO, "z80 port %04x write %02x", a, d);
 
-  if((a&0xff)>= 0xf0){
-    switch((a&0xff))
-    {
-      case 0xf0:
-        // FM reg port
-        YM2413_regWrite(d);
-        //printf("write FM register = %02x\n", d);
-        break;
-      case 0xf1:
-        // FM data port
-        YM2413_dataWrite(d);
-        //printf("write FM data = %02x\n", d);
-        break;
-      case 0xf2:
-        // bit 0 = 1 active FM Pac
-        if (PicoIn.opt & POPT_EN_YM2413){
-          ymflag = d;
-          //printf("write FM Check = %02x\n", d);
-        }
-        break;
-    }
-  }
-  else{
-    a &= 0xc1;
-    switch (a)
-    {
-      case 0x01:
-        Pico.ms.io_ctl = d;
-        break;
+    case 0x40:
+    case 0x41:
+      if ((d & 0x90) == 0x90);
+        PsndDoPSG(Pico.m.scanline);
+      SN76496Write(d);
+      break;
 
       case 0x40:
       case 0x41:
