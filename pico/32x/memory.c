@@ -111,15 +111,16 @@ void p32x_m68k_poll_event(u32 flags)
   m68k_poll.addr1 = m68k_poll.addr2 = m68k_poll.cnt = 0;
 }
 
-static void NOINLINE sh2_poll_detect(u32 a, SH2 *sh2, u32 flags, int maxcnt)
+void NOINLINE p32x_sh2_poll_detect(u32 a, SH2 *sh2, u32 flags, int maxcnt)
 {
   u32 cycles_done = sh2_cycles_done_t(sh2);
+  u32 cycles_diff = cycles_done - sh2->poll_cycles;
 
   // reading 2 consecutive 16bit values is probably a 32bit access. detect this
   // by checking address (max 2 bytes away) and cycles (max 2 cycles later).
   // no polling if more than 20 cycles have passed since last detect call.
-  if (a - sh2->poll_addr <= 2 && CYCLES_GE(sh2->poll_cycles+20, cycles_done)) {
-    if (CYCLES_GT(cycles_done,sh2->poll_cycles+2) && ++sh2->poll_cnt >= maxcnt) {
+  if (a - sh2->poll_addr <= 2 && CYCLES_GE(20, cycles_diff)) {
+    if (CYCLES_GT(cycles_diff, 2) && ++sh2->poll_cnt >= maxcnt) {
       if (!(sh2->state & flags))
         elprintf_sh2(sh2, EL_32X, "state: %02x->%02x",
           sh2->state, sh2->state | flags);
@@ -239,7 +240,7 @@ static NOINLINE void sh2_poll_write(u32 a, u32 d, unsigned int cycles, SH2 *sh2)
   // NB this can take an eternity on m68k: mov.b <addr1.l>,<addr2.l> needs
   // 28 m68k-cycles (~80 sh2-cycles) to complete (observed in Metal Head)
   q = &fifo[(sh2_poll_wr[hix]-1) % PFIFO_SZ];
-  if (cpu < 0 && rd != wr && q->a == a && !CYCLES_GT(cycles,q->cycles+30)) {
+  if (rd != wr && q->a == a && !CYCLES_GT(cycles,q->cycles + (cpu<0 ? 30:4))) {
     q->d = d;
   } else {
     // store write to poll address in fifo
@@ -275,7 +276,7 @@ u32 REGPARM(3) p32x_sh2_poll_memory16(u32 a, u32 d, SH2 *sh2)
     d = (s16)sh2_poll_read(a, d, cycles, sh2);
   }
 
-  sh2_poll_detect(a, sh2, SH2_STATE_RPOLL, 5);
+  p32x_sh2_poll_detect(a, sh2, SH2_STATE_RPOLL, 5);
 
   DRC_RESTORE_SR(sh2);
   return d;
@@ -296,7 +297,7 @@ u32 REGPARM(3) p32x_sh2_poll_memory32(u32 a, u32 d, SH2 *sh2)
         ((u16)sh2_poll_read(a+2, d, cycles, sh2));
   }
 
-  sh2_poll_detect(a, sh2, SH2_STATE_RPOLL, 5);
+  p32x_sh2_poll_detect(a, sh2, SH2_STATE_RPOLL, 5);
 
   DRC_RESTORE_SR(sh2);
   return d;
@@ -735,7 +736,7 @@ static u32 p32x_sh2reg_read16(u32 a, SH2 *sh2)
       return (r[0] & P32XS_FM) | Pico32x.sh2_regs[0]
         | Pico32x.sh2irq_mask[sh2->is_slave];
     case 0x04/2: // H count (often as comm too)
-      sh2_poll_detect(a, sh2, SH2_STATE_CPOLL, 9);
+      p32x_sh2_poll_detect(a, sh2, SH2_STATE_CPOLL, 9);
       cycles = sh2_cycles_done_m68k(sh2);
       sh2s_sync_on_read(sh2, cycles);
       return sh2_poll_read(a, Pico32x.sh2_regs[4 / 2], cycles, sh2);
@@ -769,7 +770,7 @@ static u32 p32x_sh2reg_read16(u32 a, SH2 *sh2)
     case 0x2a/2:
     case 0x2c/2:
     case 0x2e/2:
-      sh2_poll_detect(a, sh2, SH2_STATE_CPOLL, 9);
+      p32x_sh2_poll_detect(a, sh2, SH2_STATE_CPOLL, 9);
       cycles = sh2_cycles_done_m68k(sh2);
       sh2s_sync_on_read(sh2, cycles);
       return sh2_poll_read(a, r[a / 2], cycles, sh2);
@@ -1456,7 +1457,7 @@ static u32 REGPARM(2) sh2_read8_cs0(u32 a, SH2 *sh2)
 
   if ((a & 0x3fff0) == 0x4100) {
     d = p32x_vdp_read16(a);
-    sh2_poll_detect(a, sh2, SH2_STATE_VPOLL, 9);
+    p32x_sh2_poll_detect(a, sh2, SH2_STATE_VPOLL, 9);
     goto out_16to8;
   }
 
@@ -1519,7 +1520,7 @@ static u32 REGPARM(2) sh2_read16_cs0(u32 a, SH2 *sh2)
 
   if ((a & 0x3fff0) == 0x4100) {
     d = p32x_vdp_read16(a);
-    sh2_poll_detect(a, sh2, SH2_STATE_VPOLL, 9);
+    p32x_sh2_poll_detect(a, sh2, SH2_STATE_VPOLL, 9);
     goto out;
   }
 

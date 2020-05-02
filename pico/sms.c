@@ -199,14 +199,12 @@ static void z80_sms_out(unsigned short a, unsigned char d)
       case 0x01:
         Pico.ms.io_ctl = d;
         break;
-
-      case 0x40:
-      case 0x41:
-        if ((d & 0x90) == 0x90 && Pico.snd.psg_line < Pico.m.scanline)
-          PsndDoPSG(Pico.m.scanline);
-        SN76496Write(d);
-        break;
-
+    case 0x40:
+    case 0x41:
+      if ((d & 0x90) == 0x90)
+        PsndDoPSG(Pico.m.scanline);
+      SN76496Write(d);
+      break;
 
       case 0x80:
         vdp_data_write(d);
@@ -348,8 +346,9 @@ void PicoFrameMS(void)
   {
     pv->v_counter = Pico.m.scanline = y;
 
-    if(y%8 == 0){
-      PsndDoYM2413(Pico.m.scanline);
+    //if(y%8 == 0){
+    if(y%224 == 0){
+      //PsndDoYM2413(Pico.m.scanline);
     }
 
     if (y > 218)

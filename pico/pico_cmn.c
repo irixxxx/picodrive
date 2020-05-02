@@ -35,6 +35,7 @@ static void SekExecM68k(int cyc_do)
 #elif defined(EMU_F68K)
   Pico.t.m68c_cnt += fm68k_emulate(&PicoCpuFM68k, cyc_do, 0) - cyc_do;
 #endif
+  SekCyclesLeft = 0;
 }
 
 static void SekSyncM68k(void)
@@ -45,8 +46,6 @@ static void SekSyncM68k(void)
 
   while ((cyc_do = Pico.t.m68c_aim - Pico.t.m68c_cnt) > 0)
     SekExecM68k(cyc_do);
-
-  SekCyclesLeft = 0;
 
   SekTrace(0);
   pevt_log_m68k_o(EVT_RUN_END);
@@ -179,6 +178,7 @@ static int PicoFrameHints(void)
   }
 
   pv->status |= SR_VB | PVS_VB2; // go into vblank
+  PicoVideoFIFOMode(pv->reg[1]&0x40, pv->reg[12]&1);
 
   // the following SekRun is there for several reasons:
   // there must be a delay after vblank bit is set and irq is asserted (Mazin Saga)
@@ -191,7 +191,8 @@ static int PicoFrameHints(void)
   pv->status |= SR_F;
   pv->pending_ints |= 0x20;
   if (pv->reg[1] & 0x20) {
-    SekExecM68k(11); // HACK
+    if (Pico.t.m68c_cnt - Pico.t.m68c_aim < 60) // CPU blocked?
+      SekExecM68k(11); // HACK
     elprintf(EL_INTS, "vint: @ %06x [%u]", SekPc, SekCyclesDone());
     SekInterrupt(6);
   }
@@ -269,6 +270,7 @@ static int PicoFrameHints(void)
 
   pv->status &= ~(SR_VB | PVS_VB2);
   pv->status |= ((pv->reg[1] >> 3) ^ SR_VB) & SR_VB; // forced blanking
+  PicoVideoFIFOMode(pv->reg[1]&0x40, pv->reg[12]&1);
 
   // last scanline
   Pico.m.scanline = y++;

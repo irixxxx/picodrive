@@ -383,7 +383,7 @@ static void run_sh2(SH2 *sh2, unsigned int m68k_cycles)
   elprintf_sh2(sh2, EL_32X, "+run %u %d @%08x",
     sh2->m68krcycles_done, cycles, sh2->pc);
 
-  done = sh2_execute(sh2, cycles, PicoIn.opt & POPT_EN_DRC);
+  done = sh2_execute(sh2, cycles);
 
   sh2->m68krcycles_done += C_SH2_TO_M68K(sh2, done);
   sh2->state &= ~SH2_STATE_RUN;
@@ -499,21 +499,27 @@ void sync_sh2s_normal(unsigned int m68k_target)
       pprof_end(msh2);
 
       now = next;
-      if (!(msh2.state & SH2_IDLE_STATES)) {
-        if (CYCLES_GT(now, msh2.m68krcycles_done))
+      if (CYCLES_GT(now, msh2.m68krcycles_done)) {
+        if (!(msh2.state & SH2_IDLE_STATES))
           now = msh2.m68krcycles_done;
       }
-      if (!(ssh2.state & SH2_IDLE_STATES)) {
-        if (CYCLES_GT(now, ssh2.m68krcycles_done))
+      if (CYCLES_GT(now, ssh2.m68krcycles_done)) {
+        if (!(ssh2.state & SH2_IDLE_STATES)) 
           now = ssh2.m68krcycles_done;
       }
       if (CYCLES_GT(now, timer_cycles+STEP_N)) {
-        p32x_timers_do(now - timer_cycles);
+        if  (msh2.state & SH2_TIMER_RUN)
+          p32x_timer_do(&msh2, now - timer_cycles);
+        if  (ssh2.state & SH2_TIMER_RUN)
+          p32x_timer_do(&ssh2, now - timer_cycles);
         timer_cycles = now;
       }
     }
 
-    p32x_timers_do(now - timer_cycles);
+    if  (msh2.state & SH2_TIMER_RUN)
+      p32x_timer_do(&msh2, now - timer_cycles);
+    if  (ssh2.state & SH2_TIMER_RUN)
+      p32x_timer_do(&ssh2, now - timer_cycles);
     timer_cycles = now;
   }
   pprof_end_sub(m68k);
@@ -565,6 +571,9 @@ void sync_sh2s_lockstep(unsigned int m68k_target)
 
 void PicoFrame32x(void)
 {
+  sh2_execute_prepare(&msh2, PicoIn.opt & POPT_EN_DRC);
+  sh2_execute_prepare(&ssh2, PicoIn.opt & POPT_EN_DRC);
+
   Pico.m.scanline = 0;
 
   Pico32x.vdp_regs[0x0a/2] &= ~P32XV_VBLK; // get out of vblank

@@ -73,6 +73,7 @@ extern void *p32x_bios_g, *p32x_bios_m, *p32x_bios_s;
 #define POPT_EN_32X         (1<<20) // x0 0000
 #define POPT_EN_PWM         (1<<21)
 #define POPT_PWM_IRQ_OPT    (1<<22)
+#define POPT_DIS_FM_SSGEG   (1<<23)
 
 #define PAHW_MCD  (1<<0)
 #define PAHW_32X  (1<<1)
@@ -196,10 +197,11 @@ void vidConvCpyRGB565(void *to, void *from, int pixels);
 #endif
 void PicoDoHighPal555(int sh, int line, struct PicoEState *est);
 // internals
-#define PDRAW_SPRITES_MOVED (1<<0) // (asm)
+#define PDRAW_SPRITES_MOVED (1<<0) // SAT address modified
 #define PDRAW_WND_DIFF_PRIO (1<<1) // not all window tiles use same priority
+#define PDRAW_PARSE_SPRITES (1<<2) // SAT needs parsing
 #define PDRAW_INTERLACE     (1<<3)
-#define PDRAW_DIRTY_SPRITES (1<<4) // (asm)
+#define PDRAW_DIRTY_SPRITES (1<<4) // SAT modified
 #define PDRAW_SONIC_MODE    (1<<5) // mid-frame palette changes for 8bit renderer
 #define PDRAW_PLANE_HI_PRIO (1<<6) // have layer with all hi prio tiles (mk3)
 #define PDRAW_SHHI_DONE     (1<<7) // layer sh/hi already processed

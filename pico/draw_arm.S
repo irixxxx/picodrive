@@ -14,7 +14,7 @@
 
 .equ PDRAW_SPRITES_MOVED, (1<<0)
 .equ PDRAW_WND_DIFF_PRIO, (1<<1)
-.equ PDRAW_ACC_SPRITES,   (1<<2)
+.equ PDRAW_PARSE_SPRITES, (1<<2)
 .equ PDRAW_DIRTY_SPRITES, (1<<4)
 .equ PDRAW_PLANE_HI_PRIO, (1<<6)
 .equ PDRAW_SHHI_DONE,     (1<<7)
@@ -317,9 +317,10 @@ DrawLayer:
     moveq   r1,      #0x0007
     movgt   r1,      #0x00ff      @ r1=ymask=(height<<8)|0xff; ...; // Y Mask in pixels
 
-    add     r10, r10, #5
-    cmp     r10, #7
-    subge   r10, r10, #1          @ r10=shift[width] (5,6,6,7)
+    cmp     r10, #2
+    addlt   r10, r10, #5
+    moveq   r10, #5
+    movgt   r10, #7               @ r10=shift[width] (5,6,5,7)
 
     ldr     r2, [r12, #OFS_EST_DrawScanline]
     ldr     lr, [r12, #OFS_EST_PicoMem_vram]
@@ -366,7 +367,8 @@ DrawLayer:
     bne     .DrawStrip_interlace
 
     tst     r0, r0
-    movne   r7, r7, lsr #16
+    moveq   r7, r7, lsl #16
+    mov     r7, r7, lsr #16
 
     @ Find the line in the name table
     add     r2, r2, r7
@@ -521,6 +523,9 @@ DrawLayer:
 @ @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
 
 .DrawStrip_vsscroll:
+    tst     r8, #1                @ if h40: lflags |= 0x10000
+    orrne   r0, r0, #0x10000
+
     rsb     r8, r3, #0
     mov     r8, r8, lsr #3        @ r8=tilex=(-ts->hscroll)>>3
     bic     r8, r8, #0x3fc00000
@@ -545,6 +550,12 @@ DrawLayer:
     tst     r3, #0x08
     subne   r10,r10, #1<<16       @ cells--
     subne   r10,r10, #1<<24       @ cell--  // even more negative
+
+    add_c24 r1, lr, (OFS_PMEM_vsram-OFS_PMEM_vram)
+    tst     r0, #0x10000          @ h40?
+    ldrne   r3, [r1, #0x00]       @ r3=vsram[0x00..0x01]
+    ldreq   r3, [r1, #0x40]       @ r3=vsram[0x20..0x21]
+    str     r3, [r1, #0x7c]       @ vsram[0x3e..0x3f]=r3
 0:
     tst     r9, #1<<31
     mov     r3, #0
@@ -575,8 +586,8 @@ DrawLayer:
 
     @ calc offset and read tileline code to r7, also calc ty
     add_c24 r7, lr, (OFS_PMEM_vsram-OFS_PMEM_vram)
-    add     r7, r7, r10,asr #23   @ vsram + ((cell&~1)<<1)
-    bic     r7, r7, #3
+    and     r4, r10, #0x3e000000
+    add     r7, r7, r4, asr #23   @ vsram + ((cell&0x3e)<<1)
     tst     r10,#0x8000           @ plane1?
     addne   r7, r7, #2
     ldrh    r7, [r7]              @ r7=vscroll
@@ -699,8 +710,8 @@ DrawLayer:
 @ interlace mode 2? Sonic 2?
 .DrawStrip_interlace:
     tst     r0, r0
-    moveq   r7, r7, lsl #21
-    movne   r7, r7, lsl #5
+    movne   r7, r7, lsr #16
+    mov     r7, r7, lsl #21
 
     @ Find the line in the name table
     add     r2, r7, r2, lsl #22    @ r2=(vscroll+(DrawScanline<<1))<<21 (11 bits);
@@ -795,7 +806,6 @@ DrawTilesFromCache:
     add     r1, r11, r4     @ r1=pdest
 
     movs    r7, r6, lsl #16
-    bpl     .dtfc_loop      @ !(code & 0x8000)
     cmp     r5, r7, lsr #16
     beq     .dtfc_samecode  @ if (code==prevcode)
 

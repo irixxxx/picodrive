@@ -15,6 +15,10 @@
 
 #include "../arm_features.h"
 
+@ very simple YM2612 output rate to sample rate adaption (~500k cycles @44100)
+#define INTERPOL
+#define SSG_EG
+
 .equiv SLOT1, 0
 .equiv SLOT2, 2
 .equiv SLOT3, 1
@@ -41,11 +45,15 @@
 
 @ r5=slot, r1=eg_cnt, trashes: r0,r2,r3
 @ writes output to routp, but only if vol_out changes
-.macro update_eg_phase_slot slot
+.macro update_eg_phase_slot
+#if defined(INTERPOL)
     ldrh    r0, [r5,#0x34]       @ vol_out
+#endif
     ldrb    r2, [r5,#0x17]       @ state
     add     r3, r5, #0x1c
+#if defined(INTERPOL)
     strh    r0, [r5,#0x36]       @ vol_ipol
+#endif
     tst     r2, r2
     beq     0f                   @ EG_OFF
 
@@ -59,15 +67,18 @@
     bne     0f                   @ no volume change
 
     mov     r3, r1, lsr r0
+    ldrb    r0, [r5,#0x30]       @ ssg
     and     r3, r3, #7
     add     r3, r3, r3, lsl #1
     mov     r3, r2, lsr r3
     and     r3, r3, #7           @ eg_inc_val shift, may be 0
-    ldrb    r0, [r5,#0x30]       @ ssg
     ldrb    r2, [r5,#0x17]       @ state
 
+#if defined(SSG_EG)
     tst     r0, #0x08            @ ssg enabled?
+    tstne   r12, #0x02
     bne     9f
+#endif
 
     @ non-SSG-EG mode
     cmp     r2, #4               @ EG_ATT
@@ -120,12 +131,14 @@
     strgeb  r3, [r5,#0x17]       @ state
 
 10: @ finish
+    ldrh    r3, [r5,#0x18]       @ tl
     strh    r0, [r5,#0x1a]       @ volume
+#if defined(SSG_EG)
     b       11f
 
 9:  @ SSG-EG mode
-    cmp     r2, #4               @ EG_ATT
     ldrh    r0, [r5,#0x1a]       @ volume, unsigned (0-1023)
+    cmp     r2, #4               @ EG_ATT
     beq     4f
 
     cmp     r0, #0x200           @ if ( volume < 0x200 )
@@ -133,7 +146,7 @@
     movlt   r3, r0, lsl r3
     ldrlth  r0, [r5,#0x1a]       @ volume, unsigned (0-1023)
     movlt   r3, r3, lsr #1       @ eg_inc_val
-    addlt   r0, r0, r3, lsr #2
+    addlt   r0, r0, r3, lsl #2
 
     cmp     r2, #2
     blt     1f                   @ EG_REL
@@ -170,48 +183,36 @@
     strgeb  r3, [r5,#0x17]       @ state
 
 10: @ finish
-    strh    r0, [r5,#0x1a]       @ volume
     ldrb    r2, [r5,#0x30]       @ ssg
     ldrb    r3, [r5,#0x17]       @ state
+    strh    r0, [r5,#0x1a]       @ volume
     cmp     r2, #0x0c            @ if ( ssg&0x04 && state > EG_REL )
     cmpge   r3, #EG_REL+1
+    ldrh    r3, [r5,#0x18]       @ tl
     rsbge   r0, r0, #0x200       @ volume = (0x200-volume) & MAX_ATT
-    lslge   r0, r0, #10
-    lsrge   r0, r0, #10
+    lslge   r0, r0, #22
+    lsrge   r0, r0, #22
 
 11:
-    ldrh    r3, [r5,#0x18]       @ tl
+#endif
     add     r0, r0, r3           @ volume += tl
     strh    r0, [r5,#0x34]       @ vol_out
-.if     \slot == SLOT1
-    mov     r6, r6, lsr #16
-    orr     r6, r0, r6, lsl #16
-.elseif \slot == SLOT2
-    mov     r6, r6, lsl #16
-    mov     r0, r0, lsl #16
-    orr     r6, r0, r6, lsr #16
-.elseif \slot == SLOT3
-    mov     r7, r7, lsr #16
-    orr     r7, r0, r7, lsl #16
-.elseif \slot == SLOT4
-    mov     r7, r7, lsl #16
-    mov     r0, r0, lsl #16
-    orr     r7, r0, r7, lsr #16
-.endif
 
 0: @ EG_OFF
 .endm
 
+#if defined(SSG_EG)
 @ r5=slot, trashes: r0,r2,r3
 .macro update_ssg_eg
     ldrh    r0, [r5,#0x30]                @ ssg+ssgn
     ldrb    r2, [r5,#0x17]                @ state
-    and     r3, r0, #0x08
-    cmp     r3, #0x08                     @ ssg enabled &&
     ldrh    r3, [r5,#0x1a]                @ volume
-    cmpge   r2, #EG_REL+1                 @   state > EG_REL &&
+    tst     r0, #0x08                     @ ssg enabled &&
+    beq     9f
+    cmp     r2, #EG_REL+1                 @   state > EG_REL &&
     cmpge   r3, #0x200                    @   volume >= 0x200?
     blt     9f
+    orr     r4, r4, #0x10                 @ ssg_update
 
     tst     r0, #0x01
     beq     1f
@@ -222,7 +223,7 @@
     orrne   r0, r0, #0x400                @ ssgn = 4
     strneh  r0, [r5,#0x30]
 
-    eor     r0, r0, #0x4                  @ if ( !(ssg&0x04 )
+    eor     r0, r0, #0x4                  @ if ( !(ssg&0x04) )
     tst     r0, #0x4
     cmpne   r2, #EG_ATT                   @ if ( state != EG_ATT )
     movne   r3, #0x400
@@ -256,6 +257,33 @@
     strb    r2, [r5,#0x17]                @ state
 9:
 .endm
+
+@ r5=slot, trashes: r0,r2,r3
+.macro recalc_volout
+#if defined(INTERPOL)
+    ldrh    r0, [r5,#0x34]                @ vol_out
+#endif
+    ldrb    r2, [r5,#0x30]                @ ssg
+    ldrb    r3, [r5,#0x17]                @ state
+#if defined(INTERPOL)
+    strh    r0, [r5,#0x36]                @ vol_ipol
+#endif
+    ldrh    r0, [r5,#0x1a]                @ volume
+
+@    and     r2, r2, #0x0c
+    cmp     r2, #0x0c                     @ if ( ~ssg&0x0c && state > EG_REL )
+    cmpge   r3, #EG_REL+1
+    ldrh    r3, [r5,#0x18]                @ tl
+    rsbge   r0, r0, #0x200                @ volume = (0x200-volume) & MAX_ATT
+    lslge   r0, r0, #22
+    lsrge   r0, r0, #22
+    ldrh    r0, [r5,#0x1a]                @ volume
+    ldrh    r3, [r5,#0x18]                @ tl
+
+    add     r0, r0, r3                    @ volume += tl
+    strh    r0, [r5,#0x34]                @ vol_out
+.endm
+#endif
 
 @ r12=lfo_ampm[31:16], r1=lfo_cnt_old, r2=lfo_cnt, r3=scratch
 .macro advance_lfo_m
@@ -313,7 +341,7 @@
 .endm
 
 
-@ lr=context, r12=pack (stereo, lastchan, disabled, lfo_enabled | pan_r, pan_l, ams[2] | AMmasks[4] | FB[4] | lfo_ampm[16])
+@ lr=context, r12=pack (stereo, ssg_enabled, disabled, lfo_enabled | pan_r, pan_l, ams[2] | AMmasks[4] | FB[4] | lfo_ampm[16])
 @ r0-r2=scratch, r3=sin_tab, r5=scratch, r6-r7=vol_out[4], r10=op1_out
 .macro upd_algo0_m
 
@@ -651,8 +679,8 @@
 .endm
 
 
-@ lr=context, r12=pack (stereo, lastchan, disabled, lfo_enabled | pan_r, pan_l, ams[2] | AMmasks[4] | FB[4] | lfo_ampm[16])
-@ r0-r2=scratch, r3=sin_tab/scratch, r4=(length<<8)|unused[4],was_update,algo[3], r5=tl_tab/slot,
+@ lr=context, r12=pack (stereo, ssg_enabled, disabled, lfo_enabled | pan_r, pan_l, ams[2] | AMmasks[4] | FB[4] | lfo_ampm[16])
+@ r0-r2=scratch, r3=sin_tab/scratch, r4=(length<<8)|unused[3],ssg_update,was_update,algo[3], r5=tl_tab/slot,
 @ r6-r7=vol_out[4], r8=eg_timer, r9=eg_timer_add[31:16], r10=op1_out, r11=buffer
 .global chan_render_loop @ chan_rend_context *ct, int *buffer, int length
 
@@ -665,24 +693,16 @@ chan_render_loop:
     mov     r11, r1
     and     r0,  r0, #7
     orr     r4,  r4, r0          @ (length<<8)|algo
-    add     r0,  lr, #0x44
-    ldmia   r0,  {r8,r9}         @ eg_timer, eg_timer_add
+    ldr     r8, [lr, #0x44]      @ eg_timer
+    ldr     r9, [lr, #0x48]      @ eg_timer_add
     ldr     r10, [lr, #0x54]     @ op1_out
-@   ldmia   lr,  {r6,r7}         @ load volumes
-    ldr     r5, [lr, #0x40]      @ CH
-    ldrh    r6, [r5, #0x34]      @ vol_out values for all slots
-    ldrh    r2, [r5, #0x34+SLOT_STRUCT_SIZE*2]
-    ldrh    r7, [r5, #0x34+SLOT_STRUCT_SIZE]
-    ldrh    r3, [r5, #0x34+SLOT_STRUCT_SIZE*3]
-    orr     r6, r6, r2, lsl #16
-    orr     r7, r7, r3, lsl #16
 
     tst     r12, #8              @ lfo?
     beq     crl_loop
 
 crl_loop_lfo:
-    add     r0, lr, #0x30
-    ldmia   r0, {r1,r2}          @ lfo_cnt, lfo_inc
+    ldr     r1, [lr, #0x30]      @ lfo_cnt
+    ldr     r2, [lr, #0x34]      @ lfo_inc
 
     subs    r4, r4, #0x100
     bmi     crl_loop_end
@@ -699,46 +719,91 @@ crl_loop:
     subs    r4, r4, #0x100
     bmi     crl_loop_end
 
+    ldr     r5, [lr, #0x40]      @ CH
+#if defined(SSG_EG)
+    tst     r12, #0x02              @ ssg_enabled?
+    beq     ssg_done
     @ -- SSG --
-    add     r0, lr, #0x3c
-    ldmia   r0, {r1,r5}         @ eg_cnt, CH
+    lsl     r7, r8, #EG_SH
+    add     r7, r9, r7, lsr #EG_SH
+    subs    r7, r7, #1<<EG_SH
+    blt     ssg_done
 
-    @ r5=slot, trashes: r0,r2,r3
+ssg_loop:
+    mov     r6, #4
+ssg_upd_loop:
     update_ssg_eg
-    add     r5, r5, #SLOT_STRUCT_SIZE*2 @ SLOT2 (2)
+#if 0
+    subs    r6, r6, #1
+    addne   r5, r5, #SLOT_STRUCT_SIZE
+#else
+    add     r5, r5, #SLOT_STRUCT_SIZE*2
     update_ssg_eg
-    sub     r5, r5, #SLOT_STRUCT_SIZE   @ SLOT3 (1)
-    update_ssg_eg
-    add     r5, r5, #SLOT_STRUCT_SIZE*2 @ SLOT4 (3)
-    update_ssg_eg
+    subs    r6, r6, #2
+    subne   r5, r5, #SLOT_STRUCT_SIZE
+#endif
+    bne     ssg_upd_loop
     sub     r5, r5, #SLOT_STRUCT_SIZE*3
+
+    subs    r7, r7, #1<<EG_SH
+    bge     ssg_loop
+ssg_done:
+#endif
 
     @ -- EG --
     add     r8, r8, r9
     cmp     r8, #EG_TIMER_OVERFLOW
-    bcc     eg_done
+    bcc     volout_upd
+    ldr     r1, [lr, #0x3c]     @ eg_cnt
 eg_loop:
     sub     r8, r8, #EG_TIMER_OVERFLOW
     add     r1, r1, #1
     cmp     r1, #4096
     movge   r1, #1
-                                        @ SLOT1 (0)
-    @ r5=slot, r1=eg_cnt, trashes: r0,r2,r3
-    update_eg_phase_slot SLOT1
-    add     r5, r5, #SLOT_STRUCT_SIZE*2 @ SLOT2 (2)
-    update_eg_phase_slot SLOT2
-    sub     r5, r5, #SLOT_STRUCT_SIZE   @ SLOT3 (1)
-    update_eg_phase_slot SLOT3
-    add     r5, r5, #SLOT_STRUCT_SIZE*2 @ SLOT4 (3)
-    update_eg_phase_slot SLOT4
+
+    mov     r6, #4
+eg_upd_loop:
+    update_eg_phase_slot
+#if 1
+    subs    r6, r6, #1
+    addne   r5, r5, #SLOT_STRUCT_SIZE
+#else
+    add     r5, r5, #SLOT_STRUCT_SIZE*2
+    update_eg_phase_slot
+    subs    r6, r6, #2
+    subne   r5, r5, #SLOT_STRUCT_SIZE
+#endif
+    bne     eg_upd_loop
 
     cmp     r8, #EG_TIMER_OVERFLOW
     sub     r5, r5, #SLOT_STRUCT_SIZE*3
     bhs     eg_loop
     str     r1, [lr, #0x3c]
+    b       eg_done
+
+volout_upd:
+#if defined(SSG_EG)
+    tst     r4, #0x10               @ ssg_update?
+    beq     eg_done
+
+    @ recalc vol_out
+    mov     r6, #4
+volout_loop:
+    recalc_volout
+#if 0
+    subs    r6, r6, #1
+    addne   r5, r5, #SLOT_STRUCT_SIZE
+#else
+    add     r5, r5, #SLOT_STRUCT_SIZE*2
+    recalc_volout
+    subs    r6, r6, #2
+    subne   r5, r5, #SLOT_STRUCT_SIZE
+#endif
+    bne     volout_loop
+    sub     r5, r5, #SLOT_STRUCT_SIZE*3
+#endif
 
 eg_done:
-
     @ -- disabled? --
     and     r0, r12, #0xC
     cmp     r0, #0xC
@@ -747,69 +812,54 @@ eg_done:
     beq     crl_loop
 
     @ output interpolation
-#if 0
+#if defined(INTERPOL)
+#if 1 // possibly too expensive for slow platforms?
     @ basic interpolator, interpolate in middle region, else use closer value
     mov     r3, r8, lsr #EG_SH      @ eg_timer, [0..3<<EG_SH) after loop
     cmp     r3, #(EG_TIMER_OVERFLOW>>EG_SH)/2
-    bgt     0f                      @ mix is vol_out
+    bne     0f                      @ mix is vol_out
 
-    ldrh    r0, [r5,#0x36]          @ SLOT1 vol_ipol
-    lsleq   r2, r6, #16
-    addeq   r0, r0, r2, lsr #16
-    lsreq   r0, r0, #1
-    mov     r6, r6, lsr #16
-    orr     r6, r0, r6, lsl #16
-
-    ldrh    r0, [r5,#0x36+SLOT_STRUCT_SIZE*2] @ SLOT2 vol_ipol
-    addeq   r0, r0, r6, lsr #16
-    lsreq   r0, r0, #1
-    mov     r6, r6, lsl #16
-    orr     r6, r6, r0
-    ror     r6, r6, #16
-
-    ldrh    r0, [r5,#0x36+SLOT_STRUCT_SIZE]   @ SLOT3 vol_ipol
-    lsleq   r2, r7, #16
-    addeq   r0, r0, r2, lsr #16
-    lsreq   r0, r0, #1
-    mov     r7, r7, lsr #16
-    orr     r7, r0, r7, lsl #16
-
-    ldrh    r0, [r5,#0x36+SLOT_STRUCT_SIZE*3] @ SLOT4 vol_ipol
-    addeq   r0, r0, r7, lsr #16
-    lsreq   r0, r0, #1
-    mov     r7, r7, lsl #16
-    orr     r7, r7, r0
-    ror     r7, r7, #16
-#elif 0
+    ldr     r6, [r5, #0x34]      @ vol_out, vol_ipol for all slots
+    ldr     r2, [r5, #0x34+SLOT_STRUCT_SIZE*2]
+    ldr     r7, [r5, #0x34+SLOT_STRUCT_SIZE]
+    ldr     r3, [r5, #0x34+SLOT_STRUCT_SIZE*3]
+    add     r6, r6, r6, lsl #16
+    lsr     r6, r6, #17
+    add     r2, r2, r2, lsl #16
+    lsr     r2, r2, #17
+    add     r7, r7, r7, lsl #16
+    lsr     r7, r7, #17
+    add     r3, r3, r3, lsl #16
+    lsr     r3, r3, #17
+    b       1f
+#else
     @ super-basic... just take value closest to sample point
     mov     r3, r8, lsr #EG_SH-1    @ eg_timer, [0..3<<EG_SH) after loop
     cmp     r3, #(EG_TIMER_OVERFLOW>>EG_SH)
-    bge     0f                      @ mix is vol_out
-
-    ldrh    r0, [r5,#0x36]          @ SLOT1 vol_ipol
-    mov     r6, r6, lsr #16
-    orr     r6, r0, r6, lsl #16
-
-    ldrh    r0, [r5,#0x36+SLOT_STRUCT_SIZE*2] @ SLOT2 vol_ipol
-    mov     r6, r6, lsl #16
-    orr     r6, r6, r0
-    ror     r6, r6, #16
-
-    ldrh    r0, [r5,#0x36+SLOT_STRUCT_SIZE]   @ SLOT3 vol_ipol
-    mov     r7, r7, lsr #16
-    orr     r7, r0, r7, lsl #16
-
-    ldrh    r0, [r5,#0x36+SLOT_STRUCT_SIZE*3] @ SLOT4 vol_ipol
-    mov     r7, r7, lsl #16
-    orr     r7, r7, r0
-    ror     r7, r7, #16
 #endif
-0:
+
+0:  ldrgeh  r6, [r5, #0x34]      @ vol_out values for all slots
+    ldrlth  r6, [r5, #0x36]      @ vol_ipol values for all slots
+    ldrgeh  r2, [r5, #0x34+SLOT_STRUCT_SIZE*2]
+    ldrlth  r2, [r5, #0x36+SLOT_STRUCT_SIZE*2]
+    ldrgeh  r7, [r5, #0x34+SLOT_STRUCT_SIZE]
+    ldrlth  r7, [r5, #0x36+SLOT_STRUCT_SIZE]
+    ldrgeh  r3, [r5, #0x34+SLOT_STRUCT_SIZE*3]
+    ldrlth  r3, [r5, #0x36+SLOT_STRUCT_SIZE*3]
+
+#else
+    ldrh    r6, [r5, #0x34]      @ vol_out values for all slots
+    ldrh    r2, [r5, #0x34+SLOT_STRUCT_SIZE*2]
+    ldrh    r7, [r5, #0x34+SLOT_STRUCT_SIZE]
+    ldrh    r3, [r5, #0x34+SLOT_STRUCT_SIZE*3]
+#endif
+1:  orr     r6, r6, r2, lsl #16
+    orr     r7, r7, r3, lsl #16
 
     @ -- SLOT1 --
     PIC_LDR(r3, r2, ym_tl_tab)
 
-    @ lr=context, r12=pack (stereo, lastchan, disabled, lfo_enabled | pan_r, pan_l, ams[2] | AMmasks[4] | FB[4] | lfo_ampm[16])
+    @ lr=context, r12=pack (stereo, ssg_enabled, disabled, lfo_enabled | pan_r, pan_l, ams[2] | AMmasks[4] | FB[4] | lfo_ampm[16])
     @ r0-r2=scratch, r3=tl_tab, r5=scratch, r6-r7=vol_out[4], r10=op1_out
     upd_slot1_m
 
@@ -886,34 +936,28 @@ crl_algo_done:
     strne   r1, [r11], #4
     b       crl_do_phase
 
-ctl_sample_skip:
-    and     r1, r12, #1
-    add     r1, r1,  #1
-    add     r11,r11, r1, lsl #2
-    b       crl_do_phase
-
 ctl_sample_mono:
     ldr     r1, [r11]
     add     r1, r0, r1
     str     r1, [r11], #4
+    b       crl_do_phase
+
+ctl_sample_skip:
+    and     r1, r12, #1
+    add     r1, r1,  #1
+    add     r11,r11, r1, lsl #2
 
 crl_do_phase:
     @ -- PHASE UPDATE --
     add     r5, lr, #0x10
-    ldmia   r5, {r0-r1}
-    add     r5, lr, #0x20
-    ldmia   r5, {r2-r3}
-    add     r5, lr, #0x10
-    add     r0, r0, r2
-    add     r1, r1, r3
-    stmia   r5!,{r0-r1}
-    ldmia   r5, {r0-r1}
-    add     r5, lr, #0x28
-    ldmia   r5, {r2-r3}
-    add     r5, lr, #0x18
-    add     r0, r0, r2
-    add     r1, r1, r3
-    stmia   r5, {r0-r1}
+    ldmia   r5, {r0-r3,r6-r7}
+    add     r0, r0, r6
+    add     r1, r1, r7
+    ldr     r6, [r5, #0x18]
+    ldr     r7, [r5, #0x1c]
+    add     r2, r2, r6
+    add     r3, r3, r7
+    stmia   r5, {r0-r3}
 
     tst     r12, #8
     bne     crl_loop_lfo
@@ -921,7 +965,6 @@ crl_do_phase:
 
 
 crl_loop_end:
-@    stmia   lr,  {r6,r7}         @ save volumes (for debug)
     str     r8,  [lr, #0x44]     @ eg_timer
     str     r12, [lr, #0x4c]     @ pack (for lfo_ampm)
     str     r4,  [lr, #0x50]     @ was_update

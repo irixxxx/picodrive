@@ -81,6 +81,7 @@ void PicoPower(void)
   Pico.video.reg[0] = Pico.video.reg[1] = 0x04;
   Pico.video.reg[0xc] = 0x81;
   Pico.video.reg[0xf] = 0x02;
+  PicoVideoFIFOMode(0, 1);
 
   if (PicoIn.AHW & PAHW_MCD)
     PicoPowerMCD();
@@ -283,7 +284,7 @@ void PicoFrameDrawOnly(void)
 {
   if (!(PicoIn.AHW & PAHW_SMS)) {
     PicoFrameStart();
-    PicoDrawSync(223, 0);
+    PicoDrawSync(Pico.m.pal?239:223, 0);
   } else {
     PicoFrameDrawOnlyMS();
   }

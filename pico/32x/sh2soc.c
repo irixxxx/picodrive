@@ -209,6 +209,9 @@ void p32x_timers_recalc(void)
 
   // SH2 timer step
   for (i = 0; i < 2; i++) {
+    sh2s[i].state &= ~SH2_TIMER_RUN;
+    if (PREG8(sh2s[i].peri_regs, 0x80) & 0x20) // TME
+      sh2s[i].state |= SH2_TIMER_RUN;
     tmp = PREG8(sh2s[i].peri_regs, 0x80) & 7;
     // Sclk cycles per timer tick
     if (tmp)
@@ -222,32 +225,29 @@ void p32x_timers_recalc(void)
   }
 }
 
-void p32x_timers_do(unsigned int m68k_slice)
+NOINLINE void p32x_timer_do(SH2 *sh2, unsigned int m68k_slice)
 {
   unsigned int cycles = m68k_slice * 3;
-  int cnt, i;
+  void *pregs = sh2->peri_regs;
+  int cnt; int i = sh2->is_slave;
 
-  // WDT timers
-  for (i = 0; i < 2; i++) {
-    void *pregs = sh2s[i].peri_regs;
-    if (PREG8(pregs, 0x80) & 0x20) { // TME
-      timer_cycles[i] += cycles;
-      // cnt = timer_cycles[i] / timer_tick_cycles[i];
-      cnt = (1ULL * timer_cycles[i] * timer_tick_factor[i]) >> 32;
-      timer_cycles[i] -= timer_tick_cycles[i] * cnt;
-      if (timer_cycles[i] > timer_tick_cycles[i])
-        timer_cycles[i] -= timer_tick_cycles[i], cnt++;
-      cnt += PREG8(pregs, 0x81);
-      if (cnt >= 0x100) {
-        int level = PREG8(pregs, 0xe3) >> 4;
-        int vector = PREG8(pregs, 0xe4) & 0x7f;
-        elprintf(EL_32XP, "%csh2 WDT irq (%d, %d)",
-          i ? 's' : 'm', level, vector);
-        sh2_internal_irq(&sh2s[i], level, vector);
-        cnt &= 0xff;
-      }
-      PREG8(pregs, 0x81) = cnt;
+  // WDT timer
+  timer_cycles[i] += cycles;
+  if (timer_cycles[i] > timer_tick_cycles[i]) {
+    // cnt = timer_cycles[i] / timer_tick_cycles[i];
+    cnt = (1ULL * timer_cycles[i] * timer_tick_factor[i]) >> 32;
+    timer_cycles[i] -= timer_tick_cycles[i] * cnt;
+
+    cnt += PREG8(pregs, 0x81);
+    if (cnt >= 0x100) {
+      int level = PREG8(pregs, 0xe3) >> 4;
+      int vector = PREG8(pregs, 0xe4) & 0x7f;
+      elprintf(EL_32XP, "%csh2 WDT irq (%d, %d)",
+        i ? 's' : 'm', level, vector);
+      sh2_internal_irq(sh2, level, vector);
+      cnt &= 0xff;
     }
+    PREG8(pregs, 0x81) = cnt;
   }
 }
 
@@ -273,9 +273,14 @@ u32 REGPARM(2) sh2_peripheral_read8(u32 a, SH2 *sh2)
   a &= 0x1ff;
   d = PREG8(r, a);
 
-  sh2->poll_cnt = 0;
   elprintf_sh2(sh2, EL_32XP, "peri r8  [%08x]       %02x @%06x",
     a | ~0x1ff, d, sh2_pc(sh2));
+  if ((a & 0x1c0) == 0x140) {
+    // abused as comm area
+    DRC_SAVE_SR(sh2);
+    p32x_sh2_poll_detect(a, sh2, SH2_STATE_CPOLL, 3);
+    DRC_RESTORE_SR(sh2);
+  }
   return d;
 }
 
@@ -287,9 +292,14 @@ u32 REGPARM(2) sh2_peripheral_read16(u32 a, SH2 *sh2)
   a &= 0x1fe;
   d = r[(a / 2) ^ 1];
 
-  sh2->poll_cnt = 0;
   elprintf_sh2(sh2, EL_32XP, "peri r16 [%08x]     %04x @%06x",
     a | ~0x1ff, d, sh2_pc(sh2));
+  if ((a & 0x1c0) == 0x140) {
+    // abused as comm area
+    DRC_SAVE_SR(sh2);
+    p32x_sh2_poll_detect(a, sh2, SH2_STATE_CPOLL, 3);
+    DRC_RESTORE_SR(sh2);
+  }
   return d;
 }
 
@@ -300,9 +310,17 @@ u32 REGPARM(2) sh2_peripheral_read32(u32 a, SH2 *sh2)
   a &= 0x1fc;
   d = sh2->peri_regs[a / 4];
 
-  sh2->poll_cnt = 0;
   elprintf_sh2(sh2, EL_32XP, "peri r32 [%08x] %08x @%06x",
     a | ~0x1ff, d, sh2_pc(sh2));
+  if (a == 0x18c)
+    // kludge for polling COMM while polling for end of DMA
+    sh2->poll_cnt = 0;
+  else if ((a & 0x1c0) == 0x140) {
+    // abused as comm area
+    DRC_SAVE_SR(sh2);
+    p32x_sh2_poll_detect(a, sh2, SH2_STATE_CPOLL, 3);
+    DRC_RESTORE_SR(sh2);
+  }
   return d;
 }
 
@@ -378,6 +396,9 @@ void REGPARM(3) sh2_peripheral_write8(u32 a, u32 d, SH2 *sh2)
     break;
   }
   PREG8(r, a) = d;
+
+  if ((a & 0x1c0) == 0x140)
+    p32x_sh2_poll_event(sh2, SH2_STATE_CPOLL, SekCyclesDone());
 }
 
 void REGPARM(3) sh2_peripheral_write16(u32 a, u32 d, SH2 *sh2)
@@ -400,6 +421,8 @@ void REGPARM(3) sh2_peripheral_write16(u32 a, u32 d, SH2 *sh2)
   }
 
   r[(a / 2) ^ 1] = d;
+  if ((a & 0x1c0) == 0x140)
+    p32x_sh2_poll_event(sh2, SH2_STATE_CPOLL, SekCyclesDone());
 }
 
 void REGPARM(3) sh2_peripheral_write32(u32 a, u32 d, SH2 *sh2)
@@ -457,14 +480,15 @@ void REGPARM(3) sh2_peripheral_write32(u32 a, u32 d, SH2 *sh2)
       if (!(dmac->dmaor & DMA_DME))
         return;
 
-      DRC_SAVE_SR(sh2);
       if ((dmac->chan[0].chcr & (DMA_TE|DMA_DE)) == DMA_DE)
         dmac_trigger(sh2, &dmac->chan[0]);
       if ((dmac->chan[1].chcr & (DMA_TE|DMA_DE)) == DMA_DE)
         dmac_trigger(sh2, &dmac->chan[1]);
-      DRC_RESTORE_SR(sh2);
       break;
   }
+
+  if ((a & 0x1c0) == 0x140)
+    p32x_sh2_poll_event(sh2, SH2_STATE_CPOLL, SekCyclesDone());
 }
 
 /* 32X specific */
