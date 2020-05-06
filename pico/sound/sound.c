@@ -188,6 +188,7 @@ PICO_INTERNAL void PsndDoPSG(int line_to)
   SN76496Update(PicoIn.sndOut + pos, len, stereo);
 }
 
+#if 0
 PICO_INTERNAL void PsndDoYM2413(int line_to)
 {
   int pos, len;
@@ -225,6 +226,7 @@ PICO_INTERNAL void PsndDoYM2413(int line_to)
     }
   }
 }
+#endif
 
 void YM2413_regWrite(unsigned data){
   OPLL_writeIO(opll,0,data);
@@ -431,33 +433,30 @@ static int PsndRenderMS(int offset, int length)
     }
   }
 
-  // upmix to "stereo" if needed
-  if (PicoIn.opt & POPT_EN_STEREO) {
-    int i, *p;
-    for (i = length, p = (void *)PicoIn.sndOut; i > 0; i--, p++)
-    {
-      *p |= *p << 16;
-    }
-  }
-
-
   if (length-ym2413len > 0) {
     short *ym2413buf = PicoIn.sndOut + (ym2413len << stereo);
     Pico.snd.ym2413_pos += (length-ym2413len) << 16;
     int len = (length-ym2413len);
-
     if (PicoIn.opt & POPT_EN_YM2413){
       int iI;
-      for (iI = len; iI > 0; iI -= (1<<stereo)) {
-        short getdata = OPLL_calc(opll)<<2;
-        *ym2413buf++ += getdata;
-        if (PicoIn.opt & POPT_EN_STEREO) {
-          *ym2413buf++ += getdata;
-        }
+      for (iI = len; iI > 0; iI -= 1) {
+        float getdata = (float)OPLL_calc(opll);
+        getdata *= 3;
+        *ym2413buf += (short)getdata;
+        ym2413buf += 1<<stereo;
       }
     }
   }
 
+  // upmix to "stereo" if needed
+  if (PicoIn.opt & POPT_EN_STEREO) {
+    int i;
+    short *p;
+    for (i = length, p = (short *)PicoIn.sndOut; i > 0; i--, p+=2)
+    {
+      *(p + 1) |= *p;
+    }
+  }
 
   pprof_end(sound);
 
