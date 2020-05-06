@@ -175,6 +175,58 @@ PICO_INTERNAL void PsndDoPSG(int line_to)
   SN76496Update(PicoIn.sndOut + pos, len, stereo);
 }
 
+<<<<<<< HEAD
+=======
+#if 0
+PICO_INTERNAL void PsndDoYM2413(int line_to)
+{
+  int pos, len;
+  int stereo = 0;
+
+  // Q16, number of samples since last call
+  len = ((line_to+1) * Pico.snd.smpl_mult) - Pico.snd.ym2413_pos;
+  if (len <= 0){
+    return;
+  }
+
+  // update position and calculate buffer offset and length
+  pos = (Pico.snd.ym2413_pos+0x8000) >> 16;
+  Pico.snd.ym2413_pos += len;
+  len = ((Pico.snd.ym2413_pos+0x8000) >> 16) - pos;
+
+  if (!PicoIn.sndOut || !(PicoIn.opt & POPT_EN_YM2413))
+    return;
+
+  // fill buffer
+  if (PicoIn.opt & POPT_EN_STEREO) {
+    stereo = 1;
+    pos <<= 1;
+  }
+
+  if (PicoIn.opt & POPT_EN_YM2413){
+    short *buf = PicoIn.sndOut + pos;
+    int iI;
+    for (iI = 0; iI < len; iI+= (1<<stereo)) {
+      int16_t getdata = OPLL_calc(opll);
+      *(buf +iI + 0) += getdata;
+      if (PicoIn.opt & POPT_EN_STEREO) {
+          *(buf +iI + 1) += getdata;
+      }
+    }
+  }
+}
+#endif
+
+void YM2413_regWrite(unsigned data){
+  OPLL_writeIO(opll,0,data);
+}
+void YM2413_dataWrite(unsigned data){
+  OPLL_writeIO(opll,1,data);
+}
+
+
+
+>>>>>>> d006e06... opkのコマンドライン起動のエラー修正
 PICO_INTERNAL void PsndDoFM(int cyc_to)
 {
   int pos, len;
@@ -374,11 +426,37 @@ static int PsndRenderMS(int offset, int length)
   }
 >>>>>>> 70aecd1... audio: SN76496 fixes
 
+<<<<<<< HEAD
   // upmix to "stereo" if needed
   if (PicoIn.opt & POPT_EN_STEREO) {
     int i, *p;
     for (i = length, p = (void *)PicoIn.sndOut; i > 0; i--, p++)
       *p |= *p << 16;
+=======
+  if (length-ym2413len > 0) {
+    short *ym2413buf = PicoIn.sndOut + (ym2413len << stereo);
+    Pico.snd.ym2413_pos += (length-ym2413len) << 16;
+    int len = (length-ym2413len);
+    if (PicoIn.opt & POPT_EN_YM2413){
+      int iI;
+      for (iI = len; iI > 0; iI -= 1) {
+        float getdata = (float)OPLL_calc(opll);
+        getdata *= 3;
+        *ym2413buf += (short)getdata;
+        ym2413buf += 1<<stereo;
+      }
+    }
+  }
+
+  // upmix to "stereo" if needed
+  if (PicoIn.opt & POPT_EN_STEREO) {
+    int i;
+    short *p;
+    for (i = length, p = (short *)PicoIn.sndOut; i > 0; i--, p+=2)
+    {
+      *(p + 1) |= *p;
+    }
+>>>>>>> d006e06... opkのコマンドライン起動のエラー修正
   }
 
   pprof_end(sound);
