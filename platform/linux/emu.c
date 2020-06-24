@@ -29,7 +29,7 @@ void pemu_prep_defconfig(void)
 
 void pemu_validate_config(void)
 {
-#if !defined(__arm__) && !defined(__aarch64__) && !defined(__mips__) && !defined(__riscv__) &&  !defined(__riscv) && !defined(__i386__) && !defined(__x86_64__)
+#if !defined(__arm__) && !defined(__aarch64__) && !defined(__mips__) && !defined(__riscv__) &&  !defined(__riscv) && !defined(__powerpc__) && !defined(__i386__) && !defined(__x86_64__)
 	PicoIn.opt &= ~POPT_EN_DRC;
 #endif
 }
@@ -39,10 +39,11 @@ static void draw_cd_leds(void)
 	int led_reg, pitch, scr_offs, led_offs;
 	led_reg = Pico_mcd->s68k_regs[0];
 
-	pitch = 320;
+	pitch = g_screen_ppitch;
 	led_offs = 4;
 	scr_offs = pitch * 2 + 4;
 
+#if 0
 	if (currentConfig.renderer != RT_16BIT) {
 	#define p(x) px[(x) >> 2]
 		// 8-bit modes
@@ -52,7 +53,9 @@ static void draw_cd_leds(void)
 		p(pitch*0) = p(pitch*1) = p(pitch*2) = col_g;
 		p(pitch*0 + led_offs) = p(pitch*1 + led_offs) = p(pitch*2 + led_offs) = col_r;
 	#undef p
-	} else {
+	} else
+#endif
+	{
 	#define p(x) px[(x)*2 >> 2] = px[((x)*2 >> 2) + 1]
 		// 16-bit modes
 		unsigned int *px = (unsigned int *)((short *)g_screen_ptr + scr_offs);

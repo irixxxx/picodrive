@@ -1,7 +1,7 @@
 /*
  * SH2 recompiler
  * (C) notaz, 2009,2010,2013
- * (C) kub, 2018,2019
+ * (C) kub, 2018,2019,2020
  *
  * This work is licensed under the terms of MAME license.
  * See COPYING file in the top-level directory.
@@ -160,7 +160,7 @@ enum op_types {
                                 & BITMASK1(op))
 #define OP_ISBRAUC(op) (BITMASK4(OP_BRANCH, OP_BRANCH_R, OP_BRANCH_RF, OP_RTE) \
                                 & BITMASK1(op))
-#define OP_ISBRACND(op) (BITMASK3(OP_BRANCH_CT, OP_BRANCH_CF, OP_BRANCH_N) \
+#define OP_ISBRACND(op) (BITMASK2(OP_BRANCH_CT, OP_BRANCH_CF) \
                                 & BITMASK1(op))
 #define OP_ISBRAIMM(op) (BITMASK3(OP_BRANCH, OP_BRANCH_CT, OP_BRANCH_CF) \
                                 & BITMASK1(op))
@@ -189,7 +189,7 @@ static char sh2dasm_buff[64];
 		(sh2)->r[8], (sh2)->r[9], (sh2)->r[10], (sh2)->r[11], \
 		(sh2)->r[12], (sh2)->r[13], (sh2)->r[14], (sh2)->r[15]); \
 	printf("%csh2 pc-ml %08x %08x %08x %08x %08x %08x %08x %08x\n", ms, \
-		(sh2)->pc, (sh2)->ppc, (sh2)->pr, (sh2)->sr&0x3ff, \
+		(sh2)->pc, (sh2)->ppc, (sh2)->pr, (sh2)->sr&0xfff, \
 		(sh2)->gbr, (sh2)->vbr, (sh2)->mach, (sh2)->macl); \
 	printf("%csh2 tmp-p  %08x %08x %08x %08x %08x %08x %08x %08x\n", ms, \
 		(sh2)->drc_tmp, (sh2)->irq_cycles, \
@@ -246,6 +246,10 @@ static void REGPARM(3) *sh2_drc_log_entry(void *block, SH2 *sh2, u32 sr)
         SH2_DUMP(&fsh2, "file");
         SH2_DUMP(sh2, "current");
         SH2_DUMP(&csh2[idx][0], "previous");
+	char *ps = (char *)sh2, *pf = (char *)&fsh2;
+	for (idx = 0; idx < offsetof(SH2, read8_map); idx += sizeof(u32))
+		if (*(u32 *)(ps+idx) != *(u32 *)(pf+idx))
+			printf("diff reg %ld\n",idx/sizeof(u32));
         exit(1);
       }
       csh2[idx][0] = fsh2;
@@ -394,12 +398,13 @@ int rchit, rcmiss;
 enum cache_reg_htype {
   HRT_TEMP   = 1, // is for temps and args
   HRT_REG    = 2, // is for sh2 regs
-  HRT_STATIC = 2, // is for static mappings (same as HRT_REG)
 };
 
 enum cache_reg_flags {
   HRF_DIRTY  = 1 << 0, // has "dirty" value to be written to ctx
   HRF_PINNED = 1 << 1, // has a pinned mapping
+  HRF_S16    = 1 << 2, // has a sign extended 16 bit value
+  HRF_U16    = 1 << 3, // has a zero extended 16 bit value
 };
 
 enum cache_reg_type {
@@ -409,9 +414,9 @@ enum cache_reg_type {
 };
 
 typedef struct {
-  u8 hreg;      // "host" reg
+  u8 hreg:6;    // "host" reg
   u8 htype:2;   // TEMP or REG?
-  u8 flags:2;   // DIRTY, PINNED?
+  u8 flags:4;   // DIRTY, PINNED?
   u8 type:2;    // CACHED or TEMP?
   u8 locked:2;  // LOCKED reference counter
   u16 stamp;    // kind of a timestamp
@@ -455,6 +460,8 @@ static void rcache_free_tmp(int hr);
 #include "../drc/emit_mips.c"
 #elif defined(__riscv__) || defined(__riscv)
 #include "../drc/emit_riscv.c"
+#elif defined(__powerpc__)
+#include "../drc/emit_ppc.c"
 #elif defined(__i386__)
 #include "../drc/emit_x86.c"
 #elif defined(__x86_64__)
@@ -1328,6 +1335,37 @@ static void rcache_remove_vreg_alias(int x, sh2_reg_e r);
 static void rcache_evict_vreg(int x);
 static void rcache_remap_vreg(int x);
 
+static void rcache_set_x16(int hr, int s16_, int u16_)
+{
+  int x = reg_map_host[hr];
+  if (x >= 0) {
+    cache_regs[x].flags &= ~(HRF_S16|HRF_U16);
+    if (s16_) cache_regs[x].flags |= HRF_S16;
+    if (u16_) cache_regs[x].flags |= HRF_U16;
+  }
+}
+
+static void rcache_copy_x16(int hr, int hr2)
+{
+  int x = reg_map_host[hr], y = reg_map_host[hr2];
+  if (x >= 0 && y >= 0) {
+    cache_regs[x].flags = (cache_regs[x].flags & ~(HRF_S16|HRF_U16)) |
+                          (cache_regs[y].flags &  (HRF_S16|HRF_U16));
+  }
+}
+
+static int rcache_is_s16(int hr)
+{
+  int x = reg_map_host[hr];
+  return (x >= 0 ? cache_regs[x].flags & HRF_S16 : 0);
+}
+
+static int rcache_is_u16(int hr)
+{
+  int x = reg_map_host[hr];
+  return (x >= 0 ? cache_regs[x].flags & HRF_U16 : 0);
+}
+
 #define RCACHE_DUMP(msg) { \
   cache_reg_t *cp; \
   guest_reg_t *gp; \
@@ -1461,10 +1499,13 @@ static int gconst_check(sh2_reg_e r)
 static int gconst_try_read(int vreg, sh2_reg_e r)
 {
   int i, x;
+  u32 v;
 
   if (guest_regs[r].flags & GRF_CDIRTY) {
     x = guest_regs[r].cnst;
-    emith_move_r_imm(cache_regs[vreg].hreg, gconsts[x].val);
+    v = gconsts[x].val;
+    emith_move_r_imm(cache_regs[vreg].hreg, v);
+    rcache_set_x16(cache_regs[vreg].hreg, v == (s16)v, v == (u16)v);
     FOR_ALL_BITS_SET_DO(gconsts[x].gregs, i,
       {
         if (guest_regs[i].vreg >= 0 && guest_regs[i].vreg != vreg)
@@ -1549,22 +1590,31 @@ static u32 rcache_regs_clean;    // regs needing cleaning
 static void rcache_lock_vreg(int x)
 {
   if (x >= 0) {
+    cache_regs[x].locked ++;
+#if DRC_DEBUG & 64
     if (cache_regs[x].type == HR_FREE) {
       printf("locking free vreg %x, aborting\n", x);
       exit(1);
     }
-    cache_regs[x].locked ++;
+    if (!cache_regs[x].locked) {
+      printf("locking overflow vreg %x, aborting\n", x);
+      exit(1);
+    }
+#endif
   }
 }
 
 static void rcache_unlock_vreg(int x)
 {
   if (x >= 0) {
+#if DRC_DEBUG & 64
     if (cache_regs[x].type == HR_FREE) {
       printf("unlocking free vreg %x, aborting\n", x);
       exit(1);
     }
-    cache_regs[x].locked --;
+#endif
+    if (cache_regs[x].locked)
+      cache_regs[x].locked --;
   }
 }
 
@@ -1582,7 +1632,7 @@ static void rcache_unmap_vreg(int x)
   FOR_ALL_BITS_SET_DO(cache_regs[x].gregs, i,
       if (guest_regs[i].flags & GRF_DIRTY) {
         // if a dirty reg is unmapped save its value to context
-        if (~rcache_regs_discard & (1 << i))
+        if ((~rcache_regs_discard | rcache_regs_now) & (1 << i))
           emith_ctx_write(cache_regs[x].hreg, i * 4);
         guest_regs[i].flags &= ~GRF_DIRTY;
       }
@@ -1625,6 +1675,8 @@ static void rcache_clean_vreg(int x)
               // statically mapped reg not in its sreg. move back to sreg
               rcache_evict_vreg(guest_regs[r].sreg);
               emith_move_r_r(cache_regs[guest_regs[r].sreg].hreg,
+                             cache_regs[guest_regs[r].vreg].hreg);
+              rcache_copy_x16(cache_regs[guest_regs[r].sreg].hreg,
                              cache_regs[guest_regs[r].vreg].hreg);
               rcache_remove_vreg_alias(x, r);
               rcache_add_vreg_alias(guest_regs[r].sreg, r);
@@ -1700,26 +1752,28 @@ static int rcache_allocate(int what, int minprio)
       continue;
     if (cache_regs[i].type == HR_FREE || cache_regs[i].type == HR_TEMP) {
       // REG is free
-      prio = 6;
+      prio = 10;
       oldest = i;
       break;
     }
     if (cache_regs[i].type == HR_CACHED) {
       if (rcache_regs_now & cache_regs[i].gregs)
         // REGs needed for the current insn
-        i_prio = 1;
+        i_prio = 0;
       else if (rcache_regs_soon & cache_regs[i].gregs)
         // REGs needed in the next insns
         i_prio = 2;
       else if (rcache_regs_late & cache_regs[i].gregs)
         // REGs needed in some future insn
-        i_prio = 3;
-      else if (!(~rcache_regs_discard & cache_regs[i].gregs))
-        // REGs not needed in the foreseeable future
         i_prio = 4;
+      else if (~rcache_regs_discard & cache_regs[i].gregs)
+        // REGs not needed in the foreseeable future
+        i_prio = 6;
       else
         // REGs soon overwritten anyway
-        i_prio = 5;
+        i_prio = 8;
+      if (!(cache_regs[i].flags & HRF_DIRTY)) i_prio ++;
+
       if (prio < i_prio || (prio == i_prio && cache_regs[i].stamp < min_stamp)) {
         min_stamp = cache_regs[i].stamp;
         oldest = i;
@@ -1744,21 +1798,21 @@ static int rcache_allocate_vreg(int needed)
 {
   int x;
   
-  x = rcache_allocate(1, needed ? 0 : 3);
+  x = rcache_allocate(1, needed ? 0 : 4);
   if (x < 0)
-    x = rcache_allocate(-1, 1);
+    x = rcache_allocate(-1, 0);
   return x;
 }
 
 static int rcache_allocate_nontemp(void)
 {
-  int x = rcache_allocate(0, 3);
+  int x = rcache_allocate(0, 4);
   return x;
 }
 
 static int rcache_allocate_temp(void)
 {
-  int x = rcache_allocate(-1, 1);
+  int x = rcache_allocate(-1, 0);
   if (x < 0)
     x = rcache_allocate(0, 0);
   return x;
@@ -1766,9 +1820,9 @@ static int rcache_allocate_temp(void)
 
 #if REMAP_REGISTER
 // maps a host register to a REG
-static int rcache_map_reg(sh2_reg_e r, int hr, int mode)
+static int rcache_map_reg(sh2_reg_e r, int hr)
 {
-  int x, i;
+  int i;
 
   gconst_kill(r);
 
@@ -1780,19 +1834,6 @@ static int rcache_map_reg(sh2_reg_e r, int hr, int mode)
     exit(1);
   }
 
-  // deal with statically mapped regs
-  if (mode == RC_GR_RMW && (guest_regs[r].flags & (GRF_STATIC|GRF_PINNED))) {
-    x = guest_regs[r].sreg;
-    if (guest_regs[r].vreg == x) { 
-      // STATIC in its sreg with no aliases, and some processing pending
-      if (cache_regs[x].gregs == 1 << r)
-        return cache_regs[x].hreg;
-    } else if (cache_regs[x].type == HR_FREE ||
-        (cache_regs[x].type == HR_TEMP && !cache_regs[x].locked))
-      // STATIC not in its sreg, with sreg available -> move it
-      i = guest_regs[r].sreg;
-  }
-
   // remove old mappings of r and i if one exists
   if (guest_regs[r].vreg >= 0)
     rcache_remove_vreg_alias(guest_regs[r].vreg, r);
@@ -1801,7 +1842,6 @@ static int rcache_map_reg(sh2_reg_e r, int hr, int mode)
   // set new mappping
   cache_regs[i].type = HR_CACHED;
   cache_regs[i].gregs = 1 << r;
-  cache_regs[i].flags &= HRF_PINNED;
   cache_regs[i].locked = 0;
   cache_regs[i].stamp = ++rcache_counter;
   cache_regs[i].flags |= HRF_DIRTY;
@@ -1821,20 +1861,25 @@ static void rcache_remap_vreg(int x)
   int d;
 
   // x must be a cached vreg
-  if (cache_regs[x].type != HR_CACHED)
+  if (cache_regs[x].type != HR_CACHED || cache_regs[x].locked)
     return;
-  // don't do it if x is already a REG or isn't used or to be cleaned anyway
-  if ((cache_regs[x].htype & HRT_REG) ||
-      !(rsl_d & cache_regs[x].gregs)) {
+  // don't do it if x isn't used
+  if (!(rsl_d & cache_regs[x].gregs)) {
     // clean here to avoid data loss on invalidation
     rcache_clean_vreg(x);
     return;
   }
 
-  if (cache_regs[x].locked) {
-    printf("remap vreg %d is locked\n", x);
-    exit(1);
-  }
+  FOR_ALL_BITS_SET_DO(cache_regs[x].gregs, d,
+    if ((guest_regs[d].flags & (GRF_STATIC|GRF_PINNED)) &&
+        !cache_regs[guest_regs[d].sreg].locked &&
+        !((rsl_d|rcache_regs_now) & cache_regs[guest_regs[d].sreg].gregs)) {
+      // STATIC not in its sreg and sreg is available
+      rcache_evict_vreg(guest_regs[d].sreg);
+      rcache_move_vreg(guest_regs[d].sreg, x);
+      return;
+    }
+  )
 
   // allocate a non-TEMP vreg
   rcache_lock_vreg(x); // lock to avoid evicting x
@@ -1891,8 +1936,8 @@ static int rcache_get_reg_(sh2_reg_e r, rc_gr_mode mode, int do_locking, int *hr
 {
   int src, dst, ali;
   cache_reg_t *tr;
-  u32 rsp_d = (rcache_regs_now | rcache_regs_soon |
-               rcache_regs_static | rcache_regs_pinned) & ~rcache_regs_discard;
+  u32 rsp_d = (rcache_regs_soon | rcache_regs_static | rcache_regs_pinned) &
+               ~rcache_regs_discard;
 
   dst = src = guest_regs[r].vreg;
 
@@ -1901,7 +1946,7 @@ static int rcache_get_reg_(sh2_reg_e r, rc_gr_mode mode, int do_locking, int *hr
   if ((guest_regs[r].flags & (GRF_STATIC|GRF_PINNED)) &&
       src != guest_regs[r].sreg && (src < 0 || mode != RC_GR_READ) &&
       !cache_regs[guest_regs[r].sreg].locked &&
-      !(rsp_d & cache_regs[guest_regs[r].sreg].gregs)) {
+      !((rsp_d|rcache_regs_now) & cache_regs[guest_regs[r].sreg].gregs)) {
     dst = guest_regs[r].sreg;
     rcache_evict_vreg(dst);
   } else if (dst < 0) {
@@ -1926,7 +1971,7 @@ static int rcache_get_reg_(sh2_reg_e r, rc_gr_mode mode, int do_locking, int *hr
   ali = tr->gregs & ~(1 << r);
   if (mode != RC_GR_READ && src == dst && ali) {
     int x = -1;
-    if (rsp_d & ali) {
+    if ((rsp_d|rcache_regs_now) & ali) {
       if ((guest_regs[r].flags & (GRF_STATIC|GRF_PINNED)) &&
           guest_regs[r].sreg == dst && !tr->locked) {
         // split aliases if r is STATIC in sreg and dst isn't already locked
@@ -1935,7 +1980,7 @@ static int rcache_get_reg_(sh2_reg_e r, rc_gr_mode mode, int do_locking, int *hr
           if ((guest_regs[t].flags & (GRF_STATIC|GRF_PINNED)) &&
               !(ali & ~(1 << t)) &&
               !cache_regs[guest_regs[t].sreg].locked &&
-              !(rsp_d & cache_regs[guest_regs[t].sreg].gregs)) {
+              !((rsp_d|rcache_regs_now) & cache_regs[guest_regs[t].sreg].gregs)) {
             // alias is a single STATIC and its sreg is available
             x = guest_regs[t].sreg;
             rcache_evict_vreg(x);
@@ -1947,8 +1992,9 @@ static int rcache_get_reg_(sh2_reg_e r, rc_gr_mode mode, int do_locking, int *hr
           break;
         )
         if (x >= 0) {
-          src = x;
-          rcache_move_vreg(src, dst);
+          rcache_remove_vreg_alias(src, r);
+          src = dst;
+          rcache_move_vreg(x, dst);
         }
       } else {
         // split r
@@ -1956,6 +2002,7 @@ static int rcache_get_reg_(sh2_reg_e r, rc_gr_mode mode, int do_locking, int *hr
         x = rcache_allocate_vreg(rsp_d & (1 << r));
         rcache_unlock_vreg(src);
         if (x >= 0) {
+          rcache_remove_vreg_alias(src, r);
           dst = x;
           tr = &cache_regs[dst];
           tr->stamp = rcache_counter;
@@ -1965,8 +2012,6 @@ static int rcache_get_reg_(sh2_reg_e r, rc_gr_mode mode, int do_locking, int *hr
     if (x < 0)
       // aliases not needed or no vreg available, remove them
       rcache_evict_vreg_aliases(dst, r);
-    else if (src != dst)
-      rcache_remove_vreg_alias(src, r);
   }
 
   // assign r to dst
@@ -1988,7 +2033,9 @@ static int rcache_get_reg_(sh2_reg_e r, rc_gr_mode mode, int do_locking, int *hr
     tr->flags |= HRF_DIRTY;
     guest_regs[r].flags |= GRF_DIRTY;
     gconst_kill(r);
-  }
+    rcache_set_x16(tr->hreg, 0, 0);
+  } else if (src >= 0 && cache_regs[src].hreg != tr->hreg)
+    rcache_copy_x16(tr->hreg, cache_regs[src].hreg);
 #if DRC_DEBUG & 64
   RCACHE_CHECK("after getreg");
 #endif
@@ -2342,13 +2389,16 @@ static void rcache_clean_tmp(void)
 static void rcache_clean_masked(u32 mask)
 {
   int i, r, hr;
+  u32 m;
 
   rcache_regs_clean |= mask;
   mask = rcache_regs_clean;
 
-  // clean constants where all aliases are covered by the mask
+  // clean constants where all aliases are covered by the mask, exempt statics
+  // to avoid flushing them to context if sreg isn't available
+  m = mask & ~(rcache_regs_static | rcache_regs_pinned);
   for (i = 0; i < ARRAY_SIZE(gconsts); i++)
-    if ((gconsts[i].gregs & mask) && !(gconsts[i].gregs & ~mask)) {
+    if ((gconsts[i].gregs & m) && !(gconsts[i].gregs & ~mask)) {
       FOR_ALL_BITS_SET_DO(gconsts[i].gregs, r,
           if (guest_regs[r].flags & GRF_CDIRTY) {
             hr = rcache_get_reg_(r, RC_GR_READ, 0, NULL);
@@ -2384,6 +2434,8 @@ static void rcache_clean(void)
         emith_ctx_read(cache_regs[guest_regs[i].sreg].hreg, i*4);
       else {
         emith_move_r_r(cache_regs[guest_regs[i].sreg].hreg,
+                        cache_regs[guest_regs[i].vreg].hreg);
+        rcache_copy_x16(cache_regs[guest_regs[i].sreg].hreg,
                         cache_regs[guest_regs[i].vreg].hreg);
         rcache_remove_vreg_alias(guest_regs[i].vreg, i);
       }
@@ -2479,6 +2531,9 @@ static void rcache_create(void)
   }
 
   // create static host register mapping for SH2 regs
+  for (i = 0; i < ARRAY_SIZE(guest_regs); i++) {
+    guest_regs[i] = (guest_reg_t){.sreg = -1};
+  }
   for (i = 0; i < ARRAY_SIZE(regs_static); i += 2) {
     for (x = ARRAY_SIZE(cache_regs)-1; x >= 0; x--)
       if (cache_regs[x].hreg == regs_static[i+1])	break;
@@ -2486,8 +2541,7 @@ static void rcache_create(void)
       guest_regs[regs_static[i]] = (guest_reg_t){.flags = GRF_STATIC,.sreg = x};
       rcache_regs_static |= (1 << regs_static[i]);
       rcache_vregs_reg &= ~(1 << x);
-    } else
-      guest_regs[regs_static[i]] = (guest_reg_t){.sreg = -1};
+    }
   }
 
   printf("DRC registers created, %ld host regs (%d REG, %d STATIC, 1 CTX)\n",
@@ -2551,6 +2605,7 @@ static int emit_get_rbase_and_offs(SH2 *sh2, sh2_reg_e r, int rmode, u32 *offs)
     u32 odd = a & 1; // need to fix odd address for correct byte addressing
     la -= (s32)((a & ~mask) - *offs - odd); // diff between reg and memory
     hr = hr2 = rcache_get_reg(r, rmode, NULL);
+    if ((s32)a < 0) emith_uext_ptr(hr2);
     if ((la & ~omask) - odd) {
       hr = rcache_get_tmp();
       emith_add_r_r_ptr_imm(hr, hr2, (la & ~omask) - odd);
@@ -2661,6 +2716,8 @@ static void emit_sync_t_to_sr(void)
 // rd = @(arg0)
 static int emit_memhandler_read(int size)
 {
+  int hr;
+
   emit_sync_t_to_sr();
   rcache_clean_tmp();
 #ifndef DRC_SR_REG
@@ -2683,7 +2740,9 @@ static int emit_memhandler_read(int size)
     case 2:   emith_call(sh2_drc_read32);       break; // 32
     }
 
-  return rcache_get_tmp_ret();
+  hr = rcache_get_tmp_ret();
+  rcache_set_x16(hr, (size & MF_SIZEMASK) < 2, 0);
+  return hr;
 }
 
 // @(arg0) = arg1
@@ -2719,6 +2778,7 @@ static int emit_memhandler_read_rr(SH2 *sh2, sh2_reg_e rd, sh2_reg_e rs, u32 off
       emit_move_r_imm32(rd, val);
       hr2 = rcache_get_reg(rd, RC_GR_RMW, NULL);
     }
+    rcache_set_x16(hr2, val == (s16)val, val == (u16)val);
     if (size & MF_POSTINCR)
       emit_add_r_imm(rs, 1 << (size & MF_SIZEMASK));
     return hr2;
@@ -2762,12 +2822,11 @@ static int emit_memhandler_read_rr(SH2 *sh2, sh2_reg_e rd, sh2_reg_e rs, u32 off
   }
   hr = emit_memhandler_read(size);
 
-  size &= MF_SIZEMASK;
   if (rd == SHR_TMP)
     hr2 = hr;
   else
 #if REMAP_REGISTER
-    hr2 = rcache_map_reg(rd, hr, RC_GR_WRITE);
+    hr2 = rcache_map_reg(rd, hr);
 #else
     hr2 = rcache_get_reg(rd, RC_GR_WRITE, NULL);
 #endif
@@ -2837,12 +2896,11 @@ static int emit_indirect_indexed_read(SH2 *sh2, sh2_reg_e rd, sh2_reg_e rx, sh2_
   emith_add_r_r_r(hr, tx, ty);
   hr = emit_memhandler_read(size);
 
-  size &= MF_SIZEMASK;
   if (rd == SHR_TMP)
     hr2 = hr;
   else
 #if REMAP_REGISTER
-    hr2 = rcache_map_reg(rd, hr, RC_GR_WRITE);
+    hr2 = rcache_map_reg(rd, hr);
 #else
     hr2 = rcache_get_reg(rd, RC_GR_WRITE, NULL);
 #endif
@@ -3616,7 +3674,7 @@ static void REGPARM(2) *sh2_translate(SH2 *sh2, int tcache_id)
         }
         tmp2 = emit_memhandler_read(opd->size);
 #if REMAP_REGISTER
-        tmp3 = rcache_map_reg(GET_Rn(), tmp2, RC_GR_WRITE);
+        tmp3 = rcache_map_reg(GET_Rn(), tmp2);
 #else
         tmp3 = rcache_get_reg(GET_Rn(), RC_GR_WRITE, NULL);
 #endif
@@ -3858,16 +3916,29 @@ static void REGPARM(2) *sh2_translate(SH2 *sh2, int tcache_id)
         tmp2 = rcache_get_reg(GET_Rn(), RC_GR_READ, NULL);
         tmp3 = rcache_get_reg(GET_Rm(), RC_GR_READ, NULL);
         tmp  = rcache_get_reg(SHR_MACL, RC_GR_WRITE, NULL);
-        tmp4 = rcache_get_tmp();
+        tmp4 = tmp3;
         if (op & 1) {
-          emith_sext(tmp, tmp2, 16);
-          emith_sext(tmp4, tmp3, 16);
+          if (! rcache_is_s16(tmp2)) {
+            emith_sext(tmp, tmp2, 16);
+            tmp2 = tmp;
+          }
+          if (! rcache_is_s16(tmp3)) {
+            tmp4 = rcache_get_tmp();
+            emith_sext(tmp4, tmp3, 16);
+          }
         } else {
-          emith_clear_msb(tmp, tmp2, 16);
-          emith_clear_msb(tmp4, tmp3, 16);
+          if (! rcache_is_u16(tmp2)) {
+            emith_clear_msb(tmp, tmp2, 16);
+            tmp2 = tmp;
+          }
+          if (! rcache_is_u16(tmp3)) {
+            tmp4 = rcache_get_tmp();
+            emith_clear_msb(tmp4, tmp3, 16);
+          }
         }
-        emith_mul(tmp, tmp, tmp4);
-        rcache_free_tmp(tmp4);
+        emith_mul(tmp, tmp2, tmp4);
+        if (tmp4 != tmp3)
+          rcache_free_tmp(tmp4);
         goto end_op;
       }
       goto default_;
@@ -4387,15 +4458,19 @@ static void REGPARM(2) *sh2_translate(SH2 *sh2, int tcache_id)
           break;
         case 0x0c: // EXTU.B Rm,Rn        0110nnnnmmmm1100
           emith_clear_msb(tmp2, tmp, 24);
+          rcache_set_x16(tmp2, 1, 1);
           break;
         case 0x0d: // EXTU.W Rm,Rn        0110nnnnmmmm1101
           emith_clear_msb(tmp2, tmp, 16);
+          rcache_set_x16(tmp2, 0, 1);
           break;
         case 0x0e: // EXTS.B Rm,Rn        0110nnnnmmmm1110
           emith_sext(tmp2, tmp, 8);
+          rcache_set_x16(tmp2, 1, 0);
           break;
         case 0x0f: // EXTS.W Rm,Rn        0110nnnnmmmm1111
           emith_sext(tmp2, tmp, 16);
+          rcache_set_x16(tmp2, 1, 0);
           break;
         }
         goto end_op;
@@ -4717,7 +4792,7 @@ end_op:
 
       // branch not taken, correct cycle count
       if (ctaken)
-        emith_add_r_imm(sr, ctaken << 12);
+        cycles -= ctaken;
       // set T bit to reflect branch not taken for OP_BRANCH_CT/CF
       if (emith_get_t_cond() >= 0) // T is synced for all other cases
         emith_set_t(sr, opd_b->op == OP_BRANCH_CF);
@@ -5263,11 +5338,11 @@ static void sh2_smc_rm_blocks(u32 a, int len, int tcache_id, u32 shift)
     start_lit = block->addr_lit & wtmask;
     end_lit = start_lit + block->size_lit;
     // disable/delete block if it covers the modified address
-    if ((start_addr <= a+len && a < end_addr) ||
-        (start_lit <= a+len && a < end_lit))
+    if ((start_addr < a+len && a < end_addr) ||
+        (start_lit < a+len && a < end_lit))
     {
       dbg(2, "smc remove @%08x", a);
-      end_addr = (start_lit <= a+len && block->size_lit ? a : 0);
+      end_addr = (start_lit < a+len && block->size_lit ? a : 0);
       dr_rm_block_entry(block, tcache_id, end_addr, 0);
 #if (DRC_DEBUG & 2)
       removed = 1;
