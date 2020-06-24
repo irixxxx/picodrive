@@ -1,2 +1,2 @@
 #!/bin/bash
-./configure --platform=generic && make clean && make
+./configure --platform=generic && make clean && make $1

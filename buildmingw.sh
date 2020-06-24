@@ -12,4 +12,4 @@ export PKG_CONFIG_PATH=$TCBASE/bin
 export CFLAGS="-I$TC/include"
 export LDFLAGS="--sysroot $TC -L$TC/lib"
 export PKG_CONFIG=$TCBASE/bin/pkg-config.exe
-./configure --platform=mingw && make clean && make opk
+./configure --platform=mingw && make clean && make $1
