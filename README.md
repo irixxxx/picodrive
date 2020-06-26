@@ -68,3 +68,6 @@ on your SD card and replace the PicoDrive binary.
 
 Send bug reports, fixes etc to <derkub@gmail.com>
 Kai-Uwe Bloem
+
+hiroshica change log.
+Addition: Support for the Japanese Mark-III extended FM sound source unit
