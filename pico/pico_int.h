@@ -442,6 +442,7 @@ struct PicoSound
   unsigned int dac_pos;                 // last DAC position in Q20
   unsigned int fm_pos;                  // last FM position in Q20
   unsigned int psg_pos;                 // last PSG position in Q16
+  unsigned int ym2413_pos;              // last YM2413 position
 };
 
 // run tools/mkoffsets pico/pico_int_offs.h if you change these

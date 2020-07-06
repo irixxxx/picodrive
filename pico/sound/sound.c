@@ -33,6 +33,19 @@ static OPLL *opll = NULL;
 unsigned YM2413_reg;
 
 
+PICO_INTERNAL void PsndInit(void)
+{
+  opll = OPLL_new(YM2413_CLK, PicoIn.sndRate);
+  OPLL_setChipType(opll,0);
+  OPLL_reset(opll);
+}
+
+PICO_INTERNAL void PsndExit(void)
+{
+  OPLL_delete(opll);
+  opll = NULL;
+}
+
 PICO_INTERNAL void PsndReset(void)
 {
   // PsndRerate calls YM2612Init, which also resets
@@ -175,8 +188,6 @@ PICO_INTERNAL void PsndDoPSG(int line_to)
   SN76496Update(PicoIn.sndOut + pos, len, stereo);
 }
 
-<<<<<<< HEAD
-=======
 #if 0
 PICO_INTERNAL void PsndDoYM2413(int line_to)
 {
@@ -226,7 +237,6 @@ void YM2413_dataWrite(unsigned data){
 
 
 
->>>>>>> d006e06... opkのコマンドライン起動のエラー修正
 PICO_INTERNAL void PsndDoFM(int cyc_to)
 {
   int pos, len;
@@ -315,7 +325,7 @@ PICO_INTERNAL void PsndClear(void)
   if (!(PicoIn.opt & POPT_EN_FM))
     memset32(PsndBuffer, 0, PicoIn.opt & POPT_EN_STEREO ? len*2 : len);
   // drop pos remainder to avoid rounding errors (not entirely correct though)
-  Pico.snd.dac_pos = Pico.snd.fm_pos = Pico.snd.psg_pos = 0;
+  Pico.snd.dac_pos = Pico.snd.fm_pos = Pico.snd.psg_pos = Pico.snd.ym2413_pos =0;
 }
 
 
@@ -410,29 +420,19 @@ static int PsndRenderMS(int offset, int length)
 {
   int stereo = (PicoIn.opt & 8) >> 3;
   int psglen = ((Pico.snd.psg_pos+0x8000) >> 16);
+  int ym2413len = ((Pico.snd.ym2413_pos+0x8000) >> 16);
 
-<<<<<<< HEAD
-  PsndDoPSG(y - 1);
-  PsndDoYM2413(y - 1);
-=======
   pprof_start(sound);
 
   // Add in parts of the PSG output not yet done
   if (length-psglen > 0) {
     short *psgbuf = PicoIn.sndOut + (psglen << stereo);
     Pico.snd.psg_pos += (length-psglen) << 16;
-    if (PicoIn.opt & POPT_EN_PSG)
+    if (PicoIn.opt & POPT_EN_PSG){
       SN76496Update(psgbuf, length-psglen, stereo);
+    }
   }
->>>>>>> 70aecd1... audio: SN76496 fixes
 
-<<<<<<< HEAD
-  // upmix to "stereo" if needed
-  if (PicoIn.opt & POPT_EN_STEREO) {
-    int i, *p;
-    for (i = length, p = (void *)PicoIn.sndOut; i > 0; i--, p++)
-      *p |= *p << 16;
-=======
   if (length-ym2413len > 0) {
     short *ym2413buf = PicoIn.sndOut + (ym2413len << stereo);
     Pico.snd.ym2413_pos += (length-ym2413len) << 16;
@@ -440,7 +440,7 @@ static int PsndRenderMS(int offset, int length)
     if (PicoIn.opt & POPT_EN_YM2413){
       int iI;
       for (iI = len; iI > 0; iI -= 1) {
-        short getdata = OPLL_calc(opll);
+        short getdata = (short)OPLL_calc(opll);
         getdata *= 3;
         *ym2413buf += getdata;
         ym2413buf += 1<<stereo;
@@ -456,7 +456,6 @@ static int PsndRenderMS(int offset, int length)
     {
       *(p + 1) |= *p;
     }
->>>>>>> d006e06... opkのコマンドライン起動のエラー修正
   }
 
   pprof_end(sound);
