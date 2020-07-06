@@ -440,9 +440,9 @@ static int PsndRenderMS(int offset, int length)
     if (PicoIn.opt & POPT_EN_YM2413){
       int iI;
       for (iI = len; iI > 0; iI -= 1) {
-        float getdata = (float)OPLL_calc(opll);
+        short getdata = OPLL_calc(opll);
         getdata *= 3;
-        *ym2413buf += (short)getdata;
+        *ym2413buf += getdata;
         ym2413buf += 1<<stereo;
       }
     }

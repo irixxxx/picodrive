@@ -1,10 +1,10 @@
 #!/bin/bash
 #
-export TCBASE=/opt/gcw0-toolchain/usr/
-export TC=$TCBASE/mipsel-gcw0-linux-uclibc/sysroot
-export CROSS_LIB_PATH=$TCBASE/lib
-export PATH=$TCBASE/bin:$PATH
-export PKG_CONFIG_PATH=$TCBASE/bin
+#export TCBASE=/opt/gcw0-toolchain/usr/
+#export TC=$TCBASE/mipsel-gcw0-linux-uclibc/sysroot
+#export CROSS_LIB_PATH=$TCBASE/lib
+#export PATH=$TCBASE/bin:$PATH
+#export PKG_CONFIG_PATH=$TCBASE/bin
 #
 #
 #
