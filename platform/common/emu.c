@@ -1030,9 +1030,10 @@ void run_events_pico(unsigned int events)
 
 	if (events & PEV_PICO_SWINP) {
 		pico_inp_mode++;
-		if (pico_inp_mode > 2)
+		if (pico_inp_mode > 3)
 			pico_inp_mode = 0;
 		switch (pico_inp_mode) {
+			case 3: emu_status_msg("Input: PS/2 Peripheral"); break;
 			case 2: emu_status_msg("Input: Pen on Pad"); break;
 			case 1: emu_status_msg("Input: Pen on Storyware"); break;
 			case 0: emu_status_msg("Input: Joystick");
@@ -1048,12 +1049,28 @@ void run_events_pico(unsigned int events)
 	}
 	if (events & PEV_PICO_PNEXT) {
 		PicoPicohw.page++;
-		if (PicoPicohw.page > 6)
-			PicoPicohw.page = 6;
-		emu_status_msg("Page %i", PicoPicohw.page);
+		if (PicoPicohw.page > 7)
+			PicoPicohw.page = 7;
+        if (PicoPicohw.page == 7) {
+            // Used in games that require the Keyboard Pico peripheral
+            emu_status_msg("Test Page");
+        }
+        else {
+            emu_status_msg("Page %i", PicoPicohw.page);
+        }
+	}
+	if (events & PEV_PICO_SWPS2) {
+		PicoPicohw.is_kb_active = !PicoPicohw.is_kb_active;
+		emu_status_msg("PS/2 connection: %s", PicoPicohw.is_kb_active ? "on" : "off");
+	}
+	if (events & PEV_PICO_PENOV) {
+		PicoPicohw.is_pen_overlay_active = !PicoPicohw.is_pen_overlay_active;
+		emu_status_msg("Pen position overlay: %s", PicoPicohw.is_pen_overlay_active ? "on" : "off");
 	}
 
-	if (pico_inp_mode == 0)
+	PicoPicohw.inp_mode = pico_inp_mode;
+
+	if (pico_inp_mode == 0 || pico_inp_mode == 3)
 		return;
 
 	/* handle other input modes */
@@ -1175,41 +1192,70 @@ void emu_update_input(void)
 {
 	static int prev_events = 0;
 	int actions[IN_BINDTYPE_COUNT] = { 0, };
+	int actions_pico_ps2[IN_BIND_LAST] = { 0, };
 	int pl_actions[4];
 	int events;
 
 	in_update(actions);
+	in_update_pico_ps2(actions_pico_ps2);
+	PicoIn.ps2 = 0;
+	for (int i = 0; i < IN_BIND_LAST; i++) {
+		if (actions_pico_ps2[i]) {
+			unsigned int action = actions_pico_ps2[i];
+			if ((action & 0xff) == PEVB_PICO_PS2_LSHIFT) {
+				PicoIn.ps2 = (PicoIn.ps2 & 0x00ff) | (action << 8);
+			} else {
+				PicoIn.ps2 = (PicoIn.ps2 & 0xff00) | action;
+			}
+		}
+	}
 
 	pl_actions[0] = actions[IN_BINDTYPE_PLAYER12];
 	pl_actions[1] = actions[IN_BINDTYPE_PLAYER12] >> 16;
 	pl_actions[2] = actions[IN_BINDTYPE_PLAYER34];
 	pl_actions[3] = actions[IN_BINDTYPE_PLAYER34] >> 16;
 
-	PicoIn.pad[0] = pl_actions[0] & 0xfff;
-	PicoIn.pad[1] = pl_actions[1] & 0xfff;
-	PicoIn.pad[2] = pl_actions[2] & 0xfff;
-	PicoIn.pad[3] = pl_actions[3] & 0xfff;
-
-	if (pl_actions[0] & 0x7000)
-		do_turbo(&PicoIn.pad[0], pl_actions[0]);
-	if (pl_actions[1] & 0x7000)
-		do_turbo(&PicoIn.pad[1], pl_actions[1]);
-	if (pl_actions[2] & 0x7000)
-		do_turbo(&PicoIn.pad[2], pl_actions[2]);
-	if (pl_actions[3] & 0x7000)
-		do_turbo(&PicoIn.pad[3], pl_actions[3]);
-
 	events = actions[IN_BINDTYPE_EMU] & PEV_MASK;
+
+	if (pico_inp_mode == 3) {
+		// FIXME: Only passthrough joystick input to avoid collisions
+		// with PS/2 bindings. Ideally we should check if the device this
+		// input originated from is the same as the device used for
+		// PS/2 input, and passthrough if they are different devices.
+		PicoIn.pad[0] = pl_actions[0] & 0xf;
+		PicoIn.pad[1] = pl_actions[1] & 0xf;
+		PicoIn.pad[2] = pl_actions[2] & 0xf;
+		PicoIn.pad[3] = pl_actions[3] & 0xf;
+
+		// Ignore events mapped to bindings that collide with PS/2 peripherals.
+		// Note that calls to emu_set_fastforward() should be avoided as well,
+		// since fast-forward activates even with parameter set_on = 0.
+		events &= ~PEV_MENU;
+	} else {
+		PicoIn.pad[0] = pl_actions[0] & 0xfff;
+		PicoIn.pad[1] = pl_actions[1] & 0xfff;
+		PicoIn.pad[2] = pl_actions[2] & 0xfff;
+		PicoIn.pad[3] = pl_actions[3] & 0xfff;
+
+		if (pl_actions[0] & 0x7000)
+			do_turbo(&PicoIn.pad[0], pl_actions[0]);
+		if (pl_actions[1] & 0x7000)
+			do_turbo(&PicoIn.pad[1], pl_actions[1]);
+		if (pl_actions[2] & 0x7000)
+			do_turbo(&PicoIn.pad[2], pl_actions[2]);
+		if (pl_actions[3] & 0x7000)
+			do_turbo(&PicoIn.pad[3], pl_actions[3]);
+
+		if ((events ^ prev_events) & PEV_FF) {
+			emu_set_fastforward(events & PEV_FF);
+			plat_update_volume(0, 0);
+			reset_timing = 1;
+		}
+	}
 
 	// volume is treated in special way and triggered every frame
 	if (events & (PEV_VOL_DOWN|PEV_VOL_UP))
 		plat_update_volume(1, events & PEV_VOL_UP);
-
-	if ((events ^ prev_events) & PEV_FF) {
-		emu_set_fastforward(events & PEV_FF);
-		plat_update_volume(0, 0);
-		reset_timing = 1;
-	}
 
 	events &= ~prev_events;
 

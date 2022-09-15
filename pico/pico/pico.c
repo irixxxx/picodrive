@@ -88,6 +88,7 @@ PICO_INTERNAL void PicoInitPico(void)
 
   PicoIn.AHW = PAHW_PICO;
   memset(&PicoPicohw, 0, sizeof(PicoPicohw));
+  memset(&(PicoPicohw.kb), 0, sizeof(picohw_kb));
   PicoPicohw.pen_pos[0] = 0x03c + 320/2;
   PicoPicohw.pen_pos[1] = 0x200 + 240/2;
   prev_line_cnt_irq3 = prev_line_cnt_irq5 = 0;

@@ -189,6 +189,8 @@ void pemu_finalize_frame(const char *fps, const char *notice)
 			}
 	}
 
+	if (PicoPicohw.is_pen_overlay_active)
+		emu_osd_text16(pico_pen_x * g_screen_width / 320, pico_pen_y * g_screen_height / 240, "X");
 	if (notice)
 		emu_osd_text16(4, g_screen_height - 8, notice);
 	if (currentConfig.EmuOpt & EOPT_SHOW_FPS)

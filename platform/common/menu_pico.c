@@ -340,19 +340,21 @@ me_bind_action me_ctrl_actions[] =
 
 me_bind_action emuctrl_actions[] =
 {
-	{ "Load State       ", PEV_STATE_LOAD },
-	{ "Save State       ", PEV_STATE_SAVE },
-	{ "Prev Save Slot   ", PEV_SSLOT_PREV },
-	{ "Next Save Slot   ", PEV_SSLOT_NEXT },
-	{ "Switch Renderer  ", PEV_SWITCH_RND },
-	{ "Volume Down      ", PEV_VOL_DOWN },
-	{ "Volume Up        ", PEV_VOL_UP },
-	{ "Fast forward     ", PEV_FF },
-	{ "Reset Game       ", PEV_RESET },
-	{ "Enter Menu       ", PEV_MENU },
-	{ "Pico Next page   ", PEV_PICO_PNEXT },
-	{ "Pico Prev page   ", PEV_PICO_PPREV },
-	{ "Pico Switch input", PEV_PICO_SWINP },
+	{ "Load State          ", PEV_STATE_LOAD },
+	{ "Save State          ", PEV_STATE_SAVE },
+	{ "Prev Save Slot      ", PEV_SSLOT_PREV },
+	{ "Next Save Slot      ", PEV_SSLOT_NEXT },
+	{ "Switch Renderer     ", PEV_SWITCH_RND },
+	{ "Volume Down         ", PEV_VOL_DOWN },
+	{ "Volume Up           ", PEV_VOL_UP },
+	{ "Fast forward        ", PEV_FF },
+	{ "Reset Game          ", PEV_RESET },
+	{ "Enter Menu          ", PEV_MENU },
+	{ "Pico Next page      ", PEV_PICO_PNEXT },
+	{ "Pico Prev page      ", PEV_PICO_PPREV },
+	{ "Pico Switch input   ", PEV_PICO_SWINP },
+	{ "Pico PS/2 Connection", PEV_PICO_SWPS2 },
+	{ "Pen Position Overlay", PEV_PICO_PENOV },
 	{ NULL,                0 }
 };
 

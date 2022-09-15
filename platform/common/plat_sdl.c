@@ -30,6 +30,7 @@ static struct in_pdata in_sdl_platform_data = {
 	.defbinds = in_sdl_defbinds,
 	.key_map = in_sdl_key_map,
 	.joy_map = in_sdl_joy_map,
+	.pico_ps2_map = in_sdl_pico_ps2_map,
 };
 
 /* YUV stuff */
