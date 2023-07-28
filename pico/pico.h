@@ -82,6 +82,7 @@ extern void *p32x_bios_g, *p32x_bios_m, *p32x_bios_s;
 #define POPT_FM_YM2612      (1<<24) //x00 0000
 #define POPT_EN_FM_FILTER   (1<<25)
 #define POPT_EN_KBD         (1<<26)
+#define POPT_EN_DITHER      (1<<27)
 
 #define PAHW_MCD    (1<<0)
 #define PAHW_32X    (1<<1)
@@ -134,6 +135,7 @@ typedef struct PicoInterface
 	unsigned int mapper;           // mapper selection for SMS, 0 = auto
 	unsigned int tmsPalette;       // palette used by SMS in TMS graphic modes
 
+	int dither;                    // dither filtering strength
 	int sndRate;                   // rate in Hz
 	int sndFilterAlpha;            // Low pass sound filter alpha (Q16)
 	short *sndOut;                 // PCM output buffer
@@ -278,6 +280,7 @@ void PicoDoHighPal555(int sh, int line, struct PicoEState *est);
 #define PDRAW_SOFTSCALE    (1<<15) // H32 upscaling
 #define PDRAW_SYNC_NEEDED  (1<<16) // redraw needed
 #define PDRAW_SYNC_NEXT    (1<<17) // redraw next frame
+#define PDRAW_DITHER       (1<<18) // dither filter
 extern int rendstatus_old;
 extern int rendlines;
 

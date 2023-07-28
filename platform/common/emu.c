@@ -697,6 +697,7 @@ void emu_set_defconfig(void)
 	PicoIn.autoRgnOrder = currentConfig.s_PicoAutoRgnOrder;
 	PicoIn.hwSelect = currentConfig.s_hwSelect;
 	PicoIn.sndFilterAlpha = currentConfig.s_PicoSndFilterAlpha;
+	PicoIn.dither = 4;
 }
 
 int emu_read_config(const char *rom_fname, int no_defaults)

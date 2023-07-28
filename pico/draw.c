@@ -1526,30 +1526,75 @@ void FinalizeLine555(int sh, int line, struct PicoEState *est)
   else if ((PicoIn.AHW & PAHW_SMS) && (est->Pico->video.reg[0] & 0x20))
     len -= 8, ps += 8;
 
+  u16 *pt = DefOutBuff;
+
+  if (est->rendstatus & PDRAW_DITHER) {
+    h_copy(pt, 0, ps, 256, len, f_pal);
+#if 1
+    int th = PicoIn.dither;
+    int x, c, r;
+    for (x = 2; x <= len-th; x++) {
+      u32 v = pt[x-1];
+      r = v != pt[x-2];
+      for (c = 0; c < th && r; c++)
+        r = (v == pt[x+2*c-1]) & (v != pt[x+2*c]);
+      if (r) {
+        do {
+          r = pt[x] != pt[x+1];
+          p_05(pt[x-1], v, pt[x]);
+          if (r) pt[x] = pt[x-1];
+          x += 2;
+        } while (x < len-1 && v != pt[x] && v == pt[x-1]);
+        x--;
+      }
+    }
+#endif
+  }
   if ((est->rendstatus & PDRAW_SOFTSCALE) && len < 320) {
     if (len >= 240 && len <= 256) {
       pd += (256-len)>>1;
-      switch (PicoIn.filter) {
-      case 3: h_upscale_bl4_4_5(pd, 320, ps, 256, len, f_pal); break;
-      case 2: h_upscale_bl2_4_5(pd, 320, ps, 256, len, f_pal); break;
-      case 1: h_upscale_snn_4_5(pd, 320, ps, 256, len, f_pal); break;
-      default: h_upscale_nn_4_5(pd, 320, ps, 256, len, f_pal); break;
+      if (est->rendstatus & PDRAW_DITHER) {
+        switch (PicoIn.filter) {
+        case 3: h_upscale_bl4_4_5(pd, 320, pt, 256, len, f_nop); break;
+        case 2: h_upscale_bl2_4_5(pd, 320, pt, 256, len, f_nop); break;
+        case 1: h_upscale_snn_4_5(pd, 320, pt, 256, len, f_nop); break;
+        default: h_upscale_nn_4_5(pd, 320, pt, 256, len, f_nop); break;
+	}
+      } else {
+        switch (PicoIn.filter) {
+        case 3: h_upscale_bl4_4_5(pd, 320, ps, 256, len, f_pal); break;
+        case 2: h_upscale_bl2_4_5(pd, 320, ps, 256, len, f_pal); break;
+        case 1: h_upscale_snn_4_5(pd, 320, ps, 256, len, f_pal); break;
+        default: h_upscale_nn_4_5(pd, 320, ps, 256, len, f_pal); break;
+	}
       }
       if (est->rendstatus & PDRAW_32X_SCALE) { // 32X needs scaled CLUT data
         unsigned char *psc = ps - 256, *pdc = psc;
         rh_upscale_nn_4_5(pdc, 320, psc, 256, 256, f_nop);
       }
-    } else if (len == 160)
-      switch (PicoIn.filter) {
-      case 3:
-      case 2: h_upscale_bl2_1_2(pd, 320, ps, 160, len, f_pal); break;
-      default: h_upscale_nn_1_2(pd, 320, ps, 160, len, f_pal); break;
+    } else if (len == 160) {
+      if (est->rendstatus & PDRAW_DITHER) {
+        switch (PicoIn.filter) {
+        case 3:
+        case 2: h_upscale_bl2_1_2(pd, 320, pt, 160, len, f_nop); break;
+        default: h_upscale_nn_1_2(pd, 320, pt, 160, len, f_nop); break;
+        }
+      } else {
+        switch (PicoIn.filter) {
+        case 3:
+        case 2: h_upscale_bl2_1_2(pd, 320, ps, 160, len, f_pal); break;
+        default: h_upscale_nn_1_2(pd, 320, ps, 160, len, f_pal); break;
+        }
       }
+    }
   } else {
     if ((est->rendstatus & PDRAW_BORDER_32) && len < 320)
       pd += (320-len) / 2;
 #if 1
-    h_copy(pd, 320, ps, 320, len, f_pal);
+    if (est->rendstatus & PDRAW_DITHER)
+      h_copy(pd, 320, pt, 320, len, f_nop);
+    else
+      h_copy(pd, 320, ps, 320, len, f_pal);
 #else
     extern void amips_clut(unsigned short *dst, unsigned char *src, unsigned short *pal, int count);
     extern void amips_clut_6bit(unsigned short *dst, unsigned char *src, unsigned short *pal, int count);
@@ -1745,10 +1790,10 @@ PICO_INTERNAL void PicoFrameStart(void)
   int sync = est->rendstatus & (PDRAW_SYNC_NEEDED | PDRAW_SYNC_NEXT);
 
   // prepare to do this frame
-  est->rendstatus = 0;
+  est->rendstatus = (PicoIn.opt & POPT_EN_DITHER) ? PDRAW_DITHER : 0;
 
   if (PicoIn.AHW & PAHW_32X) // H32 upscaling, before mixing in 32X layer
-    est->rendstatus = (*est->PicoOpt & POPT_ALT_RENDERER) ?
+    est->rendstatus |= (*est->PicoOpt & POPT_ALT_RENDERER) ?
                 PDRAW_BORDER_32 : PDRAW_32X_SCALE|PDRAW_SOFTSCALE;
   else if (!(*est->PicoOpt & POPT_DIS_32C_BORDER))
     est->rendstatus |= PDRAW_BORDER_32;

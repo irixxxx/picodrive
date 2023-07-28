@@ -735,6 +735,8 @@ void PicoFrameStartSMS(void)
   skip_next_line = 0;
   loffs = screen_offset = 24; // 192 lines is really 224 with top/bottom bars
   est->rendstatus = PDRAW_32_COLS;
+  if (PicoIn.opt & POPT_EN_DITHER)
+    est->rendstatus |= PDRAW_DITHER;
 
   // if mode changes make palette dirty since some modes switch to a fixed one
   if (mode != ((Pico.video.reg[0]&0x06) | (Pico.video.reg[1]&0x18))) {
