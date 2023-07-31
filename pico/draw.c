@@ -1533,20 +1533,25 @@ void FinalizeLine555(int sh, int line, struct PicoEState *est)
 #if 1
     int th = PicoIn.dither;
     int x, c, r;
-    for (x = 2; x <= len-th; x++) {
-      u32 v = pt[x-1];
-      r = v != pt[x-2];
-      for (c = 0; c < th && r; c++)
-        r = (v == pt[x+2*c-1]) & (v != pt[x+2*c]);
-      if (r) {
-        do {
-          r = pt[x] != pt[x+1];
-          p_05(pt[x-1], v, pt[x]);
-          if (r) pt[x] = pt[x-1];
+    u32 pt_xm1 = -1; // pt[x-1]
+    for (x = 0; x < len-1; x++) {
+      u32 v = pt[x];
+      for (c = 0, r = pt_xm1 != v; x+c < len-1 && r; c += 2)
+        if ((v != pt[x+c]) | (v == pt[x+c+1])) break;
+      if (c >= 2*th) {
+        c -= (pt[x+c-1] == pt[x+c]);
+        pt_xm1 = pt[x+c-1];
+        while (c > 1) {
+          p_05(pt[x], v, pt[x+1]);
+          pt[x+1] = pt[x];
+          c -= 2;
           x += 2;
-        } while (x < len-1 && v != pt[x] && v == pt[x-1]);
+        }
         x--;
-      }
+        if (c)
+          pt[x+1] = pt[x], x++;
+      } else
+        pt_xm1 = pt[x]; // pt[x-1] on next loop run
     }
 #endif
   }
