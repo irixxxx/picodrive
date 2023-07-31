@@ -1538,8 +1538,11 @@ void FinalizeLine555(int sh, int line, struct PicoEState *est)
       u32 v = pt[x];
       for (c = 0, r = pt_xm1 != v; x+c < len-1 && r; c += 2)
         if ((v != pt[x+c]) | (v == pt[x+c+1])) break;
-      if (c >= 2*th) {
-        c -= (pt[x+c-1] == pt[x+c]);
+      c += (x+c == len-1); // avoid artifact if only 1 px left on line
+      c -= (x+c < len) & (pt[x+c-1] == pt[x+c]); // stop short if new px run
+
+      // potential text if short run and limited by the same px
+      if (c >= 2*th && (x+c == len || (c > 4 || pt_xm1 != pt[x+c]))) {
         pt_xm1 = pt[x+c-1];
         while (c > 1) {
           p_05(pt[x], v, pt[x+1]);
@@ -1547,8 +1550,8 @@ void FinalizeLine555(int sh, int line, struct PicoEState *est)
           c -= 2;
           x += 2;
         }
-        x--;
-        if (c)
+        x--; // x++ on looping
+        if (c) // fill overhanging v pixel
           pt[x+1] = pt[x], x++;
       } else
         pt_xm1 = pt[x]; // pt[x-1] on next loop run
