@@ -1528,10 +1528,11 @@ void FinalizeLine555(int sh, int line, struct PicoEState *est)
 
   u16 *pt = DefOutBuff;
 
-  if (est->rendstatus & PDRAW_DITHER) {
+  if (est->rendstatus & PDRAW_UNDITHER) {
     h_copy(pt, 0, ps, 256, len, f_pal);
 #if 1
-    int th = PicoIn.dither;
+    static int dm[] = { 999, 6, 4, 2 };
+    int th = dm[PicoIn.undither & 3];
     int x, c, r;
     u32 pt_xm1 = -1; // pt[x-1]
     for (x = 0; x < len-1; x++) {
@@ -1542,7 +1543,7 @@ void FinalizeLine555(int sh, int line, struct PicoEState *est)
       c -= (x+c < len) & (pt[x+c-1] == pt[x+c]); // stop short if new px run
 
       // potential text if short run and limited by the same px
-      if (c >= 2*th && (x+c == len || (c > 4 || pt_xm1 != pt[x+c]))) {
+      if (c >= 2*th && (x+c == len || c > 2*th || pt_xm1 != pt[x+c])) {
         pt_xm1 = pt[x+c-1];
         while (c > 1) {
           p_05(pt[x], v, pt[x+1]);
@@ -1561,7 +1562,7 @@ void FinalizeLine555(int sh, int line, struct PicoEState *est)
   if ((est->rendstatus & PDRAW_SOFTSCALE) && len < 320) {
     if (len >= 240 && len <= 256) {
       pd += (256-len)>>1;
-      if (est->rendstatus & PDRAW_DITHER) {
+      if (est->rendstatus & PDRAW_UNDITHER) {
         switch (PicoIn.filter) {
         case 3: h_upscale_bl4_4_5(pd, 320, pt, 256, len, f_nop); break;
         case 2: h_upscale_bl2_4_5(pd, 320, pt, 256, len, f_nop); break;
@@ -1581,7 +1582,7 @@ void FinalizeLine555(int sh, int line, struct PicoEState *est)
         rh_upscale_nn_4_5(pdc, 320, psc, 256, 256, f_nop);
       }
     } else if (len == 160) {
-      if (est->rendstatus & PDRAW_DITHER) {
+      if (est->rendstatus & PDRAW_UNDITHER) {
         switch (PicoIn.filter) {
         case 3:
         case 2: h_upscale_bl2_1_2(pd, 320, pt, 160, len, f_nop); break;
@@ -1599,7 +1600,7 @@ void FinalizeLine555(int sh, int line, struct PicoEState *est)
     if ((est->rendstatus & PDRAW_BORDER_32) && len < 320)
       pd += (320-len) / 2;
 #if 1
-    if (est->rendstatus & PDRAW_DITHER)
+    if (est->rendstatus & PDRAW_UNDITHER)
       h_copy(pd, 320, pt, 320, len, f_nop);
     else
       h_copy(pd, 320, ps, 320, len, f_pal);
@@ -1798,7 +1799,7 @@ PICO_INTERNAL void PicoFrameStart(void)
   int sync = est->rendstatus & (PDRAW_SYNC_NEEDED | PDRAW_SYNC_NEXT);
 
   // prepare to do this frame
-  est->rendstatus = (PicoIn.opt & POPT_EN_DITHER) ? PDRAW_DITHER : 0;
+  est->rendstatus = (PicoIn.undither > 0) ? PDRAW_UNDITHER : 0;
 
   if (PicoIn.AHW & PAHW_32X) // H32 upscaling, before mixing in 32X layer
     est->rendstatus |= (*est->PicoOpt & POPT_ALT_RENDERER) ?

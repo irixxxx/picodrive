@@ -1036,6 +1036,8 @@ static int menu_loop_snd_options(int id, int keys)
 
 // ------------ gfx options menu ------------
 
+static const char *men_undither[] = { "OFF", "weak", "medium", "strong", NULL };
+static const char h_undither[] = "Identify dithered areas and apply smoothing";
 static const char h_gamma[] = "Gamma/brightness adjustment (default 1.00)";
 
 static const char *mgn_opt_fskip(int id, int *offs)
@@ -1057,8 +1059,7 @@ static menu_entry e_menu_gfx_options[] =
 	mee_enum      ("Video output mode", MA_OPT_VOUT_MODE, plat_target.vout_method, men_dummy),
 	mee_range_cust("Frameskip",         MA_OPT_FRAMESKIP, currentConfig.Frameskip, -1, 16, mgn_opt_fskip),
 	mee_range     ("Max auto frameskip",MA_OPT2_MAX_FRAMESKIP, currentConfig.max_skip, 1, 10),
-	mee_onoff     ("Dithering",         MA_OPT2_ENABLE_DITHER, PicoIn.opt, POPT_EN_DITHER),
-	mee_range     ("Dither strength",   MA_OPT2_ENABLE_DITHER, PicoIn.dither, 1, 8),
+	mee_enum_h    ("Dither removal",    MA_OPT2_UNDITHER, PicoIn.undither, men_undither, h_undither),
 	mee_enum      ("Filter",            MA_OPT3_FILTERING, currentConfig.filter, men_dummy),
 	mee_range_cust_h("Gamma correction",MA_OPT2_GAMMA, currentConfig.gamma, 1, 300, mgn_aopt_gamma, h_gamma),
 	MENU_OPTIONS_GFX

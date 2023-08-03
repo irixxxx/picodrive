@@ -135,7 +135,7 @@ typedef struct PicoInterface
 	unsigned int mapper;           // mapper selection for SMS, 0 = auto
 	unsigned int tmsPalette;       // palette used by SMS in TMS graphic modes
 
-	int dither;                    // dither filtering strength
+	int undither;                  // undither filtering strength (0=off, 3=max)
 	int sndRate;                   // rate in Hz
 	int sndFilterAlpha;            // Low pass sound filter alpha (Q16)
 	short *sndOut;                 // PCM output buffer
@@ -280,7 +280,7 @@ void PicoDoHighPal555(int sh, int line, struct PicoEState *est);
 #define PDRAW_SOFTSCALE    (1<<15) // H32 upscaling
 #define PDRAW_SYNC_NEEDED  (1<<16) // redraw needed
 #define PDRAW_SYNC_NEXT    (1<<17) // redraw next frame
-#define PDRAW_DITHER       (1<<18) // dither filter
+#define PDRAW_UNDITHER     (1<<18) // undither filter
 extern int rendstatus_old;
 extern int rendlines;
 
