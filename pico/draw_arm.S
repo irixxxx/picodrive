@@ -22,6 +22,7 @@
 .equ PDRAW_32X_SCALE,     (1<<12)
 .equ PDRAW_BGC_DMA,       (1<<14)
 .equ PDRAW_SOFTSCALE,     (1<<15)
+.equ PDRAW_UNDITHER,      (1<<18)
 
 @ helpers
 .macro add_c24 d s c
@@ -1692,6 +1693,8 @@ FinalizeLine555:
     mov     r0, r2
     tst     r3, #PDRAW_BGC_DMA
     bne     BgcDMA
+    tst     r3, #PDRAW_UNDITHER  @ ARM implementation for this is missing
+    bne     FinalizeLine555undither
 
     stmfd   sp!, {r4-r11,lr}
     mov     r11,r2               @ est

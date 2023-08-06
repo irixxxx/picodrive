@@ -414,6 +414,22 @@ struct retro_core_option_v2_definition option_defs_us[] = {
       "33"
    },
    {
+      "picodrive_undither",
+      "Dither Removal",
+      NULL,
+      "Attempt to remove dithering from the output image. Results vary greatly, while some games improve others might degrade.",
+      NULL,
+      "hacks",
+      {
+         { "off",    "disabled" },
+         { "weak",   "Weak" },
+         { "medium",   "Medium" },
+         { "strong",   "Strong" },
+         { NULL, NULL },
+      },
+      "off"
+   },
+   {
       "picodrive_sprlim",
       "No Sprite Limit",
       NULL,

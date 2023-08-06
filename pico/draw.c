@@ -1464,6 +1464,89 @@ static void PicoDoHighPal555_8bit(int sh, int line, struct PicoEState *est)
   }
 }
 
+// TODO duplicated code from FinalizeLine555, while ARM asm for this isn't done
+void FinalizeLine555undither(int sh, int line, struct PicoEState *est)
+{
+  unsigned short *pd=est->DrawLineDest;
+  unsigned char  *ps=est->HighCol+8;
+  unsigned short *pal=est->HighPal;
+  int len;
+
+  u16 *pt = DefOutBuff;
+  static int dm[] = { 999, 5, 3, 2 };
+  int th = dm[PicoIn.undither & 3];
+  int x, c, r;
+  u32 pt_xm1 = -1; // pt[x-1]
+
+  if (DrawLineDestIncrement == 0)
+    return;
+
+  PicoDrawUpdateHighPal();
+
+  len = 256;
+  if (!(PicoIn.AHW & PAHW_8BIT) && (est->Pico->video.reg[12]&1))
+    len = 320;
+  else if ((PicoIn.AHW & PAHW_GG) && (est->Pico->m.hardware & PMS_HW_LCD))
+    len = 160;
+  else if ((PicoIn.AHW & PAHW_SMS) && (est->Pico->video.reg[0] & 0x20))
+    len -= 8, ps += 8;
+
+  h_copy(pt, 0, ps, 256, len, f_pal); // need RGB data for undithering
+
+  // undithering algorithm, needs optimisation...
+  for (x = 0; x < len-1; x++) {
+    u32 v = pt[x];
+
+    // try finding a pixel run where every 2nd pixel is the same
+    for (c = 0, r = pt_xm1 != v; x+c < len-1 && r; c += 2)
+      if ((v != pt[x+c]) | (v == pt[x+c+1])) break;
+    c += (x+c == len-1); // avoid artifact if only 1 px left on line
+    c -= (x+c < len) & (pt[x+c-1] == pt[x+c]); // stop short if new px run
+
+    // potential text if short run and limited by the same px
+    if (c >= 2*th && (x+c >= len || c > 2*th || pt_xm1 != pt[x+c])) {
+      pt_xm1 = pt[x+c-1];
+      // mix every 2 adjacent pixels in the run
+      while (c > 1) {
+        p_05(pt[x], v, pt[x+1]);
+        pt[x+1] = pt[x];
+        c -= 2;
+        x += 2;
+      }
+      x += c-1;
+      if (c > 0) // fill overhanging v pixel
+        pt[x] = pt[x-1];
+    } else
+      pt_xm1 = pt[x]; // pt[x-1] on next loop run
+  }
+
+  if ((est->rendstatus & PDRAW_SOFTSCALE) && len < 320) {
+    if (len >= 240 && len <= 256) {
+      pd += (256-len)>>1;
+        switch (PicoIn.filter) {
+        case 3: h_upscale_bl4_4_5(pd, 320, pt, 256, len, f_nop); break;
+        case 2: h_upscale_bl2_4_5(pd, 320, pt, 256, len, f_nop); break;
+        case 1: h_upscale_snn_4_5(pd, 320, pt, 256, len, f_nop); break;
+        default: h_upscale_nn_4_5(pd, 320, pt, 256, len, f_nop); break;
+	}
+      if (est->rendstatus & PDRAW_32X_SCALE) { // 32X needs scaled CLUT data
+        unsigned char *psc = ps - 256, *pdc = psc;
+        rh_upscale_nn_4_5(pdc, 320, psc, 256, 256, f_nop);
+      }
+    } else if (len == 160) {
+        switch (PicoIn.filter) {
+        case 3:
+        case 2: h_upscale_bl2_1_2(pd, 320, pt, 160, len, f_nop); break;
+        default: h_upscale_nn_1_2(pd, 320, pt, 160, len, f_nop); break;
+        }
+    }
+  } else {
+    if ((est->rendstatus & PDRAW_BORDER_32) && len < 320)
+      pd += (320-len) / 2;
+    h_copy(pd, 320, pt, 320, len, f_nop);
+  }
+}
+
 #ifndef _ASM_DRAW_C
 void PicoDoHighPal555(int sh, int line, struct PicoEState *est)
 {
@@ -1515,6 +1598,8 @@ void FinalizeLine555(int sh, int line, struct PicoEState *est)
 
   if (est->rendstatus & PDRAW_BGC_DMA)
     return BgcDMA(est);
+  if (est->rendstatus & PDRAW_UNDITHER)
+    return FinalizeLine555undither(sh, line, est);
 
   PicoDrawUpdateHighPal();
 
@@ -1526,84 +1611,32 @@ void FinalizeLine555(int sh, int line, struct PicoEState *est)
   else if ((PicoIn.AHW & PAHW_SMS) && (est->Pico->video.reg[0] & 0x20))
     len -= 8, ps += 8;
 
-  u16 *pt = DefOutBuff;
-
-  if (est->rendstatus & PDRAW_UNDITHER) {
-    h_copy(pt, 0, ps, 256, len, f_pal);
-#if 1
-    static int dm[] = { 999, 6, 4, 2 };
-    int th = dm[PicoIn.undither & 3];
-    int x, c, r;
-    u32 pt_xm1 = -1; // pt[x-1]
-    for (x = 0; x < len-1; x++) {
-      u32 v = pt[x];
-      for (c = 0, r = pt_xm1 != v; x+c < len-1 && r; c += 2)
-        if ((v != pt[x+c]) | (v == pt[x+c+1])) break;
-      c += (x+c == len-1); // avoid artifact if only 1 px left on line
-      c -= (x+c < len) & (pt[x+c-1] == pt[x+c]); // stop short if new px run
-
-      // potential text if short run and limited by the same px
-      if (c >= 2*th && (x+c == len || c > 2*th || pt_xm1 != pt[x+c])) {
-        pt_xm1 = pt[x+c-1];
-        while (c > 1) {
-          p_05(pt[x], v, pt[x+1]);
-          pt[x+1] = pt[x];
-          c -= 2;
-          x += 2;
-        }
-        x--; // x++ on looping
-        if (c) // fill overhanging v pixel
-          pt[x+1] = pt[x], x++;
-      } else
-        pt_xm1 = pt[x]; // pt[x-1] on next loop run
-    }
-#endif
-  }
   if ((est->rendstatus & PDRAW_SOFTSCALE) && len < 320) {
     if (len >= 240 && len <= 256) {
       pd += (256-len)>>1;
-      if (est->rendstatus & PDRAW_UNDITHER) {
-        switch (PicoIn.filter) {
-        case 3: h_upscale_bl4_4_5(pd, 320, pt, 256, len, f_nop); break;
-        case 2: h_upscale_bl2_4_5(pd, 320, pt, 256, len, f_nop); break;
-        case 1: h_upscale_snn_4_5(pd, 320, pt, 256, len, f_nop); break;
-        default: h_upscale_nn_4_5(pd, 320, pt, 256, len, f_nop); break;
-	}
-      } else {
-        switch (PicoIn.filter) {
-        case 3: h_upscale_bl4_4_5(pd, 320, ps, 256, len, f_pal); break;
-        case 2: h_upscale_bl2_4_5(pd, 320, ps, 256, len, f_pal); break;
-        case 1: h_upscale_snn_4_5(pd, 320, ps, 256, len, f_pal); break;
-        default: h_upscale_nn_4_5(pd, 320, ps, 256, len, f_pal); break;
-	}
+      switch (PicoIn.filter) {
+      case 3: h_upscale_bl4_4_5(pd, 320, ps, 256, len, f_pal); break;
+      case 2: h_upscale_bl2_4_5(pd, 320, ps, 256, len, f_pal); break;
+      case 1: h_upscale_snn_4_5(pd, 320, ps, 256, len, f_pal); break;
+      default: h_upscale_nn_4_5(pd, 320, ps, 256, len, f_pal); break;
       }
+
       if (est->rendstatus & PDRAW_32X_SCALE) { // 32X needs scaled CLUT data
         unsigned char *psc = ps - 256, *pdc = psc;
         rh_upscale_nn_4_5(pdc, 320, psc, 256, 256, f_nop);
       }
     } else if (len == 160) {
-      if (est->rendstatus & PDRAW_UNDITHER) {
-        switch (PicoIn.filter) {
-        case 3:
-        case 2: h_upscale_bl2_1_2(pd, 320, pt, 160, len, f_nop); break;
-        default: h_upscale_nn_1_2(pd, 320, pt, 160, len, f_nop); break;
-        }
-      } else {
-        switch (PicoIn.filter) {
-        case 3:
-        case 2: h_upscale_bl2_1_2(pd, 320, ps, 160, len, f_pal); break;
-        default: h_upscale_nn_1_2(pd, 320, ps, 160, len, f_pal); break;
-        }
+      switch (PicoIn.filter) {
+      case 3:
+      case 2: h_upscale_bl2_1_2(pd, 320, ps, 160, len, f_pal); break;
+      default: h_upscale_nn_1_2(pd, 320, ps, 160, len, f_pal); break;
       }
     }
   } else {
     if ((est->rendstatus & PDRAW_BORDER_32) && len < 320)
       pd += (320-len) / 2;
 #if 1
-    if (est->rendstatus & PDRAW_UNDITHER)
-      h_copy(pd, 320, pt, 320, len, f_nop);
-    else
-      h_copy(pd, 320, ps, 320, len, f_pal);
+    h_copy(pd, 320, ps, 320, len, f_pal);
 #else
     extern void amips_clut(unsigned short *dst, unsigned char *src, unsigned short *pal, int count);
     extern void amips_clut_6bit(unsigned short *dst, unsigned char *src, unsigned short *pal, int count);

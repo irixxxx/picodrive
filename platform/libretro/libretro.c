@@ -1937,6 +1937,19 @@ static void update_variables(bool first_run)
       libretro_update_geometry = true;
 
    var.value = NULL;
+   var.key = "picodrive_undither";
+   if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value) {
+      if (strcmp(var.value, "strong") == 0)
+         PicoIn.undither = 3;
+      else if (strcmp(var.value, "medium") == 0)
+         PicoIn.undither = 2;
+      else if (strcmp(var.value, "weak") == 0)
+         PicoIn.undither = 1;
+      else
+         PicoIn.undither = 0;
+   }
+
+   var.value = NULL;
    var.key = "picodrive_sprlim";
    if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value) {
       if (strcmp(var.value, "enabled") == 0)
