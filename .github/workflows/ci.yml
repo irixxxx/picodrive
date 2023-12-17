@@ -7,14 +7,25 @@ jobs:
     - uses: actions/checkout@v4
       with:
         submodules: true
-    - name: Install dependencies
+    - name: build
       run: |
-        sudo apt-get update -qq
-        sudo apt-get install -y libsdl1.2-dev libasound2-dev libpng-dev libz-dev
-    - name: configure
-      run: DUMP_CONFIG_LOG=1 ./configure
-    - name: make
-      run: make -j$(getconf _NPROCESSORS_ONLN)
+        # cannot run github actions on ubuntu 20, so run a subcontainer for building
+        (echo "apt-get update -qq &&"; \
+         echo "DEBIAN_FRONTEND=noninteractive TZ=Etc/UTC apt-get install -y gcc g++ make git wget zip libfuse2 fuse libsdl1.2-dev libasound2-dev libpng-dev libz-dev &&"; \
+         echo "wget https://github.com/linuxdeploy/linuxdeploy/releases/download/1-alpha-20250213-2/linuxdeploy-x86_64.AppImage &&"; \
+         echo "chmod 755 linuxdeploy-x86_64.AppImage &&"; \
+         echo "git config --global --add safe.directory $PWD &&"; \
+         echo "ver=$(cut -d'"' -f2 platform/common/version.h)-$(git rev-parse --short HEAD) &&"; \
+         echo "./configure && make -j$(getconf _NPROCESSORS_ONLN) &&"; \
+         echo "mkdir -p app/usr/bin && cp -a picodrive platform/linux/skin app/usr/bin &&"; \
+         echo "./linuxdeploy-x86_64.AppImage --appdir=app --desktop-file=platform/linux/data/PicoDrive.desktop --icon-file=platform/opendingux/data/megadrive.png --output=appimage &&"; \
+         echo "mv PicoDrive-x86_64.AppImage PicoDrive-\$ver-x86_64.AppImage") | \
+        docker run -i -v$PWD:/home/picodrive -w/home/picodrive --rm --privileged ubuntu:20.04
+    - name: artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: AppImage-linux
+        path: PicoDrive-*.AppImage
 
   build-libretro:
     runs-on: ubuntu-latest
