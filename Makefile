@@ -128,8 +128,13 @@ ifeq "$(PLATFORM)" "opendingux"
 	mkdir .od_data
 	cp -r platform/opendingux/data/. .od_data
 	cp platform/game_def.cfg .od_data
+ifneq (,$(filter %__MIYOO__, $(CFLAGS)))
+	cp $< .od_data/
+	$(STRIP) .od_data/$<
+else
 	cp $< .od_data/PicoDrive
 	$(STRIP) .od_data/PicoDrive
+endif
 .PHONY: .od_data
 
 ifneq (,$(filter %__DINGUX__, $(CFLAGS)))
