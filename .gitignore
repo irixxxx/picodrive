@@ -24,8 +24,10 @@ mds/
 cfg/
 libs/
 obj/
+.od_data
 .opk_data
 PicoDrive
+PicoDrive*.zip
 PicoDrive.opk
 pico_int_offs.h
 amalgamate
