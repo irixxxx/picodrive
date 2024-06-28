@@ -57,6 +57,9 @@ void drc_cmn_init(void)
 
 void drc_cmn_cleanup(void)
 {
+#ifdef HW_WUP
+  plat_mem_free_for_drc(tcache);
+#endif
 }
 
 // vim:shiftwidth=2:expandtab

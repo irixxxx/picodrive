@@ -60,6 +60,9 @@ void linearFree(void* mem);
 
 static int ctr_svchack_successful = 0;
 
+#elif defined(HW_WUP)
+#include "wiiu/libmemorymapping.h"
+
 #elif defined(VITA)
 #define TARGET_SIZE_2 24 // 2^24 = 16 megabytes
 
@@ -486,15 +489,27 @@ void *plat_mem_get_for_drc(size_t size)
 #if defined VITA
    sceKernelGetMemBlockBase(sceBlock, &mem);
 #elif defined HW_WUP
-   // For WiiU, a slice of RWX memory left from the exploit is used, see:
-   // https://github.com/embercold/pcsx_rearmed/commit/af0453223
-   mem = (void *)(0x01000000 - size);
+   // First try Aroma libmappedmemory...
+   mem = wiiu_alloc_mappedmemory(size, 4096);
+   if (!mem)
+     // Then fall back to RWX memory left from the exploit.
+     // https://github.com/embercold/pcsx_rearmed/commit/af0453223
+     // May want to remove this once Aroma libretro is common.
+     mem = (void *)(0x01000000 - size);
 #elif defined __PS3__
    ps3mapi_process_page_allocate(sysProcessGetPid(), size, PAGE_SIZE_AUTO, 0x2F, 1, page_table);
    mem = (void *)page_table[0];
 #endif
    return mem;
 }
+
+#ifdef HW_WUP
+void plat_mem_free_for_drc(void *mem)
+{
+  wiiu_free_mappedmemory(mem);
+  wiiu_deinit_mappedmemory();
+}
+#endif
 
 int plat_mem_set_exec(void *ptr, size_t size)
 {

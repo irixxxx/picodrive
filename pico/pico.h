@@ -38,6 +38,7 @@ extern void  plat_munmap(void *ptr, size_t size);
 
 // memory for the dynarec; plat_mem_get_for_drc() can just return NULL
 extern void *plat_mem_get_for_drc(size_t size);
+extern void  plat_mem_free_for_drc(void *mem);
 extern int   plat_mem_set_exec(void *ptr, size_t size);
 
 // this one should handle display mode changes

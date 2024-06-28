@@ -290,6 +290,8 @@ else ifeq ($(platform), wiiu)
 	CFLAGS += -DGEKKO -DWIIU -DHW_RVL -DHW_WUP -D__wiiu__ -ffunction-sections -fdata-sections -mcpu=750 -meabi -mhard-float
 	STATIC_LINKING = 1
 	STATIC_LINKING_LINK = 1
+	OBJS += platform/libretro/wiiu/libmemorymapping.o
+	CFLAGS += -isystem $(DEVKITPRO)/wut/include
 
 # Nintendo Switch (libtransistor)
 else ifeq ($(platform), switch)
