@@ -26,6 +26,9 @@ AS ?= as
 CC_AS ?= $(CC)
 CFLAGS ?=
 
+# Include root directory
+CFLAGS += -I$(shell dirname $(realpath $(firstword $(MAKEFILE_LIST))))
+
 #libretro includes
 CFLAGS += -I platform/libretro/libretro-common/include
 CFLAGS += -I platform/libretro/libretro-common/include/compat
