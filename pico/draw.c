@@ -1438,7 +1438,7 @@ static void PicoDoHighPal555_8bit(int sh, int line, struct PicoEState *est)
     // otherwise intensity difference between this and s/h will be wrong
     t = PXCONV(t);
     t |= (t >> 4) & PXMASKL;
-    t |= (~t >> 3) & (PXMASKL<<1);
+    t |= (~t >> 3) & (t>>3|t>>2|t>>1) & (PXMASKL<<1);
     dpal[i] = t;
   }
 
@@ -1448,12 +1448,11 @@ static void PicoDoHighPal555_8bit(int sh, int line, struct PicoEState *est)
     // shadowed pixels
     for (i = 0; i < 0x40 / 2; i++) {
       dpal[0xc0/2 + i] = dpal[i];
-      dpal[0x80/2 + i] = ((dpal[i] >> 1) & PXMASKH) + (PXMASKL<<1);
+      dpal[0x80/2 + i] = ((dpal[i] >> 1) & PXMASKH) + ((t>>3|t>>2|t>>1) & (PXMASKL<<1));
     }
     // hilighted pixels
     for (i = 0; i < 0x40 / 2; i++) {
-      t = dpal[0x80/2 + i] + PXMASKH;
-      t |= (t >> 4) & PXMASKL;
+      t = ((dpal[i] >> 1) & PXMASKH) + PXMASKH + (PXMASKL<<1);
       dpal[0x40/2 + i] = t;
     }
   }
@@ -1476,7 +1475,7 @@ void PicoDoHighPal555(int sh, int line, struct PicoEState *est)
     // otherwise intensity difference between this and s/h will be wrong
     t = PXCONV(t);
     t |= (t >> 4) & PXMASKL;
-    t |= (~t >> 3) & (PXMASKL<<1);
+    t |= (~t >> 3) & (t>>3|t>>2|t>>1) & (PXMASKL<<1);
     dpal[i] = dpal[0xc0/2 + i] = t;
   }
 
@@ -1485,11 +1484,10 @@ void PicoDoHighPal555(int sh, int line, struct PicoEState *est)
   {
     // shadowed pixels
     for (i = 0; i < 0x40 / 2; i++)
-      dpal[0x80/2 + i] = ((dpal[i] >> 1) & PXMASKH) + (PXMASKL<<1);
+      dpal[0x80/2 + i] = ((dpal[i] >> 1) & PXMASKH) + ((t>>3|t>>2|t>>1) & (PXMASKL<<1));
     // hilighted pixels
     for (i = 0; i < 0x40 / 2; i++) {
-      t = dpal[0x80/2 + i] + PXMASKH;
-      t |= (t >> 4) & PXMASKL;
+      t = ((dpal[i] >> 1) & PXMASKH) + PXMASKH + (PXMASKL<<1);
       dpal[0x40/2 + i] = t;
     }
   }
