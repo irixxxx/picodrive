@@ -228,6 +228,14 @@ void pemu_finalize_frame(const char *fps, const char *notice)
 			draw_pico_ptr();
 	}
 
+	// TODO correct ptr position for hard/soft/no scaling?
+	if (PicoIn.AHW & PAHW_SMS) {
+		pico_inp_mode = 2;
+		pico_pen_x = PicoPicohw.pen_pos[0] = PicoIn.mouse[0];
+		pico_pen_y = PicoPicohw.pen_pos[1] = PicoIn.mouse[1];
+		draw_pico_ptr();
+	}
+
 	// draw virtual keyboard on display
 	if (kbd_mode && currentConfig.keyboard == 1 && vkbd)
 		vkbd_draw(vkbd);

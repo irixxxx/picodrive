@@ -503,6 +503,19 @@ static unsigned char z80_sms_in(unsigned short a)
             d = (d & ~0x08) | ((Pico.ms.io_ctl >> 3) & 0x08);
           if (Pico.ms.io_ctl & 0x08) d |= 0x80; // TH as input is unconnected
           if (Pico.ms.io_ctl & 0x02) d |= 0x40;
+          if (1 /*Pico.m.hardware & PMS_HW_LG*/) { // light phaser
+            // TODO mx/my scaling is wrong if V28/V30 mode is used?
+            int mx = PicoIn.mouse[0] * 256*((1LL<<32)/320) >> 32;
+            int my = PicoIn.mouse[1] * 192*((1LL<<32)/224) >> 32;
+            int x = vdp_hcounter(z80_cyclesDone() - Pico.t.z80c_line_start);
+            int dx = 2*x - mx;
+            int dy = Pico.m.scanline - my;
+            d |= 0xc0; // TH input, high if no light detected
+            if (dy > -4 && dy < 4 && dx > -40 && dx < 40) {
+              d &= ~0xc0; // TH falling -> save hcounter
+              Pico.ms.vdp_hlatch = (mx >> 1) + 24;
+            }
+          }
         } else {
           int i; // read kbd 4 bits
           kbd_update();

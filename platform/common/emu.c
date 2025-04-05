@@ -1380,16 +1380,16 @@ void emu_update_input(void)
 			in_update_analog(0, 0, &PicoIn.mouse[0]);
 			in_update_analog(0, 1, &PicoIn.mouse[1]);
 			// scale mouse coordinates from -1024..1024 to 0..screen_w/h
-			PicoIn.mouse[0] = (PicoIn.mouse[0]+1024) * g_screen_width /2048;
-			PicoIn.mouse[1] = (PicoIn.mouse[1]+1024) * g_screen_height/2048;
+			PicoIn.mouse[0] = (PicoIn.mouse[0]+1024) * 320/2048;
+			PicoIn.mouse[1] = (PicoIn.mouse[1]+1024) * 240/2048;
 		} else {
 			int xrel, yrel;
 			in_update_analog(0, 2, &xrel);
 			in_update_analog(0, 3, &yrel);
 			mouse_x += xrel, mouse_y += yrel;
 			// scale mouse coordinates from -1024..1024 to 0..screen_w/h
-			PicoIn.mouse[0] = (mouse_x+1024) * g_screen_width /2048;
-			PicoIn.mouse[1] = (mouse_y+1024) * g_screen_height/2048;
+			PicoIn.mouse[0] = (mouse_x+1024) * 320/2048;
+			PicoIn.mouse[1] = (mouse_y+1024) * 240/2048;
 		}
 
 		in_update_analog(0, -1, &i); // get mouse buttons, bit 2-0 = RML
@@ -1647,7 +1647,7 @@ static void emu_loop_prep(void)
 		PicoIn.opt |= POPT_EN_KBD;
 
 	PicoIn.opt &= ~POPT_EN_MOUSE;
-	if (!(PicoIn.AHW & PAHW_8BIT) && (currentConfig.input_dev0 == PICO_INPUT_MOUSE ||
+	if (/*!(PicoIn.AHW & PAHW_8BIT) &&*/ (currentConfig.input_dev0 == PICO_INPUT_MOUSE ||
 					currentConfig.input_dev1 == PICO_INPUT_MOUSE)) {
 		PicoIn.opt |= POPT_EN_MOUSE;
 		plat_grab_cursor(grab_mode);

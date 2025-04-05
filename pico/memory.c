@@ -469,6 +469,11 @@ static port_read_func *port_readers[3] = {
   read_pad_3btn,
   read_nothing
 };
+static int port_type[3] = {
+  PICO_INPUT_PAD_3BTN,
+  PICO_INPUT_PAD_3BTN,
+  PICO_INPUT_NOTHING
+};
 
 static int padTHLatency[3];
 static int padTLLatency[3];
@@ -477,6 +482,7 @@ static NOINLINE u32 port_read(int i)
 {
   u32 data_reg = PicoMem.ioports[i + 1];
   u32 ctrl_reg = PicoMem.ioports[i + 4] | 0x80;
+  u32 cycles = SekCyclesDone();
   u32 in, out;
 
   out = data_reg & ctrl_reg;
@@ -486,9 +492,9 @@ static NOINLINE u32 port_read(int i)
   // Decap Attack reportedly doesn't work on Nomad but works on most
   // other MD revisions (different pull-up strength?).
   u32 mask = 0x3f;
-  if (CYCLES_GE(SekCyclesDone(), padTHLatency[i])) {
+  if (CYCLES_GE(cycles, padTHLatency[i])) {
     mask |= 0x40;
-    padTHLatency[i] = SekCyclesDone();
+    padTHLatency[i] = cycles;
   }
   out |= mask & ~ctrl_reg;
 
@@ -496,8 +502,8 @@ static NOINLINE u32 port_read(int i)
 
   // Sega mouse uses the TL/TR lines for req/ack. For buggy drivers, make sure
   // there's some delay before ack is sent by taking over the new TL line level
-  if (CYCLES_GE(SekCyclesDone(), padTLLatency[i]))
-    padTLLatency[i] = SekCyclesDone();
+  if (CYCLES_GE(cycles, padTLLatency[i]))
+    padTLLatency[i] = cycles;
   else
     in ^= 0x10; // TL
 
@@ -517,7 +523,7 @@ void PicoSetInputDevice(int port, enum input_device device)
   if (port < 0 || port > 2)
     return;
 
-  if (port == 1 && port_readers[0] == read_pad_team)
+  if (port == 1 && port_type[0] == PICO_INPUT_PAD_TEAM)
     func = read_nothing;
 
   else switch (device) {
@@ -546,6 +552,7 @@ void PicoSetInputDevice(int port, enum input_device device)
     break;
   }
 
+  port_type[port] = device;
   port_readers[port] = func;
 }
 
@@ -571,17 +578,17 @@ NOINLINE void io_ports_write(u32 a, u32 d)
   if (1 <= a && a <= 2)
   {
     Pico.m.padDelay[a - 1] = 0;
-    if (port_readers[a - 1] == read_pad_team) {
+    if (port_type[a - 1] == PICO_INPUT_PAD_TEAM) {
       if (d & 0x40)
         Pico.m.padTHPhase[a - 1] = 0;
       else if ((d^PicoMem.ioports[a]) & 0x60)
         Pico.m.padTHPhase[a - 1]++;
-    } else if (port_readers[0] == read_pad_4way) {
+    } else if (port_type[0] == PICO_INPUT_PAD_4WAY) {
       if (a == 2 && ((PicoMem.ioports[a] ^ d) & 0x70))
         Pico.m.padTHPhase[0] = 0;
       if (a == 1 && !(PicoMem.ioports[a] & 0x40) && (d & 0x40))
         Pico.m.padTHPhase[0]++;
-    } else if (port_readers[a - 1] == read_pad_mouse) {
+    } else if (port_type[a - 1] == PICO_INPUT_MOUSE) {
       if ((d^PicoMem.ioports[a]) & 0x20) {
         if (Pico.m.padTHPhase[a - 1]) { // in readout?
           padTLLatency[a - 1] = SekCyclesDone() + 100;
