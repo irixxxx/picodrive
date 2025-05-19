@@ -44,7 +44,7 @@ endif
 
 ifeq "$(ASAN)" "1"
 	CFLAGS += -fsanitize=address -fsanitize=leak -fsanitize=bounds -fno-omit-frame-pointer -fno-common -O1 -g
-	LDLIBS += -fsanitize=address -fsanitize=leak -fsanitize=bounds -static-libasan
+	LDFLAGS += -fsanitize=address -fsanitize=leak -fsanitize=bounds -static-libasan
 else
 ifeq "$(DEBUG)" "0"
 	CFLAGS += -O3 -DNDEBUG
@@ -173,15 +173,7 @@ use_inputmap ?= 1
 PLATFORM := generic
 endif
 ifeq ("$(PLATFORM)",$(filter "$(PLATFORM)","rpi1" "rpi2"))
-CFLAGS += -DHAVE_GLES -DRASPBERRY
-CFLAGS += -I/opt/vc/include/ -I/opt/vc/include/interface/vcos/pthreads/ -I/opt/vc/include/interface/vmcs_host/linux/
-LDFLAGS += -ldl -lbcm_host -L/opt/vc/lib
-# Stupid renaming occured in latest raspbian...
-ifneq (,$(wildcard /opt/vc/lib/libbrcmGLESv2.so))
-LDFLAGS += -lbrcmEGL -lbrcmGLESv2
-else
-LDFLAGS += -lEGL -lGLESv2 # on raspi GLESv1_CM is included in GLESv2
-endif
+CFLAGS += -DHAVE_GLES -DSDL_BUFFER_3X -DSDL_REDRAW_EVT
 OBJS += platform/linux/emu.o platform/linux/blit.o # FIXME
 OBJS += platform/common/plat_sdl.o platform/common/inputmap_kbd.o
 OBJS += platform/libpicofe/plat_sdl.o platform/libpicofe/in_sdl.o
@@ -189,10 +181,8 @@ OBJS += platform/libpicofe/linux/plat.o
 USE_FRONTEND = 1
 endif
 ifeq "$(PLATFORM)" "generic"
-#ifeq (y,$(shell echo "\#include <GLES/gl.h>" | $(CC) -E -xc - >/dev/null 2>&1 && echo y))
 ifeq "$(HAVE_GLES)" "1"
 CFLAGS += -DHAVE_GLES
-LDFLAGS += -lEGL -lGLESv1_CM
 endif
 CFLAGS += -DSDL_OVERLAY_2X -DSDL_BUFFER_3X -DSDL_REDRAW_EVT
 OBJS += platform/linux/emu.o platform/linux/blit.o # FIXME

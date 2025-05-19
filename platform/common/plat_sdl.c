@@ -216,7 +216,8 @@ static void resize_buffers(void)
 
 void plat_video_set_size(int w, int h)
 {
-	if ((plat_sdl_overlay || plat_sdl_gl_active) && w <= 320 && h <= 240) {
+	if ((plat_sdl_overlay || plat_sdl_gl_active || !plat_sdl_is_windowed()) &&
+			w <= 320 && h <= 240) {
 		// scale to the window, but mind aspect ratio (scaled to 4:3):
 		// w *= win_aspect / 4:3_aspect or h *= 4:3_aspect / win_aspect
 		if (g_menuscreen_w * 3/4 >= g_menuscreen_h)
@@ -235,6 +236,7 @@ void plat_video_set_size(int w, int h)
 				area = (struct area) { g_screen_width,g_screen_height };
 				plat_sdl_change_video_mode(g_screen_width, g_screen_height, 0);
 			}
+			plat_sdl_gl_scaling(currentConfig.filter);
 		}
 		if (plat_sdl_overlay || plat_sdl_gl_active) {
 			// use shadow buffer for overlays
@@ -365,6 +367,7 @@ void plat_video_menu_update(void)
 			w = g_menuscreen_w, h = g_menuscreen_h;
 			plat_sdl_change_video_mode(w, h, -1);
 		} while (w != g_menuscreen_w || h != g_menuscreen_h);
+		plat_sdl_gl_scaling(currentConfig.filter);
 		SDL_WM_GrabInput(SDL_GRAB_OFF);
 	}
 
@@ -381,6 +384,7 @@ void plat_video_menu_enter(int is_rom_loaded)
 {
 	if (SDL_MUSTLOCK(plat_sdl_screen))
 		SDL_UnlockSurface(plat_sdl_screen);
+	plat_sdl_change_video_mode(g_menuscreen_w, g_menuscreen_h, -1);
 }
 
 void plat_video_menu_begin(void)
@@ -433,7 +437,7 @@ void plat_video_loop_prepare(void)
 
 	// take over any new vout settings
 	area = (struct area) { 0, 0 };
-	plat_sdl_change_video_mode(0, 0, 0);
+//	plat_sdl_change_video_mode(0, 0, 0);
 
 	// switch over to scaled output if available, but keep the aspect ratio
 	if (plat_sdl_overlay || plat_sdl_gl_active)
@@ -469,31 +473,12 @@ static void plat_sdl_resize(int w, int h)
 {
 	// take over new settings
 #if defined(__OPENDINGUX__)
-	if (currentConfig.vscaling != EOPT_SCALE_HW && w == 320 && h == 480) {
-		g_menuscreen_h = 240;
-		g_menuscreen_w = 320;
-		resized = 1;
-	} else
+	if (currentConfig.vscaling != EOPT_SCALE_HW && w == 320 && h == 480)
+		h = 240;
 #endif
 	if (g_menuscreen_w != (w & ~3) || g_menuscreen_h != (h & ~3)){
 		g_menuscreen_h = h & ~3;
 		g_menuscreen_w = w & ~3;
-#if 0 // auto resizing may be nice, but creates problems on some SDL platforms
-		if (!plat_sdl_overlay && !plat_sdl_gl_active &&
-		    plat_sdl_is_windowed() && !plat_sdl_is_fullscreen()) {
-			// in SDL window mode, adapt window to integer scaling
-			if (g_menuscreen_w * 3/4 >= g_menuscreen_h)
-				g_menuscreen_w = g_menuscreen_h * 4/3;
-			else
-				g_menuscreen_h = g_menuscreen_w * 3/4;
-			g_menuscreen_w = g_menuscreen_w/320*320;
-			g_menuscreen_h = g_menuscreen_h/240*240;
-			if (g_menuscreen_w == 0) {
-				g_menuscreen_w = 320;
-				g_menuscreen_h = 240;
-			}
-		}
-#endif
 		resized = 1;
 	}
 }
@@ -535,7 +520,7 @@ void plat_init(void)
 	}
 
 	plat_sdl_quit_cb = plat_sdl_quit;
-	plat_sdl_resize_cb = plat_sdl_resize;
+//	plat_sdl_resize_cb = plat_sdl_resize;
 
 	SDL_WM_SetCaption("PicoDrive " VERSION, NULL);
 
