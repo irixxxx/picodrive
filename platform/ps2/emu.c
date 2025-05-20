@@ -375,7 +375,7 @@ static void sound_deinit(void)
 #define is_16bit_mode() \
 	(currentConfig.renderer == RT_16BIT || (PicoIn.AHW & PAHW_32X) || is_bg_frame)
 
-static int vsync_handler(void)
+static int vsync_handler(int cause)
 {
 	iSignalSema(vsync_sema_id);
 	if (sound_stopped)
