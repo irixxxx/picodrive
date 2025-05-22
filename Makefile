@@ -173,7 +173,7 @@ use_inputmap ?= 1
 PLATFORM := generic
 endif
 ifeq ("$(PLATFORM)",$(filter "$(PLATFORM)","rpi1" "rpi2"))
-CFLAGS += -DHAVE_GLES -DSDL_BUFFER_3X -DSDL_REDRAW_EVT
+CFLAGS += -DHAVE_GLES -DEGL_NO_X11 -DSDL_BUFFER_3X -DSDL_REDRAW_EVT
 OBJS += platform/linux/emu.o platform/linux/blit.o # FIXME
 OBJS += platform/common/plat_sdl.o platform/common/inputmap_kbd.o
 OBJS += platform/libpicofe/plat_sdl.o platform/libpicofe/in_sdl.o
@@ -182,7 +182,7 @@ USE_FRONTEND = 1
 endif
 ifeq "$(PLATFORM)" "generic"
 ifeq "$(HAVE_GLES)" "1"
-CFLAGS += -DHAVE_GLES
+CFLAGS += -DHAVE_GLES -DEGL_NO_X11
 endif
 CFLAGS += -DSDL_OVERLAY_2X -DSDL_BUFFER_3X -DSDL_REDRAW_EVT
 OBJS += platform/linux/emu.o platform/linux/blit.o # FIXME
@@ -294,7 +294,7 @@ OBJS += platform/common/main.o platform/common/emu.o platform/common/upscale.o \
 OBJS += platform/libpicofe/input.o platform/libpicofe/readpng.o \
 	platform/libpicofe/fonts.o
 ifneq (,$(filter %HAVE_GLES, $(CFLAGS)))
-OBJS += platform/libpicofe/gl.o platform/libpicofe/gl_platform.o
+OBJS += platform/libpicofe/gl.o platform/libpicofe/gl_platform.o platform/libpicofe/gl_loader.o
 endif
 
 # libpicofe - sound

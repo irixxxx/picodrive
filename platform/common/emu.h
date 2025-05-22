@@ -199,6 +199,7 @@ void plat_finish(void);
 void plat_show_cursor(int on);
 int plat_grab_cursor(int on);
 int plat_has_wm(void);
+void plat_set_window(int w, int h);
 
 /* used before things blocking for a while (these funcs redraw on return) */
 void plat_status_msg_busy_first(const char *msg);

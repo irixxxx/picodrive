@@ -364,6 +364,7 @@ check_gles()
 
   # check for GLES headers
   cat > $TMPC <<EOF
+  #define EGL_NO_X11
   #include <GLES/gl.h>
   #include <EGL/egl.h>
   int main(void) {
@@ -372,16 +373,16 @@ check_gles()
 EOF
   if [ "$VIDEOCORE" = "yes" ] && compile_binary $CFLAGS $LDLIBS -lbrcmEGL -lbrcmGLESv2; then
     have_gles="yes"
-    LDLIBS="$LDLIBS -lbrcmEGL -lbrcmGLESv2" # non-standard names in old raspbian...
+#   LDLIBS="$LDLIBS -lbrcmEGL -lbrcmGLESv2" # non-standard names in old raspbian...
   elif [ "$VIDEOCORE" = "yes" ] && compile_binary $CFLAGS $LDLIBS -lEGL -lGLESv2; then
     have_gles="yes"
-    LDLIBS="$LDLIBS -lEGL -lGLESv2" # on raspi GLESv1_CM is included in GLESv2
+#   LDLIBS="$LDLIBS -lEGL -lGLESv2" # on raspi GLESv1_CM is included in GLESv2
   elif compile_binary $CFLAGS $LDLIBS -lEGL -lGLESv1_CM; then
     have_gles="yes"
-    LDLIBS="$LDLIBS -lEGL -lGLESv1_CM"
+#   LDLIBS="$LDLIBS -lEGL -lGLESv1_CM"
   elif compile_binary $CFLAGS $LDLIBS -lEGL -lGLES_CM; then
     have_gles="yes"
-    LDLIBS="$LDLIBS -lEGL -lGLES_CM"
+#   LDLIBS="$LDLIBS -lEGL -lGLES_CM"
   fi
 }
 

@@ -70,7 +70,8 @@ int plat_target_init(void)
 		FILE *f = fopen("/proc/device-tree/compatible", "r");
 		if (f) {
 			char buf[10];
-			int c = fread(buf, 1, sizeof(buf), f);
+			int c = fread(buf, 1, sizeof(buf)-1, f);
+			buf[c] = '\0';
 			if (strncmp(buf, "gcw,", 4) == 0)
 				plat_device = "gcw0";
 		}
@@ -316,7 +317,7 @@ void plat_video_flip(void)
 	// take over resized settings for the physical SDL surface
 	if (resized && plat_sdl_is_windowed() &&
 	    SDL_WM_GrabInput(SDL_GRAB_ON) == SDL_GRAB_ON) {
-		plat_sdl_change_video_mode(g_menuscreen_w, g_menuscreen_h, -1);
+		plat_sdl_change_video_mode(g_menuscreen_w, g_menuscreen_h, 1);
 		SDL_WM_GrabInput(SDL_GRAB_OFF);
 		g_menuscreen_pp = plat_sdl_screen->pitch/2;
 		resize_buffers();
@@ -365,7 +366,7 @@ void plat_video_menu_update(void)
 		int w, h;
 		do {
 			w = g_menuscreen_w, h = g_menuscreen_h;
-			plat_sdl_change_video_mode(w, h, -1);
+			plat_sdl_change_video_mode(w, h, 1);
 		} while (w != g_menuscreen_w || h != g_menuscreen_h);
 		plat_sdl_gl_scaling(currentConfig.filter);
 		SDL_WM_GrabInput(SDL_GRAB_OFF);
@@ -384,7 +385,7 @@ void plat_video_menu_enter(int is_rom_loaded)
 {
 	if (SDL_MUSTLOCK(plat_sdl_screen))
 		SDL_UnlockSurface(plat_sdl_screen);
-	plat_sdl_change_video_mode(g_menuscreen_w, g_menuscreen_h, -1);
+	plat_sdl_change_video_mode(g_menuscreen_w, g_menuscreen_h, 1);
 }
 
 void plat_video_menu_begin(void)
@@ -467,6 +468,13 @@ int plat_grab_cursor(int on)
 int plat_has_wm(void)
 {
 	return plat_sdl_is_windowed();
+}
+
+void plat_set_window(int w, int h)
+{
+	g_menuscreen_w = w;
+	g_menuscreen_h = h;
+	resized = 1;
 }
 
 static void plat_sdl_resize(int w, int h)

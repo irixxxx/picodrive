@@ -29,8 +29,7 @@ static int mh_windowsize(int id, int keys)
 			if (keys & PBTN_LEFT ) scale--;
 			if (scale <= 0) scale = 1;
 			if (scale > 20) scale = 20;
-			g_menuscreen_w = scale*320;
-			g_menuscreen_h = scale*240;
+			plat_set_window(scale*320, scale*240);
 		}
 		return 0;
 	}
