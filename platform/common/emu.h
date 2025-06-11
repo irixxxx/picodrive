@@ -100,6 +100,8 @@ typedef struct _currentConfig_t {
 	int msh2_khz;
 	int ssh2_khz;
 	int overclock_68k;
+	int overclock_z80;
+	int overclock_mcd;
 	int max_skip;
 } currentConfig_t;
 
