@@ -279,7 +279,7 @@ void Pico32xDrawSync(SH2 *sh2)
   // the fast renderer isn't operating on a line-by-line base
   if (sh2 && !(PicoIn.opt & POPT_ALT_RENDERER)) {
     unsigned int cycle = (sh2 ? sh2_cycles_done_m68k(sh2) : SekCyclesDone());
-    int line = DIVQ32(cycle - Pico.t.m68c_frame_start, 488.5);
+    int line = MULQ(cycle-Pico.t.m68c_frame_start, Pico.t.scanlines_cycle, 16);
 
     if (Pico32x.sync_line < line && line < (Pico.video.reg[1] & 8 ? 240 : 224)) {
       // make sure the MD image is also sync'ed to this line for merging
@@ -336,8 +336,8 @@ static void p32x_end_blank(void)
   if ((Pico32x.vdp_regs[0] & P32XV_Mx) != 0) // no forced blanking
     Pico32x.vdp_regs[0x0a/2] &= ~P32XV_PEN; // no palette access
   if (!(Pico32x.sh2_regs[0] & 0x80)) {
-    // NB must precede VInt per hw manual, min 4 SH-2 cycles to pass Mars Check
-    Pico32x.hint_counter = (int)(-1.5*0x10);
+    // TODO must be early by min 4 SH-2 cycles to pass Mars Check?
+    Pico32x.hint_counter = (int)(-1.5*0x100);
     p32x_schedule_hint(NULL, Pico.t.m68c_aim);
   }
 
@@ -355,9 +355,10 @@ void p32x_schedule_hint(SH2 *sh2, unsigned int m68k_cycles)
   if (!(Pico32x.sh2_regs[0] & 0x80) && (Pico.video.status & PVS_VB2))
     return;
 
-  Pico32x.hint_counter += (Pico32x.sh2_regs[4 / 2] + 1) * (int)(488.5*0x10);
-  after = Pico32x.hint_counter >> 4;
-  Pico32x.hint_counter &= 0xf;
+  Pico32x.hint_counter += MULQ(1LL * (Pico32x.sh2_regs[4 / 2] + 1), Pico.t.cycles_scanline+1, 8);
+  after = Pico32x.hint_counter >> 8;
+  Pico32x.hint_counter &= 0xff;
+
   if (sh2 != NULL)
     p32x_event_schedule_sh2(sh2, P32X_EVENT_HINT, after);
   else
@@ -676,7 +677,9 @@ void PicoFrame32x(void)
 // however using something lower breaks MK2 animations
 void Pico32xSetClocks(int msh2_hz, int ssh2_hz)
 {
-  float m68k_clk = (float)(OSC_NTSC / 7);
+  int mclock = Pico.m.pal ? OSC_PAL : OSC_NTSC;
+  float m68k_clk = (float)mclock * PicoIn.overclockM68k / 100 / 7;
+
   if (msh2_hz > 0) {
     msh2.mult_m68k_to_sh2 = (int)((float)msh2_hz * (1 << CYCLE_MULT_SHIFT) / m68k_clk);
     msh2.mult_sh2_to_m68k = (int)(m68k_clk * (1 << CYCLE_MULT_SHIFT) / (float)msh2_hz);

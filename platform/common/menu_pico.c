@@ -924,6 +924,8 @@ static menu_entry e_menu_adv_options[] =
 	mee_onoff     ("Disable idle loop patching",MA_OPT2_NO_IDLE_LOOPS,PicoIn.opt, POPT_DIS_IDLE_DET),
 	mee_onoff_h   ("Emulate Game Gear LCD",    MA_OPT2_ENABLE_GGLCD  ,PicoIn.opt, POPT_EN_GG_LCD, h_gglcd),
 	mee_range_h   ("Overclock M68k (%)",       MA_OPT2_OVERCLOCK_M68K,currentConfig.overclock_68k, 0, 1000, h_ovrclk),
+	mee_range_h   ("Overclock S68K (%)",       MA_OPT2_OVERCLOCK_M68K,currentConfig.overclock_mcd, 0, 1000, h_ovrclk),
+	mee_range_h   ("Overclock Z80 (%)",        MA_OPT2_OVERCLOCK_M68K,currentConfig.overclock_z80, 0, 1000, h_ovrclk),
 	mee_onoff_h   ("Enable dynarecs",          MA_OPT2_DYNARECS,      PicoIn.opt, POPT_EN_DRC, h_dynarec),
 	mee_cust_h    ("Master SH2 cycles",        MA_32XOPT_MSH2_CYCLES, mh_opt_sh2cycles, mgn_opt_sh2cycles, h_sh2cycles),
 	mee_cust_h    ("Slave SH2 cycles",         MA_32XOPT_SSH2_CYCLES, mh_opt_sh2cycles, mgn_opt_sh2cycles, h_sh2cycles),

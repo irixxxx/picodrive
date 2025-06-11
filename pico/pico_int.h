@@ -210,8 +210,8 @@ extern struct DrZ80 drZ80;
   (Pico.t.z80c_aim - z80_cyclesLeft)
 
 // 68k clock = OSC/7, z80 clock = OSC/15, 68k:z80 ratio = 7/15 = 3822.9/8192
-#define cycles_68k_to_z80(x) ((x) * 3823 >> 13)
-#define cycles_z80_to_68k(x) ((x) * 8777 >> 12)
+#define cycles_68k_to_z80(x) MULQ(1LL * (x), Pico.t.z80_cycle_mult, 16)
+#define cycles_z80_to_68k(x) MULQ(1LL * (x), Pico.t.z80_cycle_div,  16)
 
 // ----------------------- SH2 CPU -----------------------
 
@@ -455,7 +455,8 @@ struct PicoTiming
   unsigned int m68c_aim;
   unsigned int m68c_frame_start;        // m68k cycles
   unsigned int m68c_line_start;
-  int refresh_delay;
+  int refresh_delay;                    // mantissa of refresh delay (Q8)
+  int cycles_line;                      // #cycles/current scanline (Q16)
 
   unsigned int z80c_cnt;                // z80 cycles done (this frame)
   unsigned int z80c_aim;
@@ -470,6 +471,13 @@ struct PicoTiming
   int ym2612_decay;
 
   int vcnt_wrap, vcnt_adj;
+
+  int cycles_scanline;                  // cycles per scanline (Q16)
+  int scanlines_cycle;                  // scanlines per cycle (Q16)
+  int z80_cycle_mult;                   // z80 cycles per 68k cycle (Q16)
+  int z80_cycle_div;                    // 68k cycles per z80 cycle (Q16)
+  int z80_cycles_scanline;              // z80 scanlines per cycle (Q16)
+  int z80_scanlines_cycle;              // z80 scanlines per cycle (Q16)
 };
 
 struct PicoSound

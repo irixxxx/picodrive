@@ -7,7 +7,7 @@
  * See COPYING file in the top-level directory.
  */
 
-#define CYCLES_M68K_LINE     488 // suitable for both PAL/NTSC
+#define CYCLES_M68K_LINE     (Pico.t.cycles_line >> 16)
 #define CYCLES_M68K_VINT_LAG 112
 
 // CPUS_RUN
@@ -125,7 +125,12 @@ static void do_timing_hacks_start(struct PicoVideo *pv)
   // XXX how to handle Z80 bus cycle stealing during DMA correctly?
   if ((Pico.t.z80_buscycles -= cycles<<4) < 0)
     Pico.t.z80_buscycles = 0;
-  Pico.t.m68c_aim += Pico.m.scanline&1; // add 1 every 2 lines for 488.5 cycles
+}
+
+static void next_line(void)
+{
+  Pico.t.cycles_line &= 0xffff;
+  Pico.t.cycles_line += Pico.t.cycles_scanline;
 }
 
 static int PicoFrameHints(void)
@@ -139,6 +144,7 @@ static int PicoFrameHints(void)
   skip = PicoIn.skipFrame;
 
   Pico.t.m68c_frame_start = Pico.t.m68c_aim;
+  Pico.t.cycles_line = 0;
   PsndStartFrame();
   PicoPortUpdate();
 
@@ -154,6 +160,7 @@ static int PicoFrameHints(void)
 
     Pico.m.scanline = y;
     pv->v_counter = PicoVideoGetV(y, 0);
+    next_line();
 
     PicoPortTick();
 
@@ -210,6 +217,7 @@ static int PicoFrameHints(void)
     pv->status &= ~PVS_ACTIVE;
   Pico.m.scanline = y;
   pv->v_counter = PicoVideoGetV(y, 0);
+  next_line();
 
   memcpy(PicoIn.padInt, PicoIn.pad, sizeof(PicoIn.padInt));
   PicoPortTick();
@@ -282,6 +290,7 @@ static int PicoFrameHints(void)
   {
     Pico.m.scanline = y;
     pv->v_counter = PicoVideoGetV(y, 1);
+    next_line();
 
     PicoPortTick();
 
@@ -301,16 +310,6 @@ static int PicoFrameHints(void)
     pevt_log_m68k_o(EVT_NEXT_LINE);
   }
 
-  if (unlikely(PicoIn.overclockM68k)) {
-    unsigned int l = PicoIn.overclockM68k * lines / 100;
-    while (l-- > 0) {
-      Pico.t.m68c_cnt -= CYCLES_M68K_LINE;
-      do_timing_hacks_start(pv);
-      SekSyncM68k(0);
-      do_timing_hacks_end(pv);
-    }
-  }
-
   // === VBLANK last line ===
   pv->status &= ~(SR_VB | PVS_VB2);
   pv->status |= ((pv->reg[1] >> 3) ^ SR_VB) & SR_VB; // forced blanking
@@ -318,6 +317,7 @@ static int PicoFrameHints(void)
   // last scanline
   Pico.m.scanline = y++;
   pv->v_counter = 0xff;
+  next_line();
 
   PicoPortTick();
 

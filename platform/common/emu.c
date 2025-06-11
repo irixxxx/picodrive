@@ -742,7 +742,9 @@ int emu_read_config(const char *rom_fname, int no_defaults)
 	}
 
 	pemu_validate_config();
-	PicoIn.overclockM68k = currentConfig.overclock_68k;
+	PicoIn.overclockM68k = currentConfig.overclock_68k + 100;
+	PicoIn.overclockS68k = currentConfig.overclock_mcd + 100;
+	PicoIn.overclockZ80 = currentConfig.overclock_z80 + 100;
 	PicoIn.gunx = currentConfig.gunx;
 	PicoIn.guny = currentConfig.guny;
 

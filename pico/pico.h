@@ -124,6 +124,8 @@ typedef struct PicoInterface
 
 	unsigned short quirks;         // game-specific quirks: PQUIRK_*
 	unsigned short overclockM68k;  // overclock the emulated 68k, in %
+	unsigned short overclockS68k;  // overclock the emulated 68k, in %
+	unsigned short overclockZ80;   // overclock the emulated z80
 
 	unsigned short filter;         // softscale filter type
 

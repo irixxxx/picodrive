@@ -244,6 +244,17 @@ void PicoLoopPrepare(void)
     Pico.t.vcnt_adj = 6;
   }
 
+  // 68k cycles per scanline. A scanline always has 3420 master clocks
+  // TODO it should be 3420 cycles. use 3419.5 since that keeps the old timing
+  Pico.t.cycles_scanline = 0x10000LL * 3419.5 * PicoIn.overclockM68k / 100 / 7;
+  Pico.t.scanlines_cycle = 0x10000LL * 7 * 100 / PicoIn.overclockM68k / 3419.5;
+  // z80 cycles per 68k cycle. Fixed divider of 7/15
+  Pico.t.z80_cycle_mult = 0x10000LL * 7 * PicoIn.overclockZ80 / PicoIn.overclockM68k / 15;
+  Pico.t.z80_cycle_div = 0x10000LL * 15 * PicoIn.overclockM68k / PicoIn.overclockZ80 / 7;
+  // z80 cycles per scanline
+  Pico.t.z80_scanlines_cycle = 0x10000LL * 15 * 100 / PicoIn.overclockZ80 / 3420;
+  Pico.t.z80_cycles_scanline = 0x10000LL * 3420 * PicoIn.overclockZ80 / 100 / 15;
+
   Pico.t.m68c_line_start = Pico.t.m68c_aim; // for VDP slot calculation
   PicoVideoFIFOMode(Pico.video.reg[1]&0x40, Pico.video.reg[12]&1);
 
@@ -273,8 +284,8 @@ PICO_INTERNAL void PicoSyncZ80(unsigned int m68k_cycles_done)
   pprof_start(z80);
 
   elprintf(EL_BUSREQ, "z80 sync %i (%u|%u -> %u|%u)", cnt,
-    Pico.t.z80c_cnt, Pico.t.z80c_cnt * 15 / 7 / 488,
-    Pico.t.z80c_aim, Pico.t.z80c_aim * 15 / 7 / 488);
+    Pico.t.z80c_cnt, MULQ(Pico.t.z80c_cnt, Pico.t.z80_scanlines_cycle, 16),
+    Pico.t.z80c_aim, MULQ(Pico.t.z80c_aim, Pico.t.z80_scanlines_cycle, 16));
 
   if (cnt > 0)
     Pico.t.z80c_cnt += z80_run(cnt);

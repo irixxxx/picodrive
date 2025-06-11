@@ -1282,22 +1282,8 @@ static int get_scanline(int is_from_z80)
   if (is_from_z80) {
     // ugh... compute by dividing cycles since frame start by cycles per line
     // need some fractional resolution here, else there may be an extra line
-    int cycles_line = cycles_68k_to_z80((unsigned)(488.5*256))+1; // cycles per line, Q8
-    int cycles_z80 = (z80_cyclesLeft<0 ? Pico.t.z80c_aim:z80_cyclesDone())<<8;
-    int cycles = cycles_line * Pico.t.z80_scanline;
-    // approximation by multiplying with inverse
-    if (cycles_z80 - cycles >= 4*cycles_line) {
-      // compute 1/cycles_line, storing the result to avoid future dividing
-      static int cycles_line_o, cycles_line_i;
-      if (cycles_line_o != cycles_line)
-        { cycles_line_o = cycles_line, cycles_line_i = (1<<22) / cycles_line; }
-      // compute lines = diff/cycles_line = diff*(1/cycles_line)
-      int lines = ((cycles_z80 - cycles) * cycles_line_i) >> 22;
-      Pico.t.z80_scanline += lines, cycles += cycles_line * lines;
-    }
-    // handle any rounding leftover
-    while (cycles_z80 - cycles >= cycles_line)
-      Pico.t.z80_scanline ++, cycles += cycles_line;
+    int cycles_z80 = z80_cyclesLeft<0 ? Pico.t.z80c_aim : z80_cyclesDone();
+    Pico.t.z80_scanline = MULQ(1LL*cycles_z80, Pico.t.z80_scanlines_cycle+1, 16);
     return Pico.t.z80_scanline;
   }
 
