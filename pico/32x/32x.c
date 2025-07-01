@@ -183,7 +183,7 @@ void p32x_reset_sh2s(void)
       idl_src += 0x2000000;
       idl_dst += 0x6000000;
       while (idl_size >= 4) {
-        p32x_sh2_write32(idl_dst, p32x_sh2_read32(idl_src, &msh2), &msh2);
+        p32x_soc_write32(idl_dst, p32x_soc_read32(idl_src, &msh2), &msh2);
         idl_src += 4, idl_dst += 4, idl_size -= 4;
       }
 

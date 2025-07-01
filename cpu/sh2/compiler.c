@@ -2693,9 +2693,9 @@ static int emit_get_rom_data(SH2 *sh2, sh2_reg_e r, s32 offs, int size, u32 *val
     // check if rom is memory mapped (not bank switched), and address is in rom
     if (p32x_sh2_mem_is_rom(a, sh2) && p32x_sh2_get_mem_ptr(a, &mask, sh2) == sh2->p_rom) {
       switch (size & MF_SIZEMASK) {
-      case 0:   *val = (s8)p32x_sh2_read8(a, sh2s);   break;  // 8
-      case 1:   *val = (s16)p32x_sh2_read16(a, sh2s); break;  // 16
-      case 2:   *val = p32x_sh2_read32(a, sh2s);      break;  // 32
+      case 0:   *val = (s8)p32x_soc_read8(a, sh2s);   break;  // 8
+      case 1:   *val = (s16)p32x_soc_read16(a, sh2s); break;  // 16
+      case 2:   *val = p32x_soc_read32(a, sh2s);      break;  // 32
       }
       return 1;
     }
@@ -5284,6 +5284,10 @@ static void sh2_generate_utils(void)
   EMITH_HINT_COND(DCOND_CS);
   emith_sh2_rcall(arg0, arg1, arg2, arg3);
   EMITH_JMP_START(DCOND_CS);
+  sr = rcache_get_reg(SHR_SR, RC_GR_RMW, NULL);
+  emith_lsr(arg1, arg3, 28);
+  emith_sub_r_r_r_lsl(sr, sr, arg1, 12);
+  emith_eor_r_r_lsl(arg3, arg1, 28);
   emith_and_r_r(arg0, arg3);
   emit_le_ptr8(arg0);
   emith_read8s_r_r_r(RET_REG, arg2, arg0);
@@ -5291,6 +5295,7 @@ static void sh2_generate_utils(void)
   EMITH_JMP_END(DCOND_CS);
   emith_move_r_r_ptr(arg1, CONTEXT_REG);
   emith_abijump_reg(arg2);
+  rcache_flush();
   emith_flush();
 
   // d = sh2_drc_read16(u32 a)
@@ -5299,12 +5304,17 @@ static void sh2_generate_utils(void)
   EMITH_HINT_COND(DCOND_CS);
   emith_sh2_rcall(arg0, arg1, arg2, arg3);
   EMITH_JMP_START(DCOND_CS);
+  sr = rcache_get_reg(SHR_SR, RC_GR_RMW, NULL);
+  emith_lsr(arg1, arg3, 28);
+  emith_sub_r_r_r_lsl(sr, sr, arg1, 12);
+  emith_eor_r_r_lsl(arg3, arg1, 28);
   emith_and_r_r(arg0, arg3);
   emith_read16s_r_r_r(RET_REG, arg2, arg0);
   emith_ret();
   EMITH_JMP_END(DCOND_CS);
   emith_move_r_r_ptr(arg1, CONTEXT_REG);
   emith_abijump_reg(arg2);
+  rcache_flush();
   emith_flush();
 
   // d = sh2_drc_read32(u32 a)
@@ -5313,6 +5323,10 @@ static void sh2_generate_utils(void)
   EMITH_HINT_COND(DCOND_CS);
   emith_sh2_rcall(arg0, arg1, arg2, arg3);
   EMITH_JMP_START(DCOND_CS);
+  sr = rcache_get_reg(SHR_SR, RC_GR_RMW, NULL);
+  emith_lsr(arg1, arg3, 28);
+  emith_sub_r_r_r_lsl(sr, sr, arg1, 12);
+  emith_eor_r_r_lsl(arg3, arg1, 28);
   emith_and_r_r(arg0, arg3);
   emith_read_r_r_r(RET_REG, arg2, arg0);
   emit_le_swap(RET_REG);
@@ -5320,6 +5334,7 @@ static void sh2_generate_utils(void)
   EMITH_JMP_END(DCOND_CS);
   emith_move_r_r_ptr(arg1, CONTEXT_REG);
   emith_abijump_reg(arg2);
+  rcache_flush();
   emith_flush();
 
   // d = sh2_drc_read8_poll(u32 a)
@@ -5331,6 +5346,10 @@ static void sh2_generate_utils(void)
   emith_move_r_r_ptr(arg1, CONTEXT_REG);
   emith_abijump_reg(arg2);
   EMITH_SJMP_END(DCOND_CC);
+  sr = rcache_get_reg(SHR_SR, RC_GR_RMW, NULL);
+  emith_lsr(arg1, arg3, 28);
+  emith_sub_r_r_r_lsl(sr, sr, arg1, 12);
+  emith_eor_r_r_lsl(arg3, arg1, 28);
   emith_and_r_r_r(arg1, arg0, arg3);
   emit_le_ptr8(arg1);
   emith_read8s_r_r_r(arg1, arg2, arg1);
@@ -5338,6 +5357,7 @@ static void sh2_generate_utils(void)
   emith_move_r_r_ptr(arg2, CONTEXT_REG);
   emith_abicall(p32x_sh2_poll_memory8);
   emith_pop_and_ret(arg1);
+  rcache_flush();
   emith_flush();
 
   // d = sh2_drc_read16_poll(u32 a)
@@ -5349,12 +5369,17 @@ static void sh2_generate_utils(void)
   emith_move_r_r_ptr(arg1, CONTEXT_REG);
   emith_abijump_reg(arg2);
   EMITH_SJMP_END(DCOND_CC);
+  sr = rcache_get_reg(SHR_SR, RC_GR_RMW, NULL);
+  emith_lsr(arg1, arg3, 28);
+  emith_sub_r_r_r_lsl(sr, sr, arg1, 12);
+  emith_eor_r_r_lsl(arg3, arg1, 28);
   emith_and_r_r_r(arg1, arg0, arg3);
   emith_read16s_r_r_r(arg1, arg2, arg1);
   emith_push_ret(arg1);
   emith_move_r_r_ptr(arg2, CONTEXT_REG);
   emith_abicall(p32x_sh2_poll_memory16);
   emith_pop_and_ret(arg1);
+  rcache_flush();
   emith_flush();
 
   // d = sh2_drc_read32_poll(u32 a)
@@ -5366,6 +5391,10 @@ static void sh2_generate_utils(void)
   emith_move_r_r_ptr(arg1, CONTEXT_REG);
   emith_abijump_reg(arg2);
   EMITH_SJMP_END(DCOND_CC);
+  sr = rcache_get_reg(SHR_SR, RC_GR_RMW, NULL);
+  emith_lsr(arg1, arg3, 28);
+  emith_sub_r_r_r_lsl(sr, sr, arg1, 12);
+  emith_eor_r_r_lsl(arg3, arg1, 28);
   emith_and_r_r_r(arg1, arg0, arg3);
   emith_read_r_r_r(arg1, arg2, arg1);
   emit_le_swap(arg1);
@@ -5373,6 +5402,7 @@ static void sh2_generate_utils(void)
   emith_move_r_r_ptr(arg2, CONTEXT_REG);
   emith_abicall(p32x_sh2_poll_memory32);
   emith_pop_and_ret(arg1);
+  rcache_flush();
   emith_flush();
 
   // sh2_drc_exit(u32 pc)
@@ -5838,23 +5868,23 @@ static void state_dump(void)
   SH2_DUMP(&sh2s[0], "master");
   printf("VBR msh2: %lx\n", (ulong)sh2s[0].vbr);
   for (i = 0; i < 0x60; i++) {
-    printf("%08lx ",(ulong)p32x_sh2_read32(sh2s[0].vbr + i*4, &sh2s[0]));
+    printf("%08lx ",(ulong)p32x_soc_read32(sh2s[0].vbr + i*4, &sh2s[0]));
     if ((i+1) % 8 == 0) printf("\n");
   }
   printf("stack msh2: %lx\n", (ulong)sh2s[0].r[15]);
   for (i = -0x30; i < 0x30; i++) {
-    printf("%08lx ",(ulong)p32x_sh2_read32(sh2s[0].r[15] + i*4, &sh2s[0]));
+    printf("%08lx ",(ulong)p32x_soc_read32(sh2s[0].r[15] + i*4, &sh2s[0]));
     if ((i+1) % 8 == 0) printf("\n");
   }
   SH2_DUMP(&sh2s[1], "slave");
   printf("VBR ssh2: %lx\n", (ulong)sh2s[1].vbr);
   for (i = 0; i < 0x60; i++) {
-    printf("%08lx ",(ulong)p32x_sh2_read32(sh2s[1].vbr + i*4, &sh2s[1]));
+    printf("%08lx ",(ulong)p32x_soc_read32(sh2s[1].vbr + i*4, &sh2s[1]));
     if ((i+1) % 8 == 0) printf("\n");
   }
   printf("stack ssh2: %lx\n", (ulong)sh2s[1].r[15]);
   for (i = -0x30; i < 0x30; i++) {
-    printf("%08lx ",(ulong)p32x_sh2_read32(sh2s[1].r[15] + i*4, &sh2s[1]));
+    printf("%08lx ",(ulong)p32x_soc_read32(sh2s[1].r[15] + i*4, &sh2s[1]));
     if ((i+1) % 8 == 0) printf("\n");
   }
 #endif
