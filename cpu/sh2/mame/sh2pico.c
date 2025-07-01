@@ -17,14 +17,14 @@ typedef u16 UINT16;
 typedef u8  UINT8;
 #endif
 
-#ifdef DRC_SH2
+#if 1//def DRC_SH2
 
 // this nasty conversion is needed for drc-expecting memhandlers
 #define MAKE_READFUNC(name, cname) \
 static __inline unsigned int name(SH2 *sh2, unsigned int a) \
 { \
 	unsigned int ret; \
-	sh2->sr |= (sh2->icount << 12) | (sh2->no_polling); \
+	sh2->sr = (sh2->sr & 0x3f3) | (sh2->icount << 12) | (sh2->no_polling); \
 	ret = cname(a, sh2); \
 	sh2->icount = (signed int)sh2->sr >> 12; \
 	sh2->no_polling = (sh2->sr & SH2_NO_POLLING); \
@@ -35,7 +35,7 @@ static __inline unsigned int name(SH2 *sh2, unsigned int a) \
 #define MAKE_WRITEFUNC(name, cname) \
 static __inline void name(SH2 *sh2, unsigned int a, unsigned int d) \
 { \
-	sh2->sr |= (sh2->icount << 12) | (sh2->no_polling); \
+	sh2->sr = (sh2->sr & 0x3f3) | (sh2->icount << 12) | (sh2->no_polling); \
 	cname(a, d, sh2); \
 	sh2->icount = (signed int)sh2->sr >> 12; \
 	sh2->no_polling = (sh2->sr & SH2_NO_POLLING); \

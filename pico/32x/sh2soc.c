@@ -92,26 +92,26 @@ static void dmac_transfer_one(SH2 *sh2, struct dma_chan *chan)
   size = (chan->chcr >> 10) & 3;
   switch (size) {
   case 0:
-    d = p32x_sh2_read8(chan->sar, sh2);
-    p32x_sh2_write8(chan->dar, d, sh2);
+    d = p32x_soc_read8(chan->sar, sh2);
+    p32x_soc_write8(chan->dar, d, sh2);
     break;
   case 1:
-    d = p32x_sh2_read16(chan->sar, sh2);
-    p32x_sh2_write16(chan->dar, d, sh2);
+    d = p32x_soc_read16(chan->sar, sh2);
+    p32x_soc_write16(chan->dar, d, sh2);
     break;
   case 2:
-    d = p32x_sh2_read32(chan->sar, sh2);
-    p32x_sh2_write32(chan->dar, d, sh2);
+    d = p32x_soc_read32(chan->sar, sh2);
+    p32x_soc_write32(chan->dar, d, sh2);
     break;
   case 3:
-    d = p32x_sh2_read32(chan->sar + 0x00, sh2);
-    p32x_sh2_write32(chan->dar + 0x00, d, sh2);
-    d = p32x_sh2_read32(chan->sar + 0x04, sh2);
-    p32x_sh2_write32(chan->dar + 0x04, d, sh2);
-    d = p32x_sh2_read32(chan->sar + 0x08, sh2);
-    p32x_sh2_write32(chan->dar + 0x08, d, sh2);
-    d = p32x_sh2_read32(chan->sar + 0x0c, sh2);
-    p32x_sh2_write32(chan->dar + 0x0c, d, sh2);
+    d = p32x_soc_read32(chan->sar + 0x00, sh2);
+    p32x_soc_write32(chan->dar + 0x00, d, sh2);
+    d = p32x_soc_read32(chan->sar + 0x04, sh2);
+    p32x_soc_write32(chan->dar + 0x04, d, sh2);
+    d = p32x_soc_read32(chan->sar + 0x08, sh2);
+    p32x_soc_write32(chan->dar + 0x08, d, sh2);
+    d = p32x_soc_read32(chan->sar + 0x0c, sh2);
+    p32x_soc_write32(chan->dar + 0x0c, d, sh2);
     chan->sar += 16; // always?
     if (chan->chcr & (1 << 15))
       chan->dar -= 16;
@@ -145,7 +145,7 @@ static void dmac_memcpy(struct dma_chan *chan, SH2 *sh2)
   if (size == 3) size = 2;  // 4-word xfer mode still counts in words
   // XXX check TCR being a multiple of 4 in 4-word xfer mode?
   // XXX check alignment of sar/dar, generating a bus error if unaligned?
-  count = p32x_sh2_memcpy(chan->dar, chan->sar, chan->tcr, 1 << size, sh2);
+  count = p32x_soc_memcpy(chan->dar, chan->sar, chan->tcr, 1 << size, sh2);
 
   chan->sar += count << size;
   chan->dar += count << size;
@@ -564,7 +564,7 @@ static void dreq0_do(SH2 *sh2, struct dma_chan *chan)
   for (i = 0; i < Pico32x.dmac0_fifo_ptr && chan->tcr > 0; i++) {
     elprintf_sh2(sh2, EL_32XP, "dreq0 [%08x] %04x, dreq_len %d",
       chan->dar, Pico32x.dmac_fifo[i], dreqlen);
-    p32x_sh2_write16(chan->dar, Pico32x.dmac_fifo[i], sh2);
+    p32x_soc_write16(chan->dar, Pico32x.dmac_fifo[i], sh2);
     chan->dar += 2;
     chan->tcr--;
   }

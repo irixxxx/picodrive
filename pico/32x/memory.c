@@ -34,7 +34,7 @@
  * vdp reg  0004100-00041ff    5    5
  * vdp pal  0004200-00043ff    5    5
  * cart     2000000-23fffff     6-15
- * dram/fb  4000000-401ffff 5-12  1-3
+ * dram/fb  4000000-401ffff 5-12  3-5
  * fb ovr   4020000-403ffff
  * sdram    6000000-603ffff   12    2  (cycles)
  * d.a.    c0000000-?
@@ -1722,6 +1722,10 @@ extern void REGPARM(3) sh2_write8_da(u32 a, u32 d, SH2 *sh2);
 #else
 static void REGPARM(3) sh2_write8_dram(u32 a, u32 d, SH2 *sh2)
 {
+  DRC_SAVE_SR(sh2);
+  sh2->sr -= 4<<12;
+  DRC_RESTORE_SR(sh2);
+
   sh2_write8_dramN(sh2->p_dram, a, d);
 }
 
@@ -1798,6 +1802,10 @@ extern void REGPARM(3) sh2_write16_da(u32 a, u32 d, SH2 *sh2);
 #else
 static void REGPARM(3) sh2_write16_dram(u32 a, u32 d, SH2 *sh2)
 {
+  DRC_SAVE_SR(sh2);
+  sh2->sr -= 4<<12;
+  DRC_RESTORE_SR(sh2);
+
   sh2_write16_dramN(sh2->p_dram, a, d);
 }
 
@@ -1873,6 +1881,10 @@ extern void REGPARM(3) sh2_write32_da(u32 a, u32 d, SH2 *sh2);
 #else
 static void REGPARM(3) sh2_write32_dram(u32 a, u32 d, SH2 *sh2)
 {
+  DRC_SAVE_SR(sh2);
+  sh2->sr -= 8<<12;
+  DRC_RESTORE_SR(sh2);
+
   sh2_write32_dramN(sh2->p_dram, a, d);
 }
 
@@ -1918,7 +1930,8 @@ typedef void REGPARM(3) (sh2_write_handler)(u32 a, u32 d, SH2 *sh2);
 #define SH2MAP_ADDR2OFFS_W(a) \
   ((u32)(a) >> SH2_WRITE_SHIFT)
 
-u32 REGPARM(2) p32x_sh2_read8(u32 a, SH2 *sh2)
+// soc bus access by components other than the SH2, no accounting for bus cycles
+u32 p32x_soc_read8(u32 a, SH2 *sh2)
 {
   const sh2_memmap *sh2_map = sh2->read8_map;
   uptr p;
@@ -1926,8 +1939,52 @@ u32 REGPARM(2) p32x_sh2_read8(u32 a, SH2 *sh2)
   sh2_map += SH2MAP_ADDR2OFFS_R(a);
   p = sh2_map->addr;
   if (!map_flag_set(p))
-    return *(s8 *)((p << 1) + MEM_BE2(a & sh2_map->mask));
+    return *(s8 *)((p << 1) + MEM_BE2(a & sh2_map->mask & ~(0xf<<28)));
   else
+    return ((sh2_read_handler *)(p << 1))(a, sh2);
+}
+
+u32 p32x_soc_read16(u32 a, SH2 *sh2)
+{
+  const sh2_memmap *sh2_map = sh2->read16_map;
+  uptr p;
+
+  sh2_map += SH2MAP_ADDR2OFFS_R(a);
+  p = sh2_map->addr;
+  if (!map_flag_set(p))
+    return *(s16 *)((p << 1) + (a & sh2_map->mask & ~(0xf<<28)));
+  else
+    return ((sh2_read_handler *)(p << 1))(a, sh2);
+}
+
+u32 p32x_soc_read32(u32 a, SH2 *sh2)
+{
+  const sh2_memmap *sh2_map = sh2->read32_map;
+  uptr p;
+
+  sh2_map += SH2MAP_ADDR2OFFS_R(a);
+  p = sh2_map->addr;
+  if (!map_flag_set(p)) {
+    u32 *pd = (u32 *)((p << 1) + (a & sh2_map->mask & ~(0xf<<28)));
+    return CPU_BE2(*pd);
+  } else
+    return ((sh2_read_handler *)(p << 1))(a, sh2);
+}
+
+// SH2 bus access handlers, with cycle accounting for bus wait cycles
+u32 REGPARM(2) p32x_sh2_read8(u32 a, SH2 *sh2)
+{
+  const sh2_memmap *sh2_map = sh2->read8_map;
+  uptr p;
+
+  sh2_map += SH2MAP_ADDR2OFFS_R(a);
+  p = sh2_map->addr;
+  if (!map_flag_set(p)) {
+    DRC_SAVE_SR(sh2);
+    sh2->sr -= (sh2_map->mask>>28) << 12;
+    DRC_RESTORE_SR(sh2);
+    return *(s8 *)((p << 1) + MEM_BE2(a & sh2_map->mask & ~(0xf<<28)));
+  } else
     return ((sh2_read_handler *)(p << 1))(a, sh2);
 }
 
@@ -1938,9 +1995,12 @@ u32 REGPARM(2) p32x_sh2_read16(u32 a, SH2 *sh2)
 
   sh2_map += SH2MAP_ADDR2OFFS_R(a);
   p = sh2_map->addr;
-  if (!map_flag_set(p))
-    return *(s16 *)((p << 1) + (a & sh2_map->mask));
-  else
+  if (!map_flag_set(p)) {
+    DRC_SAVE_SR(sh2);
+    sh2->sr -= (sh2_map->mask>>28) << 12;
+    DRC_RESTORE_SR(sh2);
+    return *(s16 *)((p << 1) + (a & sh2_map->mask & ~(0xf<<28)));
+  } else
     return ((sh2_read_handler *)(p << 1))(a, sh2);
 }
 
@@ -1952,13 +2012,16 @@ u32 REGPARM(2) p32x_sh2_read32(u32 a, SH2 *sh2)
   sh2_map += SH2MAP_ADDR2OFFS_R(a);
   p = sh2_map->addr;
   if (!map_flag_set(p)) {
-    u32 *pd = (u32 *)((p << 1) + (a & sh2_map->mask));
+    u32 *pd = (u32 *)((p << 1) + (a & sh2_map->mask & ~(0xf<<28)));
+    DRC_SAVE_SR(sh2);
+    sh2->sr -= (sh2_map->mask>>28) << 12;
+    DRC_RESTORE_SR(sh2);
     return CPU_BE2(*pd);
   } else
     return ((sh2_read_handler *)(p << 1))(a, sh2);
 }
 
-void REGPARM(3) p32x_sh2_write8(u32 a, u32 d, SH2 *sh2)
+void REGPARM(3) (p32x_sh2_write8)(u32 a, u32 d, SH2 *sh2)
 {
   const void **sh2_wmap = sh2->write8_tab;
   sh2_write_handler *wh;
@@ -1967,7 +2030,7 @@ void REGPARM(3) p32x_sh2_write8(u32 a, u32 d, SH2 *sh2)
   wh(a, d, sh2);
 }
 
-void REGPARM(3) p32x_sh2_write16(u32 a, u32 d, SH2 *sh2)
+void REGPARM(3) (p32x_sh2_write16)(u32 a, u32 d, SH2 *sh2)
 {
   const void **sh2_wmap = sh2->write16_tab;
   sh2_write_handler *wh;
@@ -1976,7 +2039,7 @@ void REGPARM(3) p32x_sh2_write16(u32 a, u32 d, SH2 *sh2)
   wh(a, d, sh2);
 }
 
-void REGPARM(3) p32x_sh2_write32(u32 a, u32 d, SH2 *sh2)
+void REGPARM(3) (p32x_sh2_write32)(u32 a, u32 d, SH2 *sh2)
 {
   const void **sh2_wmap = sh2->write32_tab;
   sh2_write_handler *wh;
@@ -1994,7 +2057,7 @@ void *p32x_sh2_get_mem_ptr(u32 a, u32 *mask, SH2 *sh2)
   if (!map_flag_set(mm->addr)) {
     // directly mapped memory (SDRAM, ROM, data array)
     ret = (void *)(mm->addr << 1);
-    *mask = mm->mask;
+    *mask = mm->mask & ~(0xf << 28);
   } else if ((a & ~0x7ff) == 0) {
     // BIOS, has handler function since it shares its segment with I/O
     ret = sh2->p_bios;
@@ -2019,7 +2082,7 @@ int p32x_sh2_mem_is_rom(u32 a, SH2 *sh2)
   return 0;
 }
 
-int p32x_sh2_memcpy(u32 dst, u32 src, int count, int size, SH2 *sh2)
+int p32x_soc_memcpy(u32 dst, u32 src, int count, int size, SH2 *sh2)
 {
   u32 mask;
   u8 *ps, *pd;
@@ -2039,7 +2102,7 @@ int p32x_sh2_memcpy(u32 dst, u32 src, int count, int size, SH2 *sh2)
 
   // align dst to halfword
   if (dst & 1) {
-    p32x_sh2_write8(dst, *(u8 *)MEM_BE2((uptr)ps), sh2);
+    p32x_soc_write8(dst, *(u8 *)MEM_BE2((uptr)ps), sh2);
     ps++, dst++, len --;
   }
 
@@ -2050,16 +2113,16 @@ int p32x_sh2_memcpy(u32 dst, u32 src, int count, int size, SH2 *sh2)
     u16 dl, dh = *sp++;
     for (i = 0; i < (len & ~1); i += 2, dst += 2, sp++) {
       dl = dh, dh = *sp;
-      p32x_sh2_write16(dst, (dh >> 8) | (dl << 8), sh2);
+      p32x_soc_write16(dst, (dh >> 8) | (dl << 8), sh2);
     }
     if (len & 1)
-      p32x_sh2_write8(dst, dh, sh2);
+      p32x_soc_write8(dst, dh, sh2);
   } else {
     // dst and src at least halfword aligned
     u16 *sp = (u16 *)ps;
     // align dst to word
     if ((dst & 2) && len >= 2) {
-      p32x_sh2_write16(dst, *sp++, sh2);
+      p32x_soc_write16(dst, *sp++, sh2);
       dst += 2, len -= 2;
     }
     if ((uptr)sp & 2) {
@@ -2067,22 +2130,22 @@ int p32x_sh2_memcpy(u32 dst, u32 src, int count, int size, SH2 *sh2)
       u16 dl, dh;
       for (i = 0; i < (len & ~3); i += 4, dst += 4, sp += 2) {
         dl = sp[0], dh = sp[1];
-        p32x_sh2_write32(dst, (dl << 16) | dh, sh2);
+        p32x_soc_write32(dst, (dl << 16) | dh, sh2);
       }
     } else {
       // word copy
       u32 d;
       for (i = 0; i < (len & ~3); i += 4, dst += 4, sp += 2) {
         d = *(u32 *)sp;
-        p32x_sh2_write32(dst, CPU_BE2(d), sh2);
+        p32x_soc_write32(dst, CPU_BE2(d), sh2);
       }
     }
     if (len & 2) {
-      p32x_sh2_write16(dst, *sp++, sh2);
+      p32x_soc_write16(dst, *sp++, sh2);
       dst += 2;
     }
     if (len & 1)
-      p32x_sh2_write8(dst, *sp >> 8, sh2);
+      p32x_soc_write8(dst, *sp >> 8, sh2);
   }
 
   return count;
@@ -2425,6 +2488,14 @@ void PicoMemSetup32x(void)
     msh2_write32_map[i >> 1] = sh2_write_ignore;
   }
 
+  // NB all directly mapped areas have the wait cycles in the top 4 bits. The
+  // typical miss rate for a 4KB 4-way assiciative unified cache is a good 10%,
+  // for the 2KB 2-way case (with 2KB data array usable as internal fast RAM)
+  // it's closer to 20%. By the SH7604 doc, a cache hit doesn't have latency,
+  // so only a cache miss needs to be considered. All RAM types have access
+  // times between 5 and 15 cycles, so to emulate cache misses we go for 2 wait
+  // cycles over the board, but for the data array (internal fast RAM).
+
   // CS0
   msh2_read8_map[0x00/2].addr  = msh2_read8_map[0x20/2].addr  = MAP_HANDLER(sh2_read8_cs0);
   msh2_read16_map[0x00/2].addr = msh2_read16_map[0x20/2].addr = MAP_HANDLER(sh2_read16_cs0);
@@ -2435,15 +2506,15 @@ void PicoMemSetup32x(void)
   // CS1 - ROM
   bank_switch_rom_sh2();
   for (rs = 0x8000; rs < Pico.romsize && rs < 0x400000; rs *= 2) ; 
-  msh2_read8_map[0x02/2].mask  = msh2_read8_map[0x22/2].mask  = rs-1;
-  msh2_read16_map[0x02/2].mask = msh2_read16_map[0x22/2].mask = rs-1;
-  msh2_read32_map[0x02/2].mask = msh2_read32_map[0x22/2].mask = rs-1;
+  msh2_read8_map[0x02/2].mask  = msh2_read8_map[0x22/2].mask  = (rs-1) | (2<<28);
+  msh2_read16_map[0x02/2].mask = msh2_read16_map[0x22/2].mask = (rs-1) | (2<<28);
+  msh2_read32_map[0x02/2].mask = msh2_read32_map[0x22/2].mask = (rs-1) | (2<<28);
   msh2_write16_map[0x02/2] = msh2_write16_map[0x22/2] = sh2_write16_rom;
   msh2_write32_map[0x02/2] = msh2_write32_map[0x22/2] = sh2_write32_rom;
   // CS2 - DRAM 
-  msh2_read8_map[0x04/2].mask  = msh2_read8_map[0x24/2].mask  = 0x01ffff;
-  msh2_read16_map[0x04/2].mask = msh2_read16_map[0x24/2].mask = 0x01fffe;
-  msh2_read32_map[0x04/2].mask = msh2_read32_map[0x24/2].mask = 0x01fffc;
+  msh2_read8_map[0x04/2].mask  = msh2_read8_map[0x24/2].mask  = 0x01ffff | (2<<28);
+  msh2_read16_map[0x04/2].mask = msh2_read16_map[0x24/2].mask = 0x01fffe | (2<<28);
+  msh2_read32_map[0x04/2].mask = msh2_read32_map[0x24/2].mask = 0x01fffc | (2<<28);
   msh2_write8_map[0x04/2]  = msh2_write8_map[0x24/2]  = sh2_write8_dram;
   msh2_write16_map[0x04/2] = msh2_write16_map[0x24/2] = sh2_write16_dram;
   msh2_write32_map[0x04/2] = msh2_write32_map[0x24/2] = sh2_write32_dram;
@@ -2456,9 +2527,9 @@ void PicoMemSetup32x(void)
 
   msh2_write16_map[0x06/2]      = msh2_write16_map[0x26/2]      = sh2_write16_sdram;
   msh2_write32_map[0x06/2]      = msh2_write32_map[0x26/2]      = sh2_write32_sdram;
-  msh2_read8_map[0x06/2].mask   = msh2_read8_map[0x26/2].mask   = 0x03ffff;
-  msh2_read16_map[0x06/2].mask  = msh2_read16_map[0x26/2].mask  = 0x03fffe;
-  msh2_read32_map[0x06/2].mask  = msh2_read32_map[0x26/2].mask  = 0x03fffc;
+  msh2_read8_map[0x06/2].mask   = msh2_read8_map[0x26/2].mask   = 0x03ffff | (2<<28);
+  msh2_read16_map[0x06/2].mask  = msh2_read16_map[0x26/2].mask  = 0x03fffe | (2<<28);
+  msh2_read32_map[0x06/2].mask  = msh2_read32_map[0x26/2].mask  = 0x03fffc | (2<<28);
   // SH2 data array
   msh2_read8_map[0xc0/2].mask  = 0x0fff;
   msh2_read16_map[0xc0/2].mask = 0x0ffe;
