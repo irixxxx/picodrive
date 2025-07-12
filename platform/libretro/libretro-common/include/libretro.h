@@ -201,6 +201,33 @@ extern "C" {
 #define RETRO_DEVICE_ID_JOYPAD_R2      13
 #define RETRO_DEVICE_ID_JOYPAD_L3      14
 #define RETRO_DEVICE_ID_JOYPAD_R3      15
+#define RETRO_DEVICE_ID_JOYPAD_C       16
+#define RETRO_DEVICE_ID_JOYPAD_Z       17
+#define RETRO_DEVICE_ID_JOYPAD_MENU    18
+#define RETRO_DEVICE_ID_JOYPAD_OPT     19
+#define RETRO_DEVICE_ID_JOYPAD_L4      20
+#define RETRO_DEVICE_ID_JOYPAD_R4      21
+#define RETRO_DEVICE_ID_JOYPAD_L5      22
+#define RETRO_DEVICE_ID_JOYPAD_R5      23
+#define RETRO_DEVICE_ID_JOYPAD_L0      24
+#define RETRO_DEVICE_ID_JOYPAD_R0      25
+#define RETRO_DEVICE_ID_JOYPAD_G1      26
+#define RETRO_DEVICE_ID_JOYPAD_G2      27
+#define RETRO_DEVICE_ID_JOYPAD_G3      28
+#define RETRO_DEVICE_ID_JOYPAD_G4      29
+#define RETRO_DEVICE_ID_JOYPAD_G5      30
+#define RETRO_DEVICE_ID_JOYPAD_G6      31
+#define RETRO_DEVICE_ID_JOYPAD_BUTTON_MAX 32
+
+#define RETRO_DEVICE_ID_JOYPAD_LEFT_ANALOG_RIGHT    32
+#define RETRO_DEVICE_ID_JOYPAD_LEFT_ANALOG_LEFT     33
+#define RETRO_DEVICE_ID_JOYPAD_LEFT_ANALOG_DOWN     34
+#define RETRO_DEVICE_ID_JOYPAD_LEFT_ANALOG_UP       35
+#define RETRO_DEVICE_ID_JOYPAD_RIGHT_ANALOG_RIGHT   36
+#define RETRO_DEVICE_ID_JOYPAD_RIGHT_ANALOG_LEFT    37
+#define RETRO_DEVICE_ID_JOYPAD_RIGHT_ANALOG_DOWN    38
+#define RETRO_DEVICE_ID_JOYPAD_RIGHT_ANALOG_UP      39
+#define RETRO_DEVICE_ID_JOYPAD_BIND_MAX 40
 
 #define RETRO_DEVICE_ID_JOYPAD_MASK    256
 
@@ -3787,7 +3814,7 @@ typedef void (RETRO_CALLCONV *retro_input_poll_t)(void);
  * have been set with retro_set_controller_port_device()
  * will still use the higher level RETRO_DEVICE_JOYPAD to request input.
  */
-typedef int16_t (RETRO_CALLCONV *retro_input_state_t)(unsigned port, unsigned device,
+typedef int32_t (RETRO_CALLCONV *retro_input_state_t)(unsigned port, unsigned device,
       unsigned index, unsigned id);
 
 /* Sets callbacks. retro_set_environment() is guaranteed to be called

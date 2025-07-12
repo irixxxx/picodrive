@@ -1387,26 +1387,26 @@ bool retro_load_game(const struct retro_game_info *info)
       { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_UP,    "D-Pad Up" },
       { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_DOWN,  "D-Pad Down" },
       { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_RIGHT, "D-Pad Right" },
+      { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_C,     "A" },
       { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_B,     "B" },
       { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_A,     "C" },
-      { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_X,     "Y" },
-      { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_Y,     "A" },
-      { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_L,     "X" },
-      { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_R,     "Z" },
-      { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_SELECT,"Mode" },
+      { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_Z,     "X" },
+      { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_Y,     "Y" },
+      { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_X,     "Z" },
+      { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_R,     "Mode" },
       { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_START, "Start" },
 
       { 1, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_LEFT,  "D-Pad Left" },
       { 1, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_UP,    "D-Pad Up" },
       { 1, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_DOWN,  "D-Pad Down" },
       { 1, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_RIGHT, "D-Pad Right" },
+      { 1, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_C,     "A" },
       { 1, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_B,     "B" },
       { 1, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_A,     "C" },
-      { 1, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_X,     "Y" },
-      { 1, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_Y,     "A" },
-      { 1, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_L,     "X" },
-      { 1, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_R,     "Z" },
-      { 1, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_SELECT,"Mode" },
+      { 1, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_Z,     "X" },
+      { 1, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_Y,     "Y" },
+      { 1, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_X,     "Z" },
+      { 1, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_R,     "Mode" },
       { 1, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_START, "Start" },
 
 
@@ -1414,12 +1414,13 @@ bool retro_load_game(const struct retro_game_info *info)
       { 2, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_UP,    "D-Pad Up" },
       { 2, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_DOWN,  "D-Pad Down" },
       { 2, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_RIGHT, "D-Pad Right" },
+      { 2, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_C,     "A" },
       { 2, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_B,     "B" },
       { 2, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_A,     "C" },
-      { 2, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_X,     "Y" },
-      { 2, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_Y,     "A" },
-      { 2, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_L,     "X" },
-      { 2, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_R,     "Z" },
+      { 2, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_Z,     "X" },
+      { 2, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_Y,     "Y" },
+      { 2, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_X,     "Z" },
+      { 2, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_R,     "Mode" },
       { 2, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_SELECT,"Mode" },
       { 2, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_START, "Start" },
 
@@ -1428,12 +1429,13 @@ bool retro_load_game(const struct retro_game_info *info)
       { 3, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_UP,    "D-Pad Up" },
       { 3, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_DOWN,  "D-Pad Down" },
       { 3, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_RIGHT, "D-Pad Right" },
+      { 3, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_C,     "A" },
       { 3, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_B,     "B" },
       { 3, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_A,     "C" },
-      { 3, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_X,     "Y" },
-      { 3, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_Y,     "A" },
-      { 3, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_L,     "X" },
-      { 3, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_R,     "Z" },
+      { 3, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_Z,     "X" },
+      { 3, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_Y,     "Y" },
+      { 3, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_X,     "Z" },
+      { 3, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_R,     "Mode" },
       { 3, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_SELECT,"Mode" },
       { 3, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_START, "Start" },
 
@@ -1747,21 +1749,21 @@ void retro_reset(void)
    PicoReset();
 }
 
-static const unsigned short retro_pico_map[] = {
-   [RETRO_DEVICE_ID_JOYPAD_B]      = 1 << GBTN_B,
-   [RETRO_DEVICE_ID_JOYPAD_Y]      = 1 << GBTN_A,
-   [RETRO_DEVICE_ID_JOYPAD_SELECT] = 1 << GBTN_MODE,
-   [RETRO_DEVICE_ID_JOYPAD_START]  = 1 << GBTN_START,
-   [RETRO_DEVICE_ID_JOYPAD_UP]     = 1 << GBTN_UP,
-   [RETRO_DEVICE_ID_JOYPAD_DOWN]   = 1 << GBTN_DOWN,
-   [RETRO_DEVICE_ID_JOYPAD_LEFT]   = 1 << GBTN_LEFT,
-   [RETRO_DEVICE_ID_JOYPAD_RIGHT]  = 1 << GBTN_RIGHT,
-   [RETRO_DEVICE_ID_JOYPAD_A]      = 1 << GBTN_C,
-   [RETRO_DEVICE_ID_JOYPAD_X]      = 1 << GBTN_Y,
-   [RETRO_DEVICE_ID_JOYPAD_L]      = 1 << GBTN_X,
-   [RETRO_DEVICE_ID_JOYPAD_R]      = 1 << GBTN_Z,
+static const unsigned int pico_retro_map[] = {
+	RETRO_DEVICE_ID_JOYPAD_UP, // GBTN_UP    
+	RETRO_DEVICE_ID_JOYPAD_DOWN, // GBTN_DOWN  
+	RETRO_DEVICE_ID_JOYPAD_LEFT, // GBTN_LEFT  
+	RETRO_DEVICE_ID_JOYPAD_RIGHT, // GBTN_RIGHT 
+	RETRO_DEVICE_ID_JOYPAD_B, // GBTN_B     
+	RETRO_DEVICE_ID_JOYPAD_A, // GBTN_C     
+	RETRO_DEVICE_ID_JOYPAD_C, // GBTN_A     
+	RETRO_DEVICE_ID_JOYPAD_START, // GBTN_START 
+	RETRO_DEVICE_ID_JOYPAD_X, // GBTN_Z     
+	RETRO_DEVICE_ID_JOYPAD_Y, // GBTN_Y     
+	RETRO_DEVICE_ID_JOYPAD_Z, // GBTN_X     
+	RETRO_DEVICE_ID_JOYPAD_R, // GBTN_MODE  
 };
-#define RETRO_PICO_MAP_LEN (sizeof(retro_pico_map) / sizeof(retro_pico_map[0]))
+#define PICO_RETRO_MAP_LEN (sizeof(pico_retro_map) / sizeof(pico_retro_map[0]))
 
 static int has_4_pads;
 
@@ -2329,7 +2331,7 @@ void retro_run(void)
    else
       padcount = has_4_pads ? 4 : 2;
 
-   int16_t input[4] = {0, 0};
+   int32_t input[4] = {0, 0};
 
    if (libretro_supports_bitmasks)
    {
@@ -2343,16 +2345,16 @@ void retro_run(void)
    {
       for (pad = 0; pad < padcount; pad++)
       {
-         for (i = 0; i < RETRO_PICO_MAP_LEN; i++)
+         for (i = 0; i < RETRO_DEVICE_ID_JOYPAD_BUTTON_MAX; i++)
             if (input_state_cb(pad, RETRO_DEVICE_JOYPAD, 0, i))
                input[pad] |= 1 << i;
       }
    }
 
    for (pad = 0; pad < padcount; pad++)
-     for (i = 0; i < RETRO_PICO_MAP_LEN; i++)
-	 if (input[pad] & (1 << i))
-	     PicoIn.pad[pad] |= retro_pico_map[i];
+     for (i = 0; i < PICO_RETRO_MAP_LEN; i++)
+	 if (input[pad] & (1 << pico_retro_map[i]))
+	     PicoIn.pad[pad] |= 1<<i;
 
    if (PicoIn.AHW == PAHW_PICO) {
        uint16_t ev = input[0] &
