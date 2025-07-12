@@ -19,6 +19,8 @@
 #include <libkern/OSCacheControl.h>
 #endif
 
+#define CUSTOM_VERSION "+NC41"
+
 #include "libretro-common/include/formats/image.h" // really, for IMAGE_PROCESS_NEXT?!?
 #include "libretro-common/include/formats/rpng.h"
 #include "libretro-common/include/file/file_path.h"
@@ -680,7 +682,7 @@ void retro_get_system_info(struct retro_system_info *info)
 {
    memset(info, 0, sizeof(*info));
    info->library_name = "PicoDrive";
-   info->library_version = VERSION;
+   info->library_version = VERSION CUSTOM_VERSION;
    info->valid_extensions = "bin|gen|smd|md|32x|cue|iso|chd|sms|gg|sg|sc|m3u|68k|sgd|pco";
    info->need_fullpath = true;
 }
