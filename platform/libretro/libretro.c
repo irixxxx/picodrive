@@ -137,6 +137,8 @@ static short ALIGNED(4) sndBuffer[2*SND_RATE_MAX/50];
 
 static void snd_write(int len);
 
+static void retro_set_desc();
+
 char **g_argv;
 
 #ifdef _WIN32
@@ -168,6 +170,10 @@ static int pico_page;
 static int pico_w, pico_h;
 static char pico_overlay_path[PATH_MAX];
 static unsigned short *pico_overlay;
+
+static bool joypad_dual=false;
+
+#define RETRO_DEVICE_JOYPAD_DUAL RETRO_DEVICE_SUBCLASS(RETRO_DEVICE_JOYPAD, 1)
 
 #define TURBO_A 0
 #define TURBO_B 1
@@ -712,6 +718,13 @@ unsigned retro_api_version(void)
 
 void retro_set_controller_port_device(unsigned port, unsigned device)
 {
+	if (port == 0){
+		bool dual=(device==RETRO_DEVICE_JOYPAD_DUAL);
+		if(dual!=joypad_dual){
+			joypad_dual=dual;
+			retro_set_desc();
+		}
+	}
 }
 
 void retro_get_system_info(struct retro_system_info *info)
@@ -1394,31 +1407,125 @@ static void set_memory_maps(void)
    }
 }
 
-bool retro_load_game(const struct retro_game_info *info)
-{
-   const struct retro_game_info_ext *info_ext = NULL;
-   const unsigned char *content_data          = NULL;
-   size_t content_size                        = 0;
-   char content_path[PATH_MAX];
-   char content_ext[8];
-   char carthw_path[PATH_MAX];
-   enum media_type_e media_type;
-   size_t i;
+static void retro_set_ports_pico(){
 
-#if defined(_WIN32)
-   char slash      = '\\';
-#else
-   char slash      = '/';
-#endif
+	static bool done=false;
+	if(done)return;
 
-   content_path[0] = '\0';
-   content_ext[0]  = '\0';
-   carthw_path[0]  = '\0';
+	done=true;
+}
 
-   unsigned int cd_index = 0;
-   bool is_m3u           = false;
+static void retro_set_ports_sms(){
 
-   struct retro_input_descriptor desc[] = {
+	static bool done=false;
+	if(done)return;
+
+   static const struct retro_controller_description port_1[] = {
+      { "Joypad Standard", RETRO_DEVICE_JOYPAD },
+   };
+
+   static const struct retro_controller_description port_2[] = {
+      { "Joypad Standard", RETRO_DEVICE_JOYPAD },
+  };
+
+   static const struct retro_controller_info ports[] = {
+      { port_1, 1 },
+      { port_2, 1 },
+      { 0 },
+   };
+
+	environ_cb(RETRO_ENVIRONMENT_SET_CONTROLLER_INFO, (void*)ports);
+	done=true;
+}
+
+static void retro_set_ports_md(){
+
+	static bool done=false;
+	if(done)return;
+
+   static const struct retro_controller_description port_1[] = {
+      { "Joypad Standard", RETRO_DEVICE_JOYPAD },
+      { "Joypad Dual", RETRO_DEVICE_JOYPAD_DUAL },
+   };
+
+   static const struct retro_controller_description port_2[] = {
+      { "Joypad Standard", RETRO_DEVICE_JOYPAD },
+  };
+
+   static const struct retro_controller_info ports[] = {
+      { port_1, 2 },
+      { port_2, 1 },
+      { 0 },
+   };
+
+	environ_cb(RETRO_ENVIRONMENT_SET_CONTROLLER_INFO, (void*)ports);
+	done=true;
+}
+
+static void retro_set_ports(){
+
+   if (PicoIn.AHW & PAHW_PICO) retro_set_ports_pico();
+   else if (PicoIn.AHW & PAHW_SMS) retro_set_ports_sms();
+   else retro_set_ports_md();
+}
+
+static void retro_set_desc_pico(){
+
+	static bool done=false;
+	if(done)return;
+
+   static const struct retro_input_descriptor desc_pico[] = {
+      { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_LEFT,  "D-Pad Left (violet)" },
+      { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_UP,    "D-Pad Up (white)" },
+      { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_DOWN,  "D-Pad Down (orange)" },
+      { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_RIGHT, "D-Pad Right (green)" },
+      { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_B,     "Red Button" },
+      { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_A,     "Pen Button" },
+      { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_START, "Pen State" },
+      { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_Y,     "Pen on Storyware" },
+      { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_X,     "Pen on Pad" },
+      { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_L,     "Previous Page" },
+      { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_R,     "Next Page" },
+
+      { 0 },
+   };
+
+	environ_cb(RETRO_ENVIRONMENT_SET_INPUT_DESCRIPTORS, desc_pico);
+	done=true;
+}
+
+static void retro_set_desc_sms(){
+
+	static bool done=false;
+	if(done)return;
+
+   static const struct retro_input_descriptor desc_sms[] = {
+      { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_LEFT,  "D-Pad Left" },
+      { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_UP,    "D-Pad Up" },
+      { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_DOWN,  "D-Pad Down" },
+      { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_RIGHT, "D-Pad Right" },
+      { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_B,     "Button 1 Start" },
+      { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_A,     "Button 2" },
+      { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_START, "Button Pause" },
+
+      { 1, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_LEFT,  "D-Pad Left" },
+      { 1, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_UP,    "D-Pad Up" },
+      { 1, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_DOWN,  "D-Pad Down" },
+      { 1, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_RIGHT, "D-Pad Right" },
+      { 1, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_B,     "Button 1 Start" },
+      { 1, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_A,     "Button 2" },
+      { 1, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_START, "Button Pause" },
+
+      { 0 },
+   };
+
+	environ_cb(RETRO_ENVIRONMENT_SET_INPUT_DESCRIPTORS, desc_sms);
+	done=true;
+}
+
+static void retro_set_desc_md_standard(){
+
+   static const struct retro_input_descriptor desc[] = {
       { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_LEFT,  "D-Pad Left" },
       { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_UP,    "D-Pad Up" },
       { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_DOWN,  "D-Pad Down" },
@@ -1508,41 +1615,78 @@ bool retro_load_game(const struct retro_game_info *info)
       { 0 },
    };
 
-   struct retro_input_descriptor desc_sms[] = {
-      { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_LEFT,  "D-Pad Left" },
-      { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_UP,    "D-Pad Up" },
-      { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_DOWN,  "D-Pad Down" },
-      { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_RIGHT, "D-Pad Right" },
-      { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_B,     "Button 1 Start" },
-      { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_A,     "Button 2" },
-      { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_START, "Button Pause" },
+	environ_cb(RETRO_ENVIRONMENT_SET_INPUT_DESCRIPTORS, desc);
+}
 
-      { 1, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_LEFT,  "D-Pad Left" },
-      { 1, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_UP,    "D-Pad Up" },
-      { 1, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_DOWN,  "D-Pad Down" },
-      { 1, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_RIGHT, "D-Pad Right" },
-      { 1, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_B,     "Button 1 Start" },
-      { 1, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_A,     "Button 2" },
-      { 1, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_START, "Button Pause" },
+static void retro_set_desc_md_dual(){
 
-      { 0 },
-   };
+	static const struct retro_input_descriptor desc[] = {
+		{ 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_LEFT,   "P1 D-Pad Left" },
+		{ 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_UP,     "P1 D-Pad Up" },
+		{ 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_DOWN,   "P1 D-Pad Down" },
+		{ 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_RIGHT,  "P1 D-Pad Right" },
+		{ 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_L0,     "P1 A" },
+		{ 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_L,      "P1 B" },
+		{ 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_L2,     "P1 C" },
+		{ 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_L4,     "P1 X" },
+		{ 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_L5,     "P1 Y" },
+		{ 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_G1,     "P1 Z" },
+		{ 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_G3,     "P1 Mode" },
+		{ 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_SELECT, "P1 Start" },
+		{ 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_Y,      "P2 D-Pad Left" },
+		{ 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_X,      "P2 D-Pad Up" },
+		{ 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_B,      "P2 D-Pad Down" },
+		{ 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_A,      "P2 D-Pad Right" },
+		{ 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_R0,     "P2 A" },
+		{ 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_R,      "P2 B" },
+		{ 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_R2,     "P2 C" },
+		{ 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_R4,     "P2 X" },
+		{ 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_R5,     "P2 Y" },
+		{ 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_G2,     "P2 Z" },
+		{ 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_G4,     "P2 Mode" },
+		{ 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_START,  "P2 Start" },
+		{ 0 },
+	};
 
-   struct retro_input_descriptor desc_pico[] = {
-      { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_LEFT,  "D-Pad Left (violet)" },
-      { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_UP,    "D-Pad Up (white)" },
-      { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_DOWN,  "D-Pad Down (orange)" },
-      { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_RIGHT, "D-Pad Right (green)" },
-      { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_B,     "Red Button" },
-      { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_A,     "Pen Button" },
-      { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_START, "Pen State" },
-      { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_Y,     "Pen on Storyware" },
-      { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_X,     "Pen on Pad" },
-      { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_L,     "Previous Page" },
-      { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_R,     "Next Page" },
+	environ_cb(RETRO_ENVIRONMENT_SET_INPUT_DESCRIPTORS, (void *)desc);
+}
 
-      { 0 },
-   };
+static void retro_set_desc_md(){
+
+	if(joypad_dual)retro_set_desc_md_dual();
+	else retro_set_desc_md_standard();
+}
+
+static void retro_set_desc(){
+
+   if (PicoIn.AHW & PAHW_PICO) retro_set_desc_pico();
+   else if (PicoIn.AHW & PAHW_SMS) retro_set_desc_sms();
+   else retro_set_desc_md();
+}
+
+bool retro_load_game(const struct retro_game_info *info)
+{
+   const struct retro_game_info_ext *info_ext = NULL;
+   const unsigned char *content_data          = NULL;
+   size_t content_size                        = 0;
+   char content_path[PATH_MAX];
+   char content_ext[8];
+   char carthw_path[PATH_MAX];
+   enum media_type_e media_type;
+   size_t i;
+
+#if defined(_WIN32)
+   char slash      = '\\';
+#else
+   char slash      = '/';
+#endif
+
+   content_path[0] = '\0';
+   content_ext[0]  = '\0';
+   carthw_path[0]  = '\0';
+
+   unsigned int cd_index = 0;
+   bool is_m3u           = false;
 
    /* Attempt to fetch extended game info */
    if (environ_cb(RETRO_ENVIRONMENT_GET_GAME_INFO_EXT, &info_ext))
@@ -1680,12 +1824,9 @@ bool retro_load_game(const struct retro_game_info *info)
    }
 
    strncpy(pico_overlay_path, content_path, sizeof(pico_overlay_path)-4);
-   if (PicoIn.AHW & PAHW_PICO)
-      environ_cb(RETRO_ENVIRONMENT_SET_INPUT_DESCRIPTORS, desc_pico);
-   else if (PicoIn.AHW & PAHW_SMS)
-      environ_cb(RETRO_ENVIRONMENT_SET_INPUT_DESCRIPTORS, desc_sms);
-   else
-      environ_cb(RETRO_ENVIRONMENT_SET_INPUT_DESCRIPTORS, desc);
+
+	retro_set_ports();
+	retro_set_desc();
 
    PicoLoopPrepare();
 
@@ -1830,6 +1971,35 @@ static const unsigned int pico_retro_map[] = {
 	RETRO_DEVICE_ID_JOYPAD_R, // GBTN_MODE  
 };
 #define PICO_RETRO_MAP_LEN (sizeof(pico_retro_map) / sizeof(pico_retro_map[0]))
+
+static const unsigned int pico_retro_map_dual1[] = {
+	RETRO_DEVICE_ID_JOYPAD_UP, // GBTN_UP    
+	RETRO_DEVICE_ID_JOYPAD_DOWN, // GBTN_DOWN  
+	RETRO_DEVICE_ID_JOYPAD_LEFT, // GBTN_LEFT  
+	RETRO_DEVICE_ID_JOYPAD_RIGHT, // GBTN_RIGHT 
+	RETRO_DEVICE_ID_JOYPAD_L, // GBTN_B     
+	RETRO_DEVICE_ID_JOYPAD_L2, // GBTN_C     
+	RETRO_DEVICE_ID_JOYPAD_L0, // GBTN_A     
+	RETRO_DEVICE_ID_JOYPAD_SELECT, // GBTN_START 
+	RETRO_DEVICE_ID_JOYPAD_G1, // GBTN_Z     
+	RETRO_DEVICE_ID_JOYPAD_L5, // GBTN_Y     
+	RETRO_DEVICE_ID_JOYPAD_L4, // GBTN_X     
+	RETRO_DEVICE_ID_JOYPAD_G3, // GBTN_MODE  
+};
+static const unsigned int pico_retro_map_dual2[] = {
+	RETRO_DEVICE_ID_JOYPAD_X, // GBTN_UP    
+	RETRO_DEVICE_ID_JOYPAD_B, // GBTN_DOWN  
+	RETRO_DEVICE_ID_JOYPAD_Y, // GBTN_LEFT  
+	RETRO_DEVICE_ID_JOYPAD_A, // GBTN_RIGHT 
+	RETRO_DEVICE_ID_JOYPAD_R, // GBTN_B     
+	RETRO_DEVICE_ID_JOYPAD_R2, // GBTN_C     
+	RETRO_DEVICE_ID_JOYPAD_R0, // GBTN_A     
+	RETRO_DEVICE_ID_JOYPAD_START, // GBTN_START 
+	RETRO_DEVICE_ID_JOYPAD_G2, // GBTN_Z     
+	RETRO_DEVICE_ID_JOYPAD_R5, // GBTN_Y     
+	RETRO_DEVICE_ID_JOYPAD_R4, // GBTN_X     
+	RETRO_DEVICE_ID_JOYPAD_G4, // GBTN_MODE  
+};
 
 static int has_4_pads;
 
@@ -2434,26 +2604,36 @@ void retro_run(void)
       }
    }
 
-   for (pad = 0; pad < padcount; pad++){
-     for (i = 0; i < PICO_RETRO_MAP_LEN; i++){
-       if (input[pad] & (1 << pico_retro_map[i]))
-	     PicoIn.pad[pad] |= 1<<i;
-     }
+	if(joypad_dual){
+		for (i = 0; i < PICO_RETRO_MAP_LEN; i++){
+			if (input[0] & (1 << pico_retro_map_dual1[i]))
+				PicoIn.pad[0] |= 1<<i;
+			if (input[0] & (1 << pico_retro_map_dual2[i]))
+				PicoIn.pad[1] |= 1<<i;
+		}
+	}
+	else{
+		for (pad = 0; pad < padcount; pad++){
+			for (i = 0; i < PICO_RETRO_MAP_LEN; i++){
+				if (input[pad] & (1 << pico_retro_map[i]))
+					PicoIn.pad[pad] |= 1<<i;
+			}
 
-		for(TurboConfig* tc=&turboConfig[0];tc<&turboConfig[TURBO_BUTTONS];++tc){
-			tc->work[pad].pressing=!!(input[pad] & (1 << tc->srcbtn));
-			if(tc->work[pad].pressing){
-				if(!tc->speed)PicoIn.pad[pad] |= 1<<tc->btnflg;
+			for(TurboConfig* tc=&turboConfig[0];tc<&turboConfig[TURBO_BUTTONS];++tc){
+				tc->work[pad].pressing=!!(input[pad] & (1 << tc->srcbtn));
+				if(tc->work[pad].pressing){
+					if(!tc->speed)PicoIn.pad[pad] |= 1<<tc->btnflg;
+					else{
+						tc->work[pad].counter-=tc->speed;
+						if((tc->work[pad].counter&0xffff)>=turbo_ratio)PicoIn.pad[pad] |= 1<<tc->btnflg;
+					}
+				}
 				else{
-					tc->work[pad].counter-=tc->speed;
-					if((tc->work[pad].counter&0xffff)>=turbo_ratio)PicoIn.pad[pad] |= 1<<tc->btnflg;
+					tc->work[pad].counter=0;
 				}
 			}
-			else{
-				tc->work[pad].counter=0;
-			}
 		}
-   }
+	}
 
    if (PicoIn.AHW == PAHW_PICO) {
        uint16_t ev = input[0] &
