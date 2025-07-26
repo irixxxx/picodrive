@@ -106,7 +106,8 @@ typedef struct
 	//int		TAT;		/* timer a ticker | need_save */
 	UINT8	TB;			/* timer b              */
 	UINT8   fn_h;		/* freq latch           */
-	UINT8	pad2[2];
+	UINT8	status_read;	/* status latch by last read */
+	UINT8	pad2[1];
 	//int		TBC;		/* timer b maxval       */
 	//int		TBT;		/* timer b ticker | need_save */
 	/* local time tables */

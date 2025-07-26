@@ -272,7 +272,7 @@ MAKE_68K_WRITE32(m68k_write32, m68k_write16_map)
 
 // -----------------------------------------------------------------
 
-static u32 ym2612_read_local_68k(void);
+static u32 ym2612_read_local_68k(u32 a);
 static int ym2612_write_local(u32 a, u32 d, int is_from_z80);
 static void z80_mem_setup(void);
 
@@ -922,7 +922,7 @@ static u32 PicoRead8_z80(u32 a)
   if ((a & 0x4000) == 0x0000) {
     d = PicoMem.zram[a & 0x1fff];
   } else if ((a & 0x6000) == 0x4000) // 0x4000-0x5fff
-    d = ym2612_read_local_68k();
+    d = ym2612_read_local_68k(a);
   else {
     elprintf(EL_UIO|EL_ANOMALY, "68k bad read [%06x] @%06x", a, SekPc);
     d = (u8)PicoRead16_floating(a);
@@ -1477,28 +1477,40 @@ static int ym2612_write_local(u32 a, u32 d, int is_from_z80)
 }
 
 
-static u32 ym2612_read_local_z80(void)
+static u32 ym2612_read_local_z80(unsigned short a)
 {
   int xcycles = z80_cyclesDone() << 8;
 
   ym2612_update_status(xcycles);
 
-  elprintf(EL_YMTIMER, "timer z80 read %i, sched %i, %i @ %i|%i",
-    ym2612.OPN.ST.status, Pico.t.timer_a_next_oflow >> 8,
-    Pico.t.timer_b_next_oflow >> 8, xcycles >> 8, (xcycles >> 8) / 228);
-  return ym2612.OPN.ST.status;
+  if ((a&0x3) == 0 || !(PicoIn.opt & POPT_FM_YM2612)) {
+    elprintf(EL_YMTIMER, "timer z80 read %i, sched %i, %i @ %i|%i",
+      ym2612.OPN.ST.status, Pico.t.timer_a_next_oflow >> 8,
+      Pico.t.timer_b_next_oflow >> 8, xcycles >> 8, (xcycles >> 8) / 228);
+    Pico.t.ym2612_decay = xcycles + (OSC_NTSC/15/5<<8); // Q8 for convenience
+    return ym2612.OPN.ST.status_read = ym2612.OPN.ST.status;
+  } else if (xcycles < Pico.t.ym2612_decay)
+    return ym2612.OPN.ST.status_read;
+  else
+    return 0;
 }
 
-static u32 ym2612_read_local_68k(void)
+static u32 ym2612_read_local_68k(u32 a)
 {
   int xcycles = z80_cycles_from_68k() << 8;
 
   ym2612_update_status(xcycles);
 
-  elprintf(EL_YMTIMER, "timer 68k read %i, sched %i, %i @ %i|%i",
-    ym2612.OPN.ST.status, Pico.t.timer_a_next_oflow >> 8,
-    Pico.t.timer_b_next_oflow >> 8, xcycles >> 8, (xcycles >> 8) / 228);
-  return ym2612.OPN.ST.status;
+  if ((a&0x3) == 0 || !(PicoIn.opt & POPT_FM_YM2612)) {
+    elprintf(EL_YMTIMER, "timer 68k read %i, sched %i, %i @ %i|%i",
+      ym2612.OPN.ST.status, Pico.t.timer_a_next_oflow >> 8,
+      Pico.t.timer_b_next_oflow >> 8, xcycles >> 8, (xcycles >> 8) / 228);
+    Pico.t.ym2612_decay = xcycles + (OSC_NTSC/15/5<<8); // Q8 for convenience
+    return ym2612.OPN.ST.status_read = ym2612.OPN.ST.status;
+  } else if (xcycles < Pico.t.ym2612_decay)
+    return ym2612.OPN.ST.status_read;
+  else
+    return 0;
 }
 
 // legacy code, only used for GP2X
@@ -1526,11 +1538,13 @@ void ym2612_pack_state_old(void)
 int ym2612_pack_timers(void *buf, size_t size)
 {
   // timers are saved as tick counts, in 16.16 int format
-  int tac, tat = 0, tbc, tbt = 0, busy = 0;
+  int tac, tat = 0, tbc, tbt = 0, busy = 0, decay = 0;
   size_t b = 0;
 
   tac = 1024 - ym2612.OPN.ST.TA;
   tbc = 256  - ym2612.OPN.ST.TB;
+  if (Pico.t.ym2612_decay > 0)
+    decay = cycles_z80_to_68k(Pico.t.ym2612_decay);
   if (Pico.t.ym2612_busy > 0)
     busy = cycles_z80_to_68k(Pico.t.ym2612_busy);
   if (Pico.t.timer_a_next_oflow != TIMER_NO_OFLOW)
@@ -1540,12 +1554,14 @@ int ym2612_pack_timers(void *buf, size_t size)
   elprintf(EL_YMTIMER, "save: timer a %i/%i", tat >> 16, tac);
   elprintf(EL_YMTIMER, "save: timer b %i/%i", tbt >> 16, tbc);
 
-  assert(size >= 16);
+  assert(size >= 21);
   save_u16(buf, &b, ym2612.OPN.ST.TA);
   save_u16(buf, &b, ym2612.OPN.ST.TB);
   save_u32(buf, &b, tat);
   save_u32(buf, &b, tbt);
   save_u32(buf, &b, busy);
+  save_u32(buf, &b, decay);
+  save_u8_(buf, &b, ym2612.OPN.ST.status_read);
   return b;
 }
 
@@ -1602,7 +1618,7 @@ void ym2612_unpack_state_old(void)
 
 void ym2612_unpack_timers(const void *buf, size_t size)
 {
-  int tac, tat, tbc, tbt, busy;
+  int tac, tat, tbc, tbt, busy, decay;
   size_t b = 0;
   assert(size >= 16);
   if (size < 16)
@@ -1627,6 +1643,11 @@ void ym2612_unpack_timers(const void *buf, size_t size)
     Pico.t.timer_b_next_oflow = TIMER_NO_OFLOW;
   elprintf(EL_YMTIMER, "load: %i/%i, timer_a_next_oflow %i", tat>>16, tac>>16, Pico.t.timer_a_next_oflow >> 8);
   elprintf(EL_YMTIMER, "load: %i/%i, timer_b_next_oflow %i", tbt>>16, tbc>>16, Pico.t.timer_b_next_oflow >> 8);
+  if (size >= 21) {
+    decay = load_u32(buf, &b);
+    Pico.t.ym2612_decay = cycles_68k_to_z80(decay);
+    ym2612.OPN.ST.status_read = load_u8_(buf, &b);
+  }
 }
 
 #if defined(NO_32X) && defined(_ASM_MEMORY_C)

@@ -745,11 +745,25 @@ static int menu_loop_keyconfig(int id, int keys)
 }
 
 // ------------ MD options menu ------------
+static const char *fm_chips[] = { "YM3438", "YM2612" };
+
+static int mh_opt_fmchip(int id, int keys)
+{
+	if (keys & (PBTN_LEFT|PBTN_RIGHT))
+		PicoIn.opt ^= POPT_FM_YM2612;
+	return 0;
+}
+
+static const char *mgn_opt_fmchip(int id, int *offs)
+{
+	int chip = !!(PicoIn.opt & POPT_FM_YM2612);
+	return fm_chips[chip];
+}
 
 static const char h_renderer[] = "16bit is more accurate, 8bit is faster";
 static const char h_fmsound[]  = "Disabling improves performance, but breaks sound";
-static const char h_dacnoise[] = "FM chips in the 1st Mega Drive model have DAC noise,\n"
-				"newer models used different chips without this";
+static const char h_fmchips[]  = "Old Mega Drive models have YM2612, newer have YM3438\n"
+				"some games only work with a specific chip type";
 static const char h_fmfilter[] = "Improves sound accuracy but is noticeably slower,\n"
 				"best quality if native rate isn't working";
 static const char h_picopen[]  = "Enabling resets Pico display and d-pad input back to\n"
@@ -758,9 +772,9 @@ static const char h_picopen[]  = "Enabling resets Pico display and d-pad input b
 static menu_entry e_menu_md_options[] =
 {
 	mee_enum_h    ("Renderer",                  MA_OPT_RENDERER, currentConfig.renderer, renderer_names, h_renderer),
-	mee_onoff_h   ("FM audio",                  MA_OPT2_ENABLE_YM2612, PicoIn.opt, POPT_EN_FM, h_fmsound),
+	mee_onoff_h   ("FM audio",                  MA_OPT2_ENABLE_FM, PicoIn.opt, POPT_EN_FM, h_fmsound),
+	mee_cust_h    ("FM chip",                   MA_OPT2_FM_CHIP, mh_opt_fmchip, mgn_opt_fmchip, h_fmchips),
 	mee_onoff_h   ("FM filter",                 MA_OPT_FM_FILTER, PicoIn.opt, POPT_EN_FM_FILTER, h_fmfilter),
-	mee_onoff_h   ("FM DAC noise",              MA_OPT2_ENABLE_YM_DAC, PicoIn.opt, POPT_EN_FM_DAC, h_dacnoise),
 	mee_onoff_h   ("Pen button shows screen",   MA_OPT_PICO_PEN, currentConfig.EmuOpt, EOPT_PICO_PEN, h_picopen),
 	mee_end,
 };
@@ -1821,9 +1835,9 @@ static menu_entry e_menu_hidden[] =
 	mee_onoff("autoload savestates",      MA_OPT_AUTOLOAD_SAVE,  g_autostateld_opt, 1),
 	mee_onoff("SDL fullscreen mode",      MA_OPT_VOUT_FULL,      plat_target.vout_fullscreen, 1),
 	mee_onoff("Emulate Z80",              MA_OPT2_ENABLE_Z80,    PicoIn.opt, POPT_EN_Z80),
-	mee_onoff("Emulate YM2612 (FM)",      MA_OPT2_ENABLE_YM2612, PicoIn.opt, POPT_EN_FM),
+	mee_onoff("Emulate YM2612 (FM)",      MA_OPT2_ENABLE_FM,     PicoIn.opt, POPT_EN_FM),
 	mee_onoff("Disable YM2612 SSG-EG",    MA_OPT2_DISABLE_YM_SSG,PicoIn.opt, POPT_DIS_FM_SSGEG),
-	mee_onoff("Enable YM2612 DAC noise",  MA_OPT2_ENABLE_YM_DAC, PicoIn.opt, POPT_EN_FM_DAC),
+	mee_onoff("FM DAC noise",             MA_OPT2_FM_CHIP,       PicoIn.opt, POPT_FM_YM2612),
 	mee_onoff("Emulate SN76496 (PSG)",    MA_OPT2_ENABLE_SN76496,PicoIn.opt, POPT_EN_PSG),
 	mee_onoff("Scale/Rot. fx",            MA_CDOPT_SCALEROT_CHIP,PicoIn.opt, POPT_EN_MCD_GFX),
 	mee_onoff("32X enabled",              MA_32XOPT_ENABLE_32X,  PicoIn.opt, POPT_EN_32X),

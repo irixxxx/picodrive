@@ -467,6 +467,7 @@ struct PicoTiming
   int timer_a_next_oflow, timer_a_step; // in z80 cycles
   int timer_b_next_oflow, timer_b_step;
   int ym2612_busy;
+  int ym2612_decay;
 
   int vcnt_wrap, vcnt_adj;
 };
@@ -934,6 +935,8 @@ void ym2612_unpack_state_old(void);
 #define timers_cycle(ticks) \
   if (Pico.t.ym2612_busy > 0) \
     Pico.t.ym2612_busy -= ticks << 8; \
+  if (Pico.t.ym2612_decay > 0) \
+    Pico.t.ym2612_decay -= ticks << 8; \
   if (Pico.t.timer_a_next_oflow < TIMER_NO_OFLOW) \
     Pico.t.timer_a_next_oflow -= ticks << 8; \
   if (Pico.t.timer_b_next_oflow < TIMER_NO_OFLOW) \
@@ -941,7 +944,7 @@ void ym2612_unpack_state_old(void);
   ym2612_sync_timers(0, ym2612.OPN.ST.mode, ym2612.OPN.ST.mode);
 
 #define timers_reset() \
-  Pico.t.ym2612_busy = 0; \
+  Pico.t.ym2612_busy = Pico.t.ym2612_decay = ym2612.OPN.ST.status_read = 0; \
   Pico.t.timer_a_next_oflow = Pico.t.timer_b_next_oflow = TIMER_NO_OFLOW; \
   Pico.t.timer_a_step = TIMER_A_TICK_ZCYCLES * 1024; \
   Pico.t.timer_b_step = TIMER_B_TICK_ZCYCLES * 256; \

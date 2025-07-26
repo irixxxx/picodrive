@@ -383,6 +383,11 @@ static int custom_read(menu_entry *me, const char *var, const char *val)
 				if (strcasecmp(val, indev_names[i]) == 0)
 					currentConfig.input_dev1 = i;
 			return 1;
+		case MA_OPT2_FM_CHIP:
+			PicoIn.opt &= ~POPT_FM_YM2612;
+			if (strcasecmp(val, "ym2612") == 0)
+				PicoIn.opt |= POPT_FM_YM2612;
+			return 1;
 
 		/* PSP */
 		case MA_OPT3_VSYNC:

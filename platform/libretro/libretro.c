@@ -1967,12 +1967,12 @@ static void update_variables(bool first_run)
 #endif
 
    var.value = NULL;
-   var.key = "picodrive_dacnoise";
+   var.key = "picodrive_fmchip";
    if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value) {
-      if (strcmp(var.value, "enabled") == 0)
-         PicoIn.opt |= POPT_EN_FM_DAC;
+      if (strcmp(var.value, "ym2612") == 0)
+         PicoIn.opt |= POPT_FM_YM2612;
       else
-         PicoIn.opt &= ~POPT_EN_FM_DAC;
+         PicoIn.opt &= ~POPT_FM_YM2612;
    }
 
    var.value = NULL;

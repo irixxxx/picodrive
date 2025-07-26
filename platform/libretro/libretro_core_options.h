@@ -64,7 +64,7 @@ struct retro_core_option_v2_category option_cats_us[] = {
    {
       "audio",
       "Audio",
-      "Configure sample rate / emulated audio devices / low pass filter / DAC noise."
+      "Configure sample rate / emulated audio devices / low pass filter / FM chip type."
    },
    {
       "input",
@@ -264,15 +264,15 @@ struct retro_core_option_v2_definition option_defs_us[] = {
       "off"
    },
    {
-      "picodrive_dacnoise",
-      "Mega Drive FM DAC noise",
+      "picodrive_fmchip",
+      "Mega Drive FM chip type",
       NULL,
-      "Enable emulation of YM2612 DAC noise. This option generates a distortion which existed on most Model 1 Mega Drive/Genesis, but not on newer models.",
+      "Select the Mega Drive/Genesis FM chip type. Model 1 Mega Drive/Genesis mostly used YM2612, which produced a distinct distortion. YM3438 was used in model 2 consoles.",
       NULL,
       "audio",
       {
-         { "off", "disabled" },
-         { "on",  "enabled" },
+         { "ym2612", "YM2612" },
+         { "ym3438", "YM3438" },
          { NULL, NULL },
       },
       "off"

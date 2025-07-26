@@ -664,7 +664,7 @@ void emu_prep_defconfig(void)
 	defaultConfig.s_PicoOpt = POPT_EN_SNDFILTER|POPT_EN_GG_LCD|POPT_EN_YM2413 |
 				  POPT_EN_STEREO|POPT_EN_FM|POPT_EN_PSG|POPT_EN_Z80 |
 				  POPT_EN_MCD_PCM|POPT_EN_MCD_CDDA|POPT_EN_MCD_GFX |
-				  POPT_EN_DRC|POPT_ACC_SPRITES |
+				  POPT_EN_DRC|POPT_ACC_SPRITES|POPT_FM_YM2612 |
 				  POPT_EN_32X|POPT_EN_PWM;
 	defaultConfig.s_PsndRate = 44100;
 	defaultConfig.s_PicoRegion = 0; // auto

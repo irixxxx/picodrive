@@ -137,11 +137,11 @@ void PsndRerate(int preserve_state)
   int state_size = 4096;
 
   // don't init YM2612 if preserve_state and no parameter changes
-  ym2612_init |= ymclock != ym2612_clock || ymopts != (PicoIn.opt & (POPT_DIS_FM_SSGEG|POPT_EN_FM_DAC));
+  ym2612_init |= ymclock != ym2612_clock || ymopts != (PicoIn.opt & (POPT_DIS_FM_SSGEG|POPT_FM_YM2612));
   ym2612_init |= ymrate != (PicoIn.opt & POPT_EN_FM_FILTER ? ym2612_rate : PicoIn.sndRate);
   ymclock = ym2612_clock;
   ymrate = (PicoIn.opt & POPT_EN_FM_FILTER ? ym2612_rate : PicoIn.sndRate);
-  ymopts = PicoIn.opt & (POPT_DIS_FM_SSGEG|POPT_EN_FM_DAC);
+  ymopts = PicoIn.opt & (POPT_DIS_FM_SSGEG|POPT_FM_YM2612);
 
   if (preserve_state && ym2612_init) {
     state = malloc(state_size);
@@ -160,14 +160,14 @@ void PsndRerate(int preserve_state)
     if (ym2612_init)
       YM2612Init(ym2612_clock, ym2612_rate,
         ((PicoIn.opt&POPT_DIS_FM_SSGEG) ? 0 : ST_SSG) |
-        ((PicoIn.opt&POPT_EN_FM_DAC)    ? ST_DAC : 0));
+        ((PicoIn.opt&POPT_FM_YM2612)    ? ST_DAC : 0));
     YMFM_setup_FIR(ym2612_rate, PicoIn.sndRate, PicoIn.opt & POPT_EN_STEREO);
     PsndFMUpdate = YM2612UpdateFIR;
   } else {
     if (ym2612_init)
       YM2612Init(ym2612_clock, PicoIn.sndRate,
         ((PicoIn.opt&POPT_DIS_FM_SSGEG) ? 0 : ST_SSG) |
-        ((PicoIn.opt&POPT_EN_FM_DAC)    ? ST_DAC : 0));
+        ((PicoIn.opt&POPT_FM_YM2612)    ? ST_DAC : 0));
     PsndFMUpdate = YM2612UpdateONE;
   }
 
