@@ -193,7 +193,7 @@ static void LoadROM(const char *cmdpath)
     rompath[sizeof(rompath) - 1] = 0;
     strncpy(rompath, rom_fname_loaded, sizeof(rompath) - 1);
     of.lStructSize = sizeof(of);
-    of.lpstrFilter = "ROMs, CD images\0*.smd;*.bin;*.gen;*.zip;*.32x;*.sms;*.iso;*.cso;*.cue\0"
+    of.lpstrFilter = "ROMs, CD images\0*.smd;*.bin;*.gen;*.zip;*.32x;*.sms;*.iso;*.cso;*.cue;*.vgm;*.vgz\0"
                      "whatever\0*.*\0";
     of.lpstrFile = rompath;
     of.nMaxFile = MAX_PATH;

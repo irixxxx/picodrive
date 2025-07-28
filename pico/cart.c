@@ -710,7 +710,7 @@ static int DecodeSmd(unsigned char *data,int len)
   return 0;
 }
 
-static unsigned char *PicoCartAlloc(int filesize, int is_sms)
+void *PicoCartAlloc(int filesize, int is_sms)
 {
   unsigned char *rom;
 
@@ -789,6 +789,7 @@ int PicoCartLoad(pm_file *f, const unsigned char *rom, unsigned int romsize,
     if (bytes_read <= 0) {
       elprintf(EL_STATUS, "read failed");
       plat_munmap(rom_data, rom_alloc_size);
+      rom_alloc_size = 0;
       return 3;
     }
   }
@@ -868,6 +869,7 @@ int PicoCartInsert(unsigned char *rom, unsigned int romsize, const char *carthw_
       elprintf(EL_STATUS|EL_ANOMALY, "starting in unknown hw configuration: %x", PicoIn.AHW);
     case 0:
     case PAHW_SVP:  PicoMemSetup(); break;
+    case PAHW_MCD|PAHW_VGM:
     case PAHW_MCD:  PicoMemSetupCD(); break;
     case PAHW_PICO: PicoMemSetupPico(); break;
     case PAHW_SMS:  PicoMemSetupMS(); break;
@@ -908,7 +910,9 @@ void PicoCartUnload(void)
   if (Pico.rom != NULL) {
     SekFinishIdleDet();
     plat_munmap(Pico.rom, rom_alloc_size);
+    rom_alloc_size = 0;
     Pico.rom = NULL;
+    Pico.romsize = 0;
   }
   PicoGameLoaded = 0;
 }

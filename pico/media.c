@@ -10,6 +10,7 @@
 #include <string.h>
 #include "pico_int.h"
 #include "cd/cd_parse.h"
+#include "sound/vgm.h"
 
 unsigned char media_id_header[0x100];
 
@@ -55,9 +56,11 @@ static int detect_media(const char *fname, const unsigned char *rom, unsigned in
   if (!strcasecmp(ext, "srm") || !strcasecmp(ext, "gz")) // s.gz ~ .mds.gz
     return PM_BAD_DETECT;
 
-  /* don't believe in extensions, except .cue and .chd */
+  /* don't believe in extensions, except .cue, .chd and .vgm */
   if (strcasecmp(ext, "cue") == 0 || strcasecmp(ext, "chd") == 0)
     return PM_CD;
+  if (strcasecmp(ext, "vgm") == 0 || strcasecmp(ext, "vgz") == 0)
+    return PM_VGM;
 
   /* Open rom file, if required */
   if (!rom) {
@@ -275,6 +278,8 @@ enum media_type_e PicoLoadMedia(const char *filename,
 
   if ((PicoIn.AHW & PAHW_MCD) && Pico_mcd != NULL)
     cdd_unload();
+  if (PicoIn.AHW & PAHW_VGM)
+    vgm_finish();
   PicoCartUnload();
   PicoIn.AHW = 0;
   PicoIn.quirks = 0;
@@ -333,6 +338,13 @@ enum media_type_e PicoLoadMedia(const char *filename,
   }
   else if (media_type == PM_PICO) {
     PicoIn.AHW = PAHW_PICO;
+  }
+  else if (media_type == PM_VGM) {
+    if (vgm_load(rom_fname) == 0)
+      /* vgm_load() sets up PicoIn.AHW */;
+    else
+      media_type = PM_ERROR;
+    goto out;
   }
 
   if (rom == NULL && rom_fname != NULL) {

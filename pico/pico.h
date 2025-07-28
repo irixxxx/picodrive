@@ -93,6 +93,7 @@ extern void *p32x_bios_g, *p32x_bios_m, *p32x_bios_s;
 #define PAHW_SG     (1<<6)
 #define PAHW_SC     (1<<7)
 #define PAHW_8BIT   (PAHW_SMS|PAHW_GG|PAHW_SG|PAHW_SC)
+#define PAHW_VGM    (1<<8)
 
 #define PHWS_AUTO   0
 #define PHWS_GG     1
@@ -319,6 +320,7 @@ enum media_type_e {
   PM_MARK3,
   PM_PICO,
   PM_CD,
+  PM_VGM,
 };
 
 enum cd_track_type

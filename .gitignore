@@ -11,6 +11,8 @@
 *.a
 tags
 cscope.out
+compile_commands.json
+.gdb_history
 config.mak
 config.log
 cpu/musashi/m68kmake

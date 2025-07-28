@@ -29,7 +29,8 @@ static s32 PsndBuffer[2*(54000+100)/50+2];
 s16 cdda_out_buffer[2*1152];
 
 // FM resampling polyphase FIR
-static resampler_t *fmresampler;
+static resampler_t *ym2612_resampler;
+static resampler_t *ym2413_resampler;
 static int (*PsndFMUpdate)(s32 *buffer, int length, int stereo, int is_buf_empty);
 
 PICO_INTERNAL void PsndInit(void)
@@ -41,10 +42,12 @@ PICO_INTERNAL void PsndInit(void)
 
 PICO_INTERNAL void PsndExit(void)
 {
-  OPLL_delete(opll);
+  if (opll)
+    OPLL_delete(opll);
   opll = NULL;
 
-  resampler_free(fmresampler); fmresampler = NULL;
+  resampler_free(ym2612_resampler); ym2612_resampler = NULL;
+  resampler_free(ym2413_resampler); ym2413_resampler = NULL;
 }
 
 PICO_INTERNAL void PsndReset(void)
@@ -66,7 +69,7 @@ static void YM2612Update(s32 *buffer, int length, int stereo)
 
 static int YM2612UpdateFIR(s32 *buffer, int length, int stereo, int is_buf_empty)
 {
-  resampler_update(fmresampler, buffer, length, YM2612Update);
+  resampler_update(ym2612_resampler, buffer, length, YM2612Update);
   return ymchans;
 }
 
@@ -83,12 +86,12 @@ static void YM2413Update(s32 *buffer, int length, int stereo)
 static int YM2413UpdateFIR(s32 *buffer, int length, int stereo, int is_buf_empty)
 {
   if (!is_buf_empty) memset(buffer, 0, (length << stereo) * sizeof(*buffer));
-  resampler_update(fmresampler, buffer, length, YM2413Update);
+  resampler_update(ym2413_resampler, buffer, length, YM2413Update);
   return 0;
 }
 
 // FIR setup, looks for a close enough rational number matching the ratio
-static void YMFM_setup_FIR(int inrate, int outrate, int stereo)
+static resampler_t *YMFM_setup_FIR(int inrate, int outrate, int stereo)
 {
   int mindiff = 999;
   int diff, mul, div;
@@ -108,8 +111,7 @@ static void YMFM_setup_FIR(int inrate, int outrate, int stereo)
   printf("FM polyphase FIR ratio=%d/%d error=%.3f%%\n",
         Pico.snd.fm_fir_mul, Pico.snd.fm_fir_div, 100.0*mindiff/inrate);
 
-  resampler_free(fmresampler);
-  fmresampler = resampler_new(FMFIR_TAPS, Pico.snd.fm_fir_mul, Pico.snd.fm_fir_div,
+  return resampler_new(FMFIR_TAPS, Pico.snd.fm_fir_mul, Pico.snd.fm_fir_div,
         0.85, 2, 2*inrate/50, stereo);
 }
 
@@ -149,11 +151,14 @@ void PsndRerate(int preserve_state)
       state_size = YM2612PicoStateSave3(state, state_size);
   }
 
-  if (PicoIn.AHW & PAHW_SMS) {
+  if (opll && opll->rate != ym2413_rate) {
     OPLL_setRate(opll, ym2413_rate);
     if (!preserve_state)
       OPLL_reset(opll);
-    YMFM_setup_FIR(ym2413_rate, PicoIn.sndRate, 0);
+    resampler_free(ym2413_resampler);
+    ym2413_resampler = YMFM_setup_FIR(ym2413_rate, PicoIn.sndRate, 0);
+  }
+  if (PicoIn.AHW & PAHW_SMS) {
     PsndFMUpdate = YM2413UpdateFIR;
   } else if ((PicoIn.opt & POPT_EN_FM_FILTER) && ym2612_rate != PicoIn.sndRate) {
     // polyphase FIR resampler, resampling directly from native to output rate
@@ -161,7 +166,9 @@ void PsndRerate(int preserve_state)
       YM2612Init(ym2612_clock, ym2612_rate,
         ((PicoIn.opt&POPT_DIS_FM_SSGEG) ? 0 : ST_SSG) |
         ((PicoIn.opt&POPT_FM_YM2612)    ? ST_DAC : 0));
-    YMFM_setup_FIR(ym2612_rate, PicoIn.sndRate, PicoIn.opt & POPT_EN_STEREO);
+    resampler_free(ym2612_resampler);
+    ym2612_resampler = YMFM_setup_FIR(ym2612_rate, PicoIn.sndRate,
+        PicoIn.opt & POPT_EN_STEREO);
     PsndFMUpdate = YM2612UpdateFIR;
   } else {
     if (ym2612_init)
@@ -320,7 +327,7 @@ PICO_INTERNAL void PsndDoSMSFM(int cyc_to)
 
   if (Pico.m.hardware & PMS_HW_FMUSED) {
     buf += pos;
-    PsndFMUpdate(buf32, len, 0, 0);
+    YM2413UpdateFIR(buf32, len, 0, 0);
     if (stereo) 
       while (len--) {
         *buf++ += *buf32;

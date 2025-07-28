@@ -10,6 +10,7 @@
 
 #include "pico_int.h"
 #include "sound/ym2612.h"
+#include "sound/vgm.h"
 
 struct Pico Pico;
 struct PicoMem PicoMem;
@@ -52,6 +53,8 @@ void PicoExit(void)
   PicoCartUnload();
   if (PicoIn.AHW & PAHW_MCD)
     PicoExitMCD();
+  if (PicoIn.AHW & PAHW_VGM)
+    vgm_finish();
   z80_exit();
   PsndExit();
   PicoCloseTape();
@@ -202,6 +205,8 @@ int PicoReset(void)
   if (PicoIn.opt & POPT_EN_32X)
     PicoReset32x();
 
+  if (PicoIn.AHW & PAHW_VGM)
+    vgm_reset();
   if (PicoIn.AHW & PAHW_MCD) {
     PicoResetMCD();
     return 0;
@@ -283,6 +288,11 @@ void PicoFrame(void)
   pprof_start(frame);
 
   Pico.m.frame_count++;
+
+  if (PicoIn.AHW & PAHW_VGM) {
+    vgm_frame();
+    goto end;
+  }
 
   if (PicoIn.AHW & PAHW_SMS) {
     PicoFrameMS();

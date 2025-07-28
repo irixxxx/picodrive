@@ -628,6 +628,8 @@ void lprintf(const char *fmt, ...)
 /* libretro */
 bool libretro_supports_bitmasks = false;
 
+#define EXTENSIONS "bin|gen|smd|md|32x|cue|iso|chd|m3u|sms|gg|sg|sc|68k|sgd|pco|vgm|vgz"
+
 void retro_set_environment(retro_environment_t cb)
 {
    bool option_categories_supported;
@@ -637,7 +639,7 @@ void retro_set_environment(retro_environment_t cb)
 
    static const struct retro_system_content_info_override content_overrides[] = {
       {
-         "bin|gen|smd|md|32x|sms|gg|sg|sc|68k|sgd|pco", /* extensions */
+         EXTENSIONS,
 #if defined(LOW_MEMORY)
          true,                         /* need_fullpath */
 #else
@@ -683,7 +685,7 @@ void retro_get_system_info(struct retro_system_info *info)
    memset(info, 0, sizeof(*info));
    info->library_name = "PicoDrive";
    info->library_version = VERSION;
-   info->valid_extensions = "bin|gen|smd|md|32x|cue|iso|chd|sms|gg|sg|sc|m3u|68k|sgd|pco";
+   info->valid_extensions = EXTENSIONS;
    info->need_fullpath = true;
 }
 

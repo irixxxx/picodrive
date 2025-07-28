@@ -41,6 +41,7 @@ static const char *rom_exts[] = {
 	"iso", "cso", "cue", "chd",
 	"32x",
 	"sms", "gg",  "sg", "sc",
+	"vgm", "vgz",
 	NULL
 };
 

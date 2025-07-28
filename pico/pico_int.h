@@ -711,6 +711,7 @@ extern carthw_state_chunk *carthw_chunks;
 
 // cart.c
 extern int rom_strcmp(void *rom, int size, int offset, const char *s1);
+extern void *PicoCartAlloc(int filesize, int is_sms);
 extern int PicoCartResize(int newsize);
 extern void Byteswap(void *dst, const void *src, int len);
 extern void (*PicoCartMemSetup)(void);
@@ -1025,6 +1026,7 @@ PICO_INTERNAL void PsndDoDAC(int cycle_to);
 PICO_INTERNAL void PsndDoPSG(int cyc_to);
 PICO_INTERNAL void PsndDoYM2413(int cyc_to);
 PICO_INTERNAL void PsndDoFM(int cyc_to);
+PICO_INTERNAL void PsndDoSMSFM(int cyc_to);
 PICO_INTERNAL void PsndDoPCM(int cyc_to);
 PICO_INTERNAL void PsndClear(void);
 PICO_INTERNAL void PsndGetSamples(int y);
@@ -1206,6 +1208,7 @@ static __inline int isspace_(int c)
 #define EL_PWM     0x00100000 /* 32X PWM stuff (LOTS of output) */
 #define EL_32XP    0x00200000 /* 32X peripherals */
 #define EL_CD      0x00400000 /* MCD */
+#define EL_VGM     0x00800000
 
 #define EL_STATUS  0x40000000 /* status messages */
 #define EL_ANOMALY 0x80000000 /* some unexpected conditions (during emulation) */
