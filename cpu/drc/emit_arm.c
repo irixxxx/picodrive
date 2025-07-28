@@ -1188,12 +1188,12 @@ static int insn_cond = A_COND_AL;
 	emith_jump_ctx(offs); \
 } while (0)
 
+#define emith_abijump(target) \
+	emith_jump(target)
 #define emith_abijump_reg(r) \
 	emith_jump_reg(r)
 #define emith_abicall(target) \
 	emith_call(target)
-#define emith_abicall_cond(cond, target) \
-	emith_call_cond(cond, target)
 #define emith_abicall_reg(r) \
 	emith_call_reg(r)
 

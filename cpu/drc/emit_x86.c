@@ -909,12 +909,12 @@ enum { xAX = 0, xCX, xDX, xBX, xSP, xBP, xSI, xDI,	// x86-64,i386 common
 	emith_ret(); \
 } while (0)
 
+#define emith_abijump(target) \
+	emith_jump(target)
 #define emith_abijump_reg(r) \
 	emith_jump_reg(r)
 #define emith_abicall(target) \
 	emith_call(target)
-#define emith_abicall_cond(cond, target) \
-	emith_abicall(target)
 #define emith_abicall_reg(r) \
 	emith_call_reg(r)
 

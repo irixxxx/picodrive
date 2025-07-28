@@ -221,7 +221,7 @@ extern SH2 sh2s[2];
 #define msh2 sh2s[0]
 #define ssh2 sh2s[1]
 
-#ifndef DRC_SH2
+#if 0//ndef DRC_SH2
 # define sh2_end_run(sh2, after_) do { \
   if ((sh2)->icount > (after_)) { \
     (sh2)->cycles_timeslice -= (sh2)->icount - (after_); \

@@ -1578,12 +1578,14 @@ static u32 REGPARM(2) sh2_read16_cs0(u32 a, SH2 *sh2)
 
   if ((a & 0x3fff0) == 0x4100) {
     d = p32x_vdp_read16(a);
+    sh2->sr -= 5<<12;
     p32x_sh2_poll_detect(a, sh2, SH2_STATE_VPOLL, 9);
     goto out;
   }
 
   if ((a & 0x3fe00) == 0x4200) {
     d = Pico32xMem->pal[(a & 0x1ff) / 2];
+    sh2->sr -= 5<<12;
     goto out;
   }
 
@@ -1777,6 +1779,7 @@ static void REGPARM(3) sh2_write16_cs0(u32 a, u32 d, SH2 *sh2)
     if ((a & 0x3fff0) == 0x4100) {
       sh2->poll_cnt = 0;
       p32x_vdp_write16(a, d, sh2);
+      sh2->sr -= 5<<12;
       goto out;
     }
 
@@ -1786,6 +1789,7 @@ static void REGPARM(3) sh2_write16_cs0(u32 a, u32 d, SH2 *sh2)
         Pico32xDrawSync(sh2);
       Pico32xMem->pal[(a & 0x1ff) / 2] = d;
       Pico32x.dirty_pal = 1;
+      sh2->sr -= 5<<12;
       goto out;
     }
   }
@@ -2508,13 +2512,13 @@ void PicoMemSetup32x(void)
   for (rs = 0x8000; rs < Pico.romsize && rs < 0x400000; rs *= 2) ; 
   msh2_read8_map[0x02/2].mask  = msh2_read8_map[0x22/2].mask  = (rs-1) | (2<<28);
   msh2_read16_map[0x02/2].mask = msh2_read16_map[0x22/2].mask = (rs-1) | (2<<28);
-  msh2_read32_map[0x02/2].mask = msh2_read32_map[0x22/2].mask = (rs-1) | (2<<28);
+  msh2_read32_map[0x02/2].mask = msh2_read32_map[0x22/2].mask = (rs-1) | (4<<28);
   msh2_write16_map[0x02/2] = msh2_write16_map[0x22/2] = sh2_write16_rom;
   msh2_write32_map[0x02/2] = msh2_write32_map[0x22/2] = sh2_write32_rom;
   // CS2 - DRAM 
   msh2_read8_map[0x04/2].mask  = msh2_read8_map[0x24/2].mask  = 0x01ffff | (2<<28);
   msh2_read16_map[0x04/2].mask = msh2_read16_map[0x24/2].mask = 0x01fffe | (2<<28);
-  msh2_read32_map[0x04/2].mask = msh2_read32_map[0x24/2].mask = 0x01fffc | (2<<28);
+  msh2_read32_map[0x04/2].mask = msh2_read32_map[0x24/2].mask = 0x01fffc | (4<<28);
   msh2_write8_map[0x04/2]  = msh2_write8_map[0x24/2]  = sh2_write8_dram;
   msh2_write16_map[0x04/2] = msh2_write16_map[0x24/2] = sh2_write16_dram;
   msh2_write32_map[0x04/2] = msh2_write32_map[0x24/2] = sh2_write32_dram;
@@ -2529,7 +2533,7 @@ void PicoMemSetup32x(void)
   msh2_write32_map[0x06/2]      = msh2_write32_map[0x26/2]      = sh2_write32_sdram;
   msh2_read8_map[0x06/2].mask   = msh2_read8_map[0x26/2].mask   = 0x03ffff | (2<<28);
   msh2_read16_map[0x06/2].mask  = msh2_read16_map[0x26/2].mask  = 0x03fffe | (2<<28);
-  msh2_read32_map[0x06/2].mask  = msh2_read32_map[0x26/2].mask  = 0x03fffc | (2<<28);
+  msh2_read32_map[0x06/2].mask  = msh2_read32_map[0x26/2].mask  = 0x03fffc | (4<<28);
   // SH2 data array
   msh2_read8_map[0xc0/2].mask  = 0x0fff;
   msh2_read16_map[0xc0/2].mask = 0x0ffe;

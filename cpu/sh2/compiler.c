@@ -5360,8 +5360,7 @@ static void sh2_generate_utils(void)
   emit_le_ptr8(arg1);
   emith_read8s_r_r_r(arg1, arg2, arg1);
   emith_move_r_r_ptr(arg2, CONTEXT_REG);
-  emith_abicall(p32x_sh2_poll_memory8);
-  emith_ret();
+  emith_abijump(p32x_sh2_poll_memory8);
   rcache_flush();
   emith_flush();
 
@@ -5381,8 +5380,7 @@ static void sh2_generate_utils(void)
   emith_and_r_r_r(arg1, arg0, arg3);
   emith_read16s_r_r_r(arg1, arg2, arg1);
   emith_move_r_r_ptr(arg2, CONTEXT_REG);
-  emith_abicall(p32x_sh2_poll_memory16);
-  emith_ret();
+  emith_abijump(p32x_sh2_poll_memory16);
   rcache_flush();
   emith_flush();
 
@@ -5403,8 +5401,7 @@ static void sh2_generate_utils(void)
   emith_read_r_r_r(arg1, arg2, arg1);
   emit_le_swap(arg1);
   emith_move_r_r_ptr(arg2, CONTEXT_REG);
-  emith_abicall(p32x_sh2_poll_memory32);
-  emith_ret();
+  emith_abijump(p32x_sh2_poll_memory32);
   rcache_flush();
   emith_flush();
 

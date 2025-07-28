@@ -1544,6 +1544,10 @@ static int emith_cond_check(int cond, int *r)
 	emith_call_reg(CR); \
 } while (0)
 
+#define emith_abijump(target) do { \
+	emith_move_r_ptr_imm(CR, target); \
+	emith_branch(MIPS_JR(CR)); \
+} while (0)
 #define emith_abijump_reg(r) do { \
 	if ((r) != CR) emith_move_r_r(CR, r); \
 	emith_branch(MIPS_JR(CR)); \
@@ -1552,8 +1556,6 @@ static int emith_cond_check(int cond, int *r)
 	emith_move_r_ptr_imm(CR, target); \
 	emith_branch(MIPS_JALR(LR, CR)); \
 } while (0)
-#define emith_abicall_cond(cond, target) \
-	emith_abicall(target)
 #define emith_abicall_reg(r) do { \
 	if ((r) != CR) emith_move_r_r(CR, r); \
 	emith_branch(MIPS_JALR(LR, CR)); \

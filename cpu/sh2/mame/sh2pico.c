@@ -26,7 +26,7 @@ static __inline unsigned int name(SH2 *sh2, unsigned int a) \
 	unsigned int ret; \
 	sh2->sr = (sh2->sr & 0x3f3) | (sh2->icount << 12) | (sh2->no_polling); \
 	ret = cname(a, sh2); \
-	sh2->icount = (signed int)sh2->sr >> 12; \
+	sh2->icount = (int32_t)sh2->sr >> 12; \
 	sh2->no_polling = (sh2->sr & SH2_NO_POLLING); \
 	sh2->sr &= 0x3f3; \
 	return ret; \
@@ -37,7 +37,7 @@ static __inline void name(SH2 *sh2, unsigned int a, unsigned int d) \
 { \
 	sh2->sr = (sh2->sr & 0x3f3) | (sh2->icount << 12) | (sh2->no_polling); \
 	cname(a, d, sh2); \
-	sh2->icount = (signed int)sh2->sr >> 12; \
+	sh2->icount = (int32_t)sh2->sr >> 12; \
 	sh2->no_polling = (sh2->sr & SH2_NO_POLLING); \
 	sh2->sr &= 0x3f3; \
 }
@@ -114,6 +114,8 @@ int sh2_execute_interpreter(SH2 *sh2, int cycles)
 	UINT32 opcode;
 
 	sh2->icount = cycles;
+	sh2->no_polling = (sh2->sr & SH2_NO_POLLING);
+	sh2->sr &= 0x3f3;
 
 	if (sh2->icount <= 0)
 		goto out;
@@ -183,6 +185,7 @@ int sh2_execute_interpreter(SH2 *sh2, int cycles)
 	while (sh2->icount > 0 || sh2->delay);	/* can't interrupt before delay */
 
 out:
+	sh2->sr = (sh2->sr & 0x3f3) | (sh2->icount << 12) | (sh2->no_polling);
 	return sh2->icount;
 }
 

@@ -1080,12 +1080,12 @@ static void emith_ldst_offs(int sz, int rd, int rn, int o9, int ld, int mode)
 	rcache_free_tmp(_t); \
 } while (0)
 
+#define emith_abijump(target) \
+	emith_jump(target)
 #define emith_abijump_reg(r) \
 	emith_jump_reg(r)
 #define emith_abicall(target) \
 	emith_call(target)
-#define emith_abicall_cond(cond, target) \
-	emith_abicall(target)
 #define emith_abicall_reg(r) \
 	emith_call_reg(r)
 
