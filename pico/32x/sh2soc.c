@@ -427,6 +427,9 @@ void REGPARM(3) sh2_peripheral_write8(u32 a, u32 d, SH2 *sh2)
     d |= 0xe0;
     PREG8(r, a) = d;
     break;
+  case 0x092: // CCR
+    Pico32xSetCache(sh2->is_slave, d&1);
+    break;
   case 0x0e3:
     p32x_timer_do(sh2, sh2_cycles_done_m68k(sh2));
     p32x_timer_recalc(sh2);

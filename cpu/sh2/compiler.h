@@ -71,14 +71,15 @@ extern void REGPARM(1) (*sh2_drc_restore_sr)(SH2 *sh2);
 #else
 #define	DRC_DECLARE_SR	register long		_sh2_sr asm(DRC_SR_REG)
 #endif
-// NB: save/load SR register only when DRC is executing and not in DMA access
+
+// NB: save/load SR register only needed when DRC is executing
 #define DRC_SAVE_SR(sh2) \
-    if (likely((sh2->state & (SH2_IN_DRC|SH2_STATE_SLEEP)) == SH2_IN_DRC)) \
-	sh2->sr = (s32)_sh2_sr
+    if (likely(sh2->state & SH2_IN_DRC)) \
+	sh2->sr = (s32)_sh2_sr;
 //      host_call(sh2_drc_save_sr, (SH2 *))(sh2)
 #define DRC_RESTORE_SR(sh2) \
-    if (likely((sh2->state & (SH2_IN_DRC|SH2_STATE_SLEEP)) == SH2_IN_DRC)) \
-	_sh2_sr = (s32)sh2->sr
+    if (likely(sh2->state & SH2_IN_DRC)) \
+	_sh2_sr = (s32)sh2->sr;
 //      host_call(sh2_drc_restore_sr, (SH2 *))(sh2)
 #else
 #define	DRC_DECLARE_SR
