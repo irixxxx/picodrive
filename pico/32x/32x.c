@@ -172,6 +172,9 @@ void p32x_reset_sh2s(void)
   if (p32x_bios_m == NULL) {
     sh2_set_gbr(0, 0x20004000);
 
+    // enable cache
+    Pico32xSetCache(0, 1);
+
     if (!Pico.m.ncart_in) { // copy IDL from cartridge
       unsigned int idl_src, idl_dst, idl_size; // initial data load
       unsigned int vbr;
@@ -200,6 +203,9 @@ void p32x_reset_sh2s(void)
   // SSH2
   if (p32x_bios_s == NULL) {
     unsigned int vbr;
+
+    // enable cache
+    Pico32xSetCache(1, 1);
 
     // GBR/VBR
     vbr = CPU_BE2(*(u32 *)(Pico.rom + 0x3ec));

@@ -17,39 +17,6 @@ typedef u16 UINT16;
 typedef u8  UINT8;
 #endif
 
-#if 1//def DRC_SH2
-
-// this nasty conversion is needed for drc-expecting memhandlers
-#define MAKE_READFUNC(name, cname) \
-static __inline unsigned int name(SH2 *sh2, unsigned int a) \
-{ \
-	unsigned int ret; \
-	sh2->sr = (sh2->sr & 0x3f3) | (sh2->icount << 12) | (sh2->no_polling); \
-	ret = cname(a, sh2); \
-	sh2->icount = (int32_t)sh2->sr >> 12; \
-	sh2->no_polling = (sh2->sr & SH2_NO_POLLING); \
-	sh2->sr &= 0x3f3; \
-	return ret; \
-}
-
-#define MAKE_WRITEFUNC(name, cname) \
-static __inline void name(SH2 *sh2, unsigned int a, unsigned int d) \
-{ \
-	sh2->sr = (sh2->sr & 0x3f3) | (sh2->icount << 12) | (sh2->no_polling); \
-	cname(a, d, sh2); \
-	sh2->icount = (int32_t)sh2->sr >> 12; \
-	sh2->no_polling = (sh2->sr & SH2_NO_POLLING); \
-	sh2->sr &= 0x3f3; \
-}
-
-MAKE_READFUNC(RB, p32x_sh2_read8)
-MAKE_READFUNC(RW, p32x_sh2_read16)
-MAKE_READFUNC(RL, p32x_sh2_read32)
-MAKE_WRITEFUNC(WB, p32x_sh2_write8)
-MAKE_WRITEFUNC(WW, p32x_sh2_write16)
-MAKE_WRITEFUNC(WL, p32x_sh2_write32)
-
-#else
 
 #define RB(sh2, a) p32x_sh2_read8(a, sh2)
 #define RW(sh2, a) p32x_sh2_read16(a, sh2)
@@ -58,7 +25,7 @@ MAKE_WRITEFUNC(WL, p32x_sh2_write32)
 #define WW(sh2, a, d) p32x_sh2_write16(a, d, sh2)
 #define WL(sh2, a, d) p32x_sh2_write32(a, d, sh2)
 
-#endif
+#define RI(sh2, a) p32x_soc_read16(a, sh2)
 
 // some stuff from sh2comn.h
 #define T	0x00000001
@@ -114,8 +81,6 @@ int sh2_execute_interpreter(SH2 *sh2, int cycles)
 	UINT32 opcode;
 
 	sh2->icount = cycles;
-	sh2->no_polling = (sh2->sr & SH2_NO_POLLING);
-	sh2->sr &= 0x3f3;
 
 	if (sh2->icount <= 0)
 		goto out;
@@ -125,7 +90,7 @@ int sh2_execute_interpreter(SH2 *sh2, int cycles)
 		if (sh2->delay)
 		{
 			sh2->ppc = sh2->delay;
-			opcode = (UINT32)(UINT16)RW(sh2, sh2->delay);
+			opcode = (UINT32)(UINT16)RI(sh2, sh2->delay);
 
 			// TODO: more branch types
 			if ((opcode >> 13) == 5) { // BRA/BSR
@@ -143,7 +108,7 @@ int sh2_execute_interpreter(SH2 *sh2, int cycles)
 		else
 		{
 			sh2->ppc = sh2->pc;
-			opcode = (UINT32)(UINT16)RW(sh2, sh2->pc);
+			opcode = (UINT32)(UINT16)RI(sh2, sh2->pc);
 		}
 
 		sh2->delay = 0;
@@ -185,7 +150,6 @@ int sh2_execute_interpreter(SH2 *sh2, int cycles)
 	while (sh2->icount > 0 || sh2->delay);	/* can't interrupt before delay */
 
 out:
-	sh2->sr = (sh2->sr & 0x3f3) | (sh2->icount << 12) | (sh2->no_polling);
 	return sh2->icount;
 }
 
@@ -239,13 +203,13 @@ int sh2_execute_interpreter(SH2 *sh2, int cycles)
 		if (sh2->delay)
 		{
 			sh2->ppc = sh2->delay;
-			opcode = (UINT32)(UINT16)RW(sh2, sh2->delay);
+			opcode = (UINT32)(UINT16)RI(sh2, sh2->delay);
 			sh2->pc -= 2;
 		}
 		else
 		{
 			sh2->ppc = sh2->pc;
-			opcode = (UINT32)(UINT16)RW(sh2, sh2->pc);
+			opcode = (UINT32)(UINT16)RI(sh2, sh2->pc);
 		}
 
 		sh2->delay = 0;

@@ -302,8 +302,8 @@ void Pico32xSetClocks(int msh2_hz, int ssh2_hz);
 
 // normally 68k clock (7670442) * 3, in reality but much lower
 // because of high memory latencies
-#define PICO_MSH2_HZ ((int)(7670442.0 * 2.4))
-#define PICO_SSH2_HZ ((int)(7670442.0 * 2.4))
+#define PICO_MSH2_HZ ((int)(7670442.0 * 2.9))
+#define PICO_SSH2_HZ ((int)(7670442.0 * 2.9))
 
 // sound.c
 extern void (*PsndMix_32_to_16)(s16 *dest, s32 *src, int count);

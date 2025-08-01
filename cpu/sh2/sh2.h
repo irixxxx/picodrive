@@ -50,7 +50,7 @@ typedef struct SH2_
 #define SH2_STATE_CPOLL (1 << 2)	// polling comm regs
 #define SH2_STATE_VPOLL (1 << 3)	// polling VDP
 #define SH2_STATE_RPOLL (1 << 4)	// polling address in SDRAM
-#define SH2_IN_DRC      (1 << 7)	// DRC in use
+#define SH2_IN_DRC      (1 << 7)	// DRC executing
 	unsigned int	state;
 	uint32_t	poll_addr;
 	unsigned int	poll_cycles;
@@ -147,9 +147,9 @@ u32 REGPARM(3) p32x_sh2_poll_memory32(u32 a, u32 d, SH2 *sh2);
 u32 p32x_soc_read8(u32 a, SH2 *sh2);
 u32 p32x_soc_read16(u32 a, SH2 *sh2);
 u32 p32x_soc_read32(u32 a, SH2 *sh2);
-#define p32x_soc_write8(a, d, sh2)	p32x_sh2_write8(a, d, sh2)
-#define p32x_soc_write16(a, d, sh2)	p32x_sh2_write16(a, d, sh2)
-#define p32x_soc_write32(a, d, sh2)	p32x_sh2_write32(a, d, sh2)
+void REGPARM(3) p32x_soc_write8 (u32 a, u32 d, SH2 *sh2);
+void REGPARM(3) p32x_soc_write16(u32 a, u32 d, SH2 *sh2);
+void REGPARM(3) p32x_soc_write32(u32 a, u32 d, SH2 *sh2);
 
 // debug
 #ifdef DRC_CMP

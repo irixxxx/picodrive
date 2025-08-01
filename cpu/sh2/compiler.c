@@ -2822,7 +2822,7 @@ static int emit_memhandler_read_rr(SH2 *sh2, sh2_reg_e rd, sh2_reg_e rs, s32 off
   int hr, hr2;
   u32 val;
 
-#if PROPAGATE_CONSTANTS
+#if 0 //PROPAGATE_CONSTANTS
   if (emit_get_rom_data(sh2, rs, offs, size, &val)) {
     if (rd == SHR_TMP) {
       hr2 = rcache_get_tmp();
@@ -3836,7 +3836,7 @@ static void REGPARM(2) *sh2_translate(SH2 *sh2, int tcache_id)
       goto end_op;
 
     case OP_LOAD_POOL:
-#if PROPAGATE_CONSTANTS
+#if 0 //PROPAGATE_CONSTANTS
       if ((opd->imm && opd->imm >= base_pc && opd->imm < end_literals) ||
           p32x_sh2_mem_is_rom(opd->imm, sh2))
       {
@@ -5534,13 +5534,13 @@ static void sh2_generate_utils(void)
   emith_clear_msb(tmp, tmp, 22);
   emith_move_r_r_ptr(arg2, CONTEXT_REG);
   rcache_invalidate_tmp();
-  emith_abicall(p32x_sh2_write32); // XXX: use sh2_drc_write32?
+  emith_abicall(p32x_soc_write32); // XXX: use sh2_drc_write32?
   // push PC
   rcache_get_reg_arg(0, SHR_SP, NULL);
   rcache_get_reg_arg(1, SHR_PC, NULL);
   emith_move_r_r_ptr(arg2, CONTEXT_REG);
   rcache_invalidate_tmp();
-  emith_abicall(p32x_sh2_write32);
+  emith_abicall(p32x_soc_write32);
   // update I, cycles, do callback
   emith_ctx_read(arg1, offsetof(SH2, pending_level));
   sr = rcache_get_reg(SHR_SR, RC_GR_RMW, NULL);

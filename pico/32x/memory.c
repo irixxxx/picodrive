@@ -1505,7 +1505,7 @@ static u32 REGPARM(2) sh2_read8_cs0(u32 a, SH2 *sh2)
   u32 d = 0;
   DRC_SAVE_SR(sh2);
 
-  sh2_burn_cycles(sh2, 1*2);
+  sh2_burn_cycles(sh2, 1);
 
   // 0x3ffc0 is verified
   if ((a & 0x3ffc0) == 0x4000) {
@@ -1515,12 +1515,14 @@ static u32 REGPARM(2) sh2_read8_cs0(u32 a, SH2 *sh2)
 
   if ((a & 0x3fff0) == 0x4100) {
     d = p32x_vdp_read16(a);
+    sh2_burn_cycles(sh2, 4);
     p32x_sh2_poll_detect(a, sh2, SH2_STATE_VPOLL, 9);
     goto out_16to8;
   }
 
   if ((a & 0x3fe00) == 0x4200) {
     d = Pico32xMem->pal[(a & 0x1ff) / 2];
+    sh2_burn_cycles(sh2, 4);
     goto out_16to8;
   }
 
@@ -1567,7 +1569,7 @@ static u32 REGPARM(2) sh2_read16_cs0(u32 a, SH2 *sh2)
   u32 d = 0;
   DRC_SAVE_SR(sh2);
 
-  sh2_burn_cycles(sh2, 1*2);
+  sh2_burn_cycles(sh2, 1);
 
   if ((a & 0x3ffc0) == 0x4000) {
     d = p32x_sh2reg_read16(a, sh2);
@@ -1578,14 +1580,14 @@ static u32 REGPARM(2) sh2_read16_cs0(u32 a, SH2 *sh2)
 
   if ((a & 0x3fff0) == 0x4100) {
     d = p32x_vdp_read16(a);
-    sh2->sr -= 5<<12;
+    sh2_burn_cycles(sh2, 4);
     p32x_sh2_poll_detect(a, sh2, SH2_STATE_VPOLL, 9);
     goto out;
   }
 
   if ((a & 0x3fe00) == 0x4200) {
     d = Pico32xMem->pal[(a & 0x1ff) / 2];
-    sh2->sr -= 5<<12;
+    sh2_burn_cycles(sh2, 4);
     goto out;
   }
 
@@ -1725,7 +1727,7 @@ extern void REGPARM(3) sh2_write8_da(u32 a, u32 d, SH2 *sh2);
 static void REGPARM(3) sh2_write8_dram(u32 a, u32 d, SH2 *sh2)
 {
   DRC_SAVE_SR(sh2);
-  sh2->sr -= 4<<12;
+  sh2_burn_cycles(sh2, 4);
   DRC_RESTORE_SR(sh2);
 
   sh2_write8_dramN(sh2->p_dram, a, d);
@@ -1770,6 +1772,8 @@ static void REGPARM(3) sh2_write16_cs0(u32 a, u32 d, SH2 *sh2)
     elprintf_sh2(sh2, EL_32X, "w16 [%08x]     %04x @%06x",
       a, d & 0xffff, sh2_pc(sh2));
 
+  sh2_burn_cycles(sh2, 1);
+
   if ((a & 0x3ffc0) == 0x4000) {
     p32x_sh2reg_write16(a, d, sh2);
     goto out;
@@ -1779,7 +1783,7 @@ static void REGPARM(3) sh2_write16_cs0(u32 a, u32 d, SH2 *sh2)
     if ((a & 0x3fff0) == 0x4100) {
       sh2->poll_cnt = 0;
       p32x_vdp_write16(a, d, sh2);
-      sh2->sr -= 5<<12;
+      sh2_burn_cycles(sh2, 4);
       goto out;
     }
 
@@ -1789,7 +1793,7 @@ static void REGPARM(3) sh2_write16_cs0(u32 a, u32 d, SH2 *sh2)
         Pico32xDrawSync(sh2);
       Pico32xMem->pal[(a & 0x1ff) / 2] = d;
       Pico32x.dirty_pal = 1;
-      sh2->sr -= 5<<12;
+      sh2_burn_cycles(sh2, 4);
       goto out;
     }
   }
@@ -1807,7 +1811,7 @@ extern void REGPARM(3) sh2_write16_da(u32 a, u32 d, SH2 *sh2);
 static void REGPARM(3) sh2_write16_dram(u32 a, u32 d, SH2 *sh2)
 {
   DRC_SAVE_SR(sh2);
-  sh2->sr -= 4<<12;
+  sh2_burn_cycles(sh2, 4);
   DRC_RESTORE_SR(sh2);
 
   sh2_write16_dramN(sh2->p_dram, a, d);
@@ -1886,7 +1890,7 @@ extern void REGPARM(3) sh2_write32_da(u32 a, u32 d, SH2 *sh2);
 static void REGPARM(3) sh2_write32_dram(u32 a, u32 d, SH2 *sh2)
 {
   DRC_SAVE_SR(sh2);
-  sh2->sr -= 8<<12;
+  sh2_burn_cycles(sh2, 7);
   DRC_RESTORE_SR(sh2);
 
   sh2_write32_dramN(sh2->p_dram, a, d);
@@ -1896,6 +1900,10 @@ static void REGPARM(3) sh2_write32_sdram(u32 a, u32 d, SH2 *sh2)
 {
   u32 a1 = a & 0x3fffc;
   *(u32 *)((char*)sh2->p_sdram + a1) = CPU_BE2(d);
+
+  DRC_SAVE_SR(sh2);
+  sh2_burn_cycles(sh2, 1);
+  DRC_RESTORE_SR(sh2);
 #ifdef DRC_SH2
   u8 *p = sh2->p_drcblk_ram;
   u32 t = p[a1 >> SH2_DRCBLK_RAM_SHIFT];
@@ -1975,57 +1983,7 @@ u32 p32x_soc_read32(u32 a, SH2 *sh2)
     return ((sh2_read_handler *)(p << 1))(a, sh2);
 }
 
-// SH2 bus access handlers, with cycle accounting for bus wait cycles
-u32 REGPARM(2) p32x_sh2_read8(u32 a, SH2 *sh2)
-{
-  const sh2_memmap *sh2_map = sh2->read8_map;
-  uptr p;
-
-  sh2_map += SH2MAP_ADDR2OFFS_R(a);
-  p = sh2_map->addr;
-  if (!map_flag_set(p)) {
-    DRC_SAVE_SR(sh2);
-    sh2->sr -= (sh2_map->mask>>28) << 12;
-    DRC_RESTORE_SR(sh2);
-    return *(s8 *)((p << 1) + MEM_BE2(a & sh2_map->mask & ~(0xf<<28)));
-  } else
-    return ((sh2_read_handler *)(p << 1))(a, sh2);
-}
-
-u32 REGPARM(2) p32x_sh2_read16(u32 a, SH2 *sh2)
-{
-  const sh2_memmap *sh2_map = sh2->read16_map;
-  uptr p;
-
-  sh2_map += SH2MAP_ADDR2OFFS_R(a);
-  p = sh2_map->addr;
-  if (!map_flag_set(p)) {
-    DRC_SAVE_SR(sh2);
-    sh2->sr -= (sh2_map->mask>>28) << 12;
-    DRC_RESTORE_SR(sh2);
-    return *(s16 *)((p << 1) + (a & sh2_map->mask & ~(0xf<<28)));
-  } else
-    return ((sh2_read_handler *)(p << 1))(a, sh2);
-}
-
-u32 REGPARM(2) p32x_sh2_read32(u32 a, SH2 *sh2)
-{
-  const sh2_memmap *sh2_map = sh2->read32_map;
-  uptr p;
-
-  sh2_map += SH2MAP_ADDR2OFFS_R(a);
-  p = sh2_map->addr;
-  if (!map_flag_set(p)) {
-    u32 *pd = (u32 *)((p << 1) + (a & sh2_map->mask & ~(0xf<<28)));
-    DRC_SAVE_SR(sh2);
-    sh2->sr -= (sh2_map->mask>>28) << 12;
-    DRC_RESTORE_SR(sh2);
-    return CPU_BE2(*pd);
-  } else
-    return ((sh2_read_handler *)(p << 1))(a, sh2);
-}
-
-void REGPARM(3) (p32x_sh2_write8)(u32 a, u32 d, SH2 *sh2)
+void REGPARM(3) p32x_soc_write8(u32 a, u32 d, SH2 *sh2)
 {
   const void **sh2_wmap = sh2->write8_tab;
   sh2_write_handler *wh;
@@ -2034,7 +1992,7 @@ void REGPARM(3) (p32x_sh2_write8)(u32 a, u32 d, SH2 *sh2)
   wh(a, d, sh2);
 }
 
-void REGPARM(3) (p32x_sh2_write16)(u32 a, u32 d, SH2 *sh2)
+void REGPARM(3) p32x_soc_write16(u32 a, u32 d, SH2 *sh2)
 {
   const void **sh2_wmap = sh2->write16_tab;
   sh2_write_handler *wh;
@@ -2043,13 +2001,113 @@ void REGPARM(3) (p32x_sh2_write16)(u32 a, u32 d, SH2 *sh2)
   wh(a, d, sh2);
 }
 
-void REGPARM(3) (p32x_sh2_write32)(u32 a, u32 d, SH2 *sh2)
+void REGPARM(3) p32x_soc_write32(u32 a, u32 d, SH2 *sh2)
 {
   const void **sh2_wmap = sh2->write32_tab;
   sh2_write_handler *wh;
 
   wh = sh2_wmap[SH2MAP_ADDR2OFFS_W(a)];
   wh(a, d, sh2);
+}
+
+// SH2 bus access handlers for interpreter, with bus wait cycle accounting
+#define IP_COMBINE_SR(sh2) \
+  sh2->sr |= (sh2->icount << 12) | (sh2->no_polling)
+#define IP_SPLIT_SR(sh2) do { \
+  sh2->icount = (int32_t)sh2->sr >> 12; \
+  sh2->no_polling = (sh2->sr & SH2_NO_POLLING); \
+  sh2->sr &= 0x3f3; \
+} while (0)
+
+u32 REGPARM(2) p32x_sh2_read8(u32 a, SH2 *sh2)
+{
+  const sh2_memmap *sh2_map = sh2->read8_map;
+  uptr p;
+  u32 d;
+
+  sh2_map += SH2MAP_ADDR2OFFS_R(a);
+  p = sh2_map->addr;
+  if (!map_flag_set(p)) {
+    sh2->icount -= sh2_map->mask>>28;
+    d = *(s8 *)((p << 1) + MEM_BE2(a & sh2_map->mask & ~(0xf<<28)));
+  } else {
+    IP_COMBINE_SR(sh2);
+    d = ((sh2_read_handler *)(p << 1))(a, sh2);
+    IP_SPLIT_SR(sh2);
+  }
+  return d;
+}
+
+u32 REGPARM(2) p32x_sh2_read16(u32 a, SH2 *sh2)
+{
+  const sh2_memmap *sh2_map = sh2->read16_map;
+  uptr p;
+  u32 d;
+
+  sh2_map += SH2MAP_ADDR2OFFS_R(a);
+  p = sh2_map->addr;
+  if (!map_flag_set(p)) {
+    sh2->icount -= sh2_map->mask>>28;
+    d = *(s16 *)((p << 1) + (a & sh2_map->mask & ~(0xf<<28)));
+  } else {
+    IP_COMBINE_SR(sh2);
+    d = ((sh2_read_handler *)(p << 1))(a, sh2);
+    IP_SPLIT_SR(sh2);
+  }
+  return d;
+}
+
+u32 REGPARM(2) p32x_sh2_read32(u32 a, SH2 *sh2)
+{
+  const sh2_memmap *sh2_map = sh2->read32_map;
+  uptr p;
+  u32 d;
+
+  sh2_map += SH2MAP_ADDR2OFFS_R(a);
+  p = sh2_map->addr;
+  if (!map_flag_set(p)) {
+    u32 *pd = (u32 *)((p << 1) + (a & sh2_map->mask & ~(0xf<<28)));
+    sh2->icount -= sh2_map->mask>>28;
+    d = CPU_BE2(*pd);
+  } else {
+    IP_COMBINE_SR(sh2);
+    d = ((sh2_read_handler *)(p << 1))(a, sh2);
+    IP_SPLIT_SR(sh2);
+  }
+  return d;
+}
+
+void REGPARM(3) p32x_sh2_write8(u32 a, u32 d, SH2 *sh2)
+{
+  const void **sh2_wmap = sh2->write8_tab;
+  sh2_write_handler *wh;
+
+  IP_COMBINE_SR(sh2);
+  wh = sh2_wmap[SH2MAP_ADDR2OFFS_W(a)];
+  wh(a, d, sh2);
+  IP_SPLIT_SR(sh2);
+}
+
+void REGPARM(3) p32x_sh2_write16(u32 a, u32 d, SH2 *sh2)
+{
+  const void **sh2_wmap = sh2->write16_tab;
+  sh2_write_handler *wh;
+
+  IP_COMBINE_SR(sh2);
+  wh = sh2_wmap[SH2MAP_ADDR2OFFS_W(a)];
+  wh(a, d, sh2);
+  IP_SPLIT_SR(sh2);
+}
+
+void REGPARM(3) p32x_sh2_write32(u32 a, u32 d, SH2 *sh2)
+{
+  const void **sh2_wmap = sh2->write32_tab;
+  sh2_write_handler *wh;
+
+  IP_COMBINE_SR(sh2);
+  wh = sh2_wmap[SH2MAP_ADDR2OFFS_W(a)];
+  wh(a, d, sh2);
+  IP_SPLIT_SR(sh2);
 }
 
 void *p32x_sh2_get_mem_ptr(u32 a, u32 *mask, SH2 *sh2)
@@ -2395,6 +2453,54 @@ void Pico32xSwapDRAM(int b)
   msh2.p_dram  = ssh2.p_dram  = Pico32xMem->dram[b];
 }
 
+// NB all directly mapped areas have the wait cycles in the top 4 bits. The
+// typical miss rate for a 4KB 4-way assiciative unified cache is a good 10%,
+// for the 2KB 2-way case (with 2KB data array usable as internal fast RAM)
+// it's closer to 20%. By the SH7604 doc, a cache hit doesn't have latency,
+// so only a cache miss needs to be considered. All RAM types have access
+// times between 5 and 15 cycles, so to emulate cache misses we go for 2 wait
+// cycles over the board, but for the data array (internal fast RAM).
+
+void Pico32xSetCache(int slave, int en)
+{
+  sh2_memmap *read8_map, *read16_map, *read32_map;
+  int i;
+
+  read8_map  = slave ? ssh2_read8_map  : msh2_read8_map;
+  read16_map = slave ? ssh2_read16_map : msh2_read16_map;
+  read32_map = slave ? ssh2_read32_map : msh2_read32_map;
+
+  for (i = 0x02; i <= 0x06; i+=2) {
+    read8_map[i/2].mask  &= ~(0xf<<28);
+    read16_map[i/2].mask &= ~(0xf<<28);
+    read32_map[i/2].mask &= ~(0xf<<28);
+    read8_map[0x10+i/2].mask  &= ~(0xf<<28);
+    read16_map[0x10+i/2].mask &= ~(0xf<<28);
+    read32_map[0x10+i/2].mask &= ~(0xf<<28);
+  }
+
+  read8_map[0x02/2].mask  |= 8 << 28;
+  read16_map[0x02/2].mask |= 8 << 28;
+  read32_map[0x02/2].mask |= 15 << 28;
+  read8_map[0x22/2].mask  |= 8 << 28;
+  read16_map[0x22/2].mask |= 8 << 28;
+  read32_map[0x22/2].mask |= 15 << 28;
+
+  read8_map[0x04/2].mask  |= (en ? 1 : 5) << 28;
+  read16_map[0x04/2].mask |= (en ? 1 : 5) << 28;
+  read32_map[0x04/2].mask |= (en ? 2 : 10) << 28;
+  read8_map[0x24/2].mask  |= 5 << 28;
+  read16_map[0x24/2].mask |= 5 << 28;
+  read32_map[0x24/2].mask |= 10 << 28;
+
+  read8_map[0x06/2].mask  |= (en ? 2 : 10) << 28;
+  read16_map[0x06/2].mask |= (en ? 2 : 10) << 28;
+  read32_map[0x06/2].mask |= (en ? 3 : 11) << 28;
+  read8_map[0x26/2].mask  |= 10 << 28;
+  read16_map[0x26/2].mask |= 10 << 28;
+  read32_map[0x26/2].mask |= 11 << 28;
+}
+
 static void bank_switch_rom_sh2(void)
 {
   if (!carthw_ssf2_active) {
@@ -2492,14 +2598,6 @@ void PicoMemSetup32x(void)
     msh2_write32_map[i >> 1] = sh2_write_ignore;
   }
 
-  // NB all directly mapped areas have the wait cycles in the top 4 bits. The
-  // typical miss rate for a 4KB 4-way assiciative unified cache is a good 10%,
-  // for the 2KB 2-way case (with 2KB data array usable as internal fast RAM)
-  // it's closer to 20%. By the SH7604 doc, a cache hit doesn't have latency,
-  // so only a cache miss needs to be considered. All RAM types have access
-  // times between 5 and 15 cycles, so to emulate cache misses we go for 2 wait
-  // cycles over the board, but for the data array (internal fast RAM).
-
   // CS0
   msh2_read8_map[0x00/2].addr  = msh2_read8_map[0x20/2].addr  = MAP_HANDLER(sh2_read8_cs0);
   msh2_read16_map[0x00/2].addr = msh2_read16_map[0x20/2].addr = MAP_HANDLER(sh2_read16_cs0);
@@ -2510,15 +2608,15 @@ void PicoMemSetup32x(void)
   // CS1 - ROM
   bank_switch_rom_sh2();
   for (rs = 0x8000; rs < Pico.romsize && rs < 0x400000; rs *= 2) ; 
-  msh2_read8_map[0x02/2].mask  = msh2_read8_map[0x22/2].mask  = (rs-1) | (2<<28);
-  msh2_read16_map[0x02/2].mask = msh2_read16_map[0x22/2].mask = (rs-1) | (2<<28);
-  msh2_read32_map[0x02/2].mask = msh2_read32_map[0x22/2].mask = (rs-1) | (4<<28);
+  msh2_read8_map[0x02/2].mask  = msh2_read8_map[0x22/2].mask  = rs-1;
+  msh2_read16_map[0x02/2].mask = msh2_read16_map[0x22/2].mask = rs-1;
+  msh2_read32_map[0x02/2].mask = msh2_read32_map[0x22/2].mask = rs-1;
   msh2_write16_map[0x02/2] = msh2_write16_map[0x22/2] = sh2_write16_rom;
   msh2_write32_map[0x02/2] = msh2_write32_map[0x22/2] = sh2_write32_rom;
   // CS2 - DRAM 
-  msh2_read8_map[0x04/2].mask  = msh2_read8_map[0x24/2].mask  = 0x01ffff | (2<<28);
-  msh2_read16_map[0x04/2].mask = msh2_read16_map[0x24/2].mask = 0x01fffe | (2<<28);
-  msh2_read32_map[0x04/2].mask = msh2_read32_map[0x24/2].mask = 0x01fffc | (4<<28);
+  msh2_read8_map[0x04/2].mask  = msh2_read8_map[0x24/2].mask  = 0x01ffff;
+  msh2_read16_map[0x04/2].mask = msh2_read16_map[0x24/2].mask = 0x01fffe;
+  msh2_read32_map[0x04/2].mask = msh2_read32_map[0x24/2].mask = 0x01fffc;
   msh2_write8_map[0x04/2]  = msh2_write8_map[0x24/2]  = sh2_write8_dram;
   msh2_write16_map[0x04/2] = msh2_write16_map[0x24/2] = sh2_write16_dram;
   msh2_write32_map[0x04/2] = msh2_write32_map[0x24/2] = sh2_write32_dram;
@@ -2531,9 +2629,9 @@ void PicoMemSetup32x(void)
 
   msh2_write16_map[0x06/2]      = msh2_write16_map[0x26/2]      = sh2_write16_sdram;
   msh2_write32_map[0x06/2]      = msh2_write32_map[0x26/2]      = sh2_write32_sdram;
-  msh2_read8_map[0x06/2].mask   = msh2_read8_map[0x26/2].mask   = 0x03ffff | (2<<28);
-  msh2_read16_map[0x06/2].mask  = msh2_read16_map[0x26/2].mask  = 0x03fffe | (2<<28);
-  msh2_read32_map[0x06/2].mask  = msh2_read32_map[0x26/2].mask  = 0x03fffc | (4<<28);
+  msh2_read8_map[0x06/2].mask   = msh2_read8_map[0x26/2].mask   = 0x03ffff;
+  msh2_read16_map[0x06/2].mask  = msh2_read16_map[0x26/2].mask  = 0x03fffe;
+  msh2_read32_map[0x06/2].mask  = msh2_read32_map[0x26/2].mask  = 0x03fffc;
   // SH2 data array
   msh2_read8_map[0xc0/2].mask  = 0x0fff;
   msh2_read16_map[0xc0/2].mask = 0x0ffe;
@@ -2575,6 +2673,9 @@ void PicoMemSetup32x(void)
   ssh2.write8_tab  = (const void **)(void *)ssh2_write8_map;
   ssh2.write16_tab = (const void **)(void *)ssh2_write16_map;
   ssh2.write32_tab = (const void **)(void *)ssh2_write32_map;
+
+  Pico32xSetCache(0, 0);
+  Pico32xSetCache(1, 0);
 
   // convenience ptrs
   msh2.p_sdram = ssh2.p_sdram = Pico32xMem->sdram;
