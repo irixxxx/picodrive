@@ -1431,7 +1431,8 @@ static int ym2612_write_local(u32 a, u32 d, int is_from_z80)
           elprintf(EL_YMTIMER, "st mode %02x", d);
           ym2612_sync_timers(cycles, old_mode, d);
 
-          ym2612.OPN.ST.mode = d;
+          if ((d ^ old_mode) & 0xc0)
+            break;
 
           /* reset Timer a flag */
           if (d & 0x10)
@@ -1441,13 +1442,7 @@ static int ym2612_write_local(u32 a, u32 d, int is_from_z80)
           if (d & 0x20)
             ym2612.OPN.ST.status &= ~2;
 
-          if ((d ^ old_mode) & 0xc0) {
-#ifdef __GP2X__
-            if (PicoIn.opt & POPT_EXT_FM) return YM2612Write_940(a, d, get_scanline(is_from_z80));
-#endif
-            PsndDoFM(cycles);
-            return 1;
-          }
+          ym2612.OPN.ST.mode = d;
           return 0;
         }
         case 0x2a: { /* DAC data */

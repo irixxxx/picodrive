@@ -26,7 +26,9 @@ typedef s32		INT32;   /* signed 32bit   */
 /* struct describing a single operator (SLOT) */
 typedef struct
 {
-	INT32	*DT;		/* #0x00 detune          :dt_tab[DT] */
+	UINT8	detune;		/* #0x00 detune */
+	UINT8	detune_overflow;
+	UINT8	pad0[2];
 	UINT8	ar;		/* #0x04 attack rate  */
 	UINT8	d1r;		/* #0x05 decay rate   */
 	UINT8	d2r;		/* #0x06 sustain rate */
@@ -84,21 +86,22 @@ typedef struct
 	UINT8	kcode;		/* +11 key code:                        */
 	UINT8	pad2;
 	UINT8	upd_cnt;	/* eg update counter */
-	UINT32	fc;		/* fnum,blk:adjusted to sample rate */
+	UINT32	pad3;
 	UINT32	block_fnum;	/* current blk/fnum value for this slot (can be different betweeen slots of one channel in 3slot mode) */
 
 	/* LFO */
 	UINT8	AMmasks;	/* AM enable flag */
-	UINT8	pad3[3];
+	UINT8	pad4[3];
 } FM_CH;
 
 typedef struct
 {
 	int		clock;		/* master clock  (Hz)   */
 	int		rate;		/* sampling rate (Hz)   */
-	double	freqbase;	/* 08 frequency base       */
-	UINT8	address;	/* 10 address register | need_save     */
-	UINT8	status;		/* 11 status flag | need_save          */
+	double	freqbase;	/* frequency base       */
+	UINT32	freqbase_ui;
+	UINT8	address;	/* address register | need_save     */
+	UINT8	status;		/* status flag | need_save          */
 	UINT8	mode;		/* mode  CSM / 3SLOT    */
 	UINT8	flags;		/* operational flags	*/
 	int		TA;			/* timer a              */
@@ -110,8 +113,6 @@ typedef struct
 	UINT8	pad2[1];
 	//int		TBC;		/* timer b maxval       */
 	//int		TBT;		/* timer b ticker | need_save */
-	/* local time tables */
-	INT32	dt_tab[8][32];/* DeTune table       */
 } FM_ST;
 
 #define ST_SSG		1
@@ -124,7 +125,6 @@ typedef struct
 /* OPN 3slot struct */
 typedef struct
 {
-	UINT32  fc[3];			/* fnum3,blk3: calculated */
 	UINT8	fn_h;			/* freq3 latch */
 	UINT8	kcode[3];		/* key code */
 	UINT32	block_fnum[3];	/* current fnum value for this slot (can be different betweeen slots of one channel in 3slot mode) */

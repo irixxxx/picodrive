@@ -152,6 +152,7 @@ void memset32(void *dest, int c, int count);
 /* globals */
 
 #define FREQ_SH			16  /* 16.16 fixed point (frequency calculations) */
+#define FREQBASE_SH		9   /* Q9    fixed point */
 #define EG_SH			16  /* 16.16 fixed point (envelope generator timing) */
 #define LFO_SH			24  /*  8.24 fixed point (LFO calculations)       */
 
@@ -364,20 +365,25 @@ O( 0),O( 0),O( 0),O( 0),O( 0),O( 0),O( 0),O( 0)
 };
 #undef O
 
-static const UINT8 dt_tab[4 * 32]={
+static const INT8 dt_tab[4][32] = {
 /* this is YM2151 and YM2612 phase increment data (in 10.10 fixed point format)*/
+    {
 /* FD=0 */
 	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+    }, {
 /* FD=1 */
 	0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 2, 2, 2, 2,
-	2, 3, 3, 3, 4, 4, 4, 5, 5, 6, 6, 7, 8, 8, 8, 8,
+	2, 3, 3, 3, 4, 4, 4, 5, 5, 6, 6, 7, 8, 8, 8, 8
+    }, {
 /* FD=2 */
 	1, 1, 1, 1, 2, 2, 2, 2, 2, 3, 3, 3, 4, 4, 4, 5,
-	5, 6, 6, 7, 8, 8, 9,10,11,12,13,14,16,16,16,16,
+	5, 6, 6, 7, 8, 8, 9,10,11,12,13,14,16,16,16,16
+    }, {
 /* FD=3 */
 	2, 2, 2, 2, 2, 3, 3, 3, 4, 4, 4, 5, 5, 6, 6, 7,
 	8 ,8, 9,10,11,12,13,14,16,17,19,20,22,22,22,22
+    }
 };
 
 
@@ -509,10 +515,6 @@ static const UINT8 lfo_pm_output[7*8][8]={ /* 7 bits meaningful (of F-NUMBER), 8
 /* all 128 LFO PM waveforms */
 static INT32 lfo_pm_table[128*8*32]; /* 128 combinations of 7 bits meaningful (of F-NUMBER), 8 LFO depths, 32 LFO output levels per one depth */
 
-/* there are 2048 FNUMs that can be generated using FNUM/BLK registers
-	but LFO works with one more bit of a precision so we really need 4096 elements */
-static UINT32 fn_table[4096];	/* fnumber->increment counter */
-
 /* register number to channel number , slot offset */
 #define OPN_CHAN(N) (N&3)
 #define OPN_SLOT(N) ((N>>2)&3)
@@ -527,6 +529,9 @@ static UINT32 fn_table[4096];	/* fnumber->increment counter */
 /* OPN Mode Register Write */
 static INLINE void set_timers( int v )
 {
+	if ((ym2612.OPN.ST.mode ^ v) & 0xc0)
+		ym2612.CH[2].SLOT[SLOT1].Incr = -1;
+
 	/* b7 = CSM MODE */
 	/* b6 = 3 slot mode */
 	/* b5 = reset b */
@@ -600,7 +605,7 @@ static INLINE void FM_KEYOFF(int c , int s )
 static INLINE void set_det_mul(FM_CH *CH, FM_SLOT *SLOT, int v)
 {
 	SLOT->mul = (v&0x0f)? (v&0x0f)*2 : 1;
-	SLOT->DT  = ym2612.OPN.ST.dt_tab[(v>>4)&7];
+	SLOT->detune = (v>>4)&7;
 	CH->SLOT[SLOT1].Incr=-1;
 }
 
@@ -690,7 +695,7 @@ static INLINE void set_sl_rr(FM_SLOT *SLOT, int v)
 
 static INLINE signed int op_calc(UINT32 phase, unsigned int env, signed int pm)
 {
-	int ret, sin = (phase>>16) + (pm>>1);
+	int ret, sin = (phase >> FREQ_SH) + (pm >> 1);
 	int neg = sin & 0x200;
 	if (sin & 0x100) sin ^= 0xff;
 	sin&=0xff;
@@ -707,7 +712,7 @@ static INLINE signed int op_calc(UINT32 phase, unsigned int env, signed int pm)
 
 static INLINE signed int op_calc1(UINT32 phase, unsigned int env, signed int pm)
 {
-	int ret, sin = (phase+pm)>>16;
+	int ret, sin = (phase + pm) >> FREQ_SH;
 	int neg = sin & 0x200;
 	if (sin & 0x100) sin ^= 0xff;
 	sin&=0xff;
@@ -1237,13 +1242,28 @@ static void chan_render_finish(s32 *buffer, int length, int active_chans)
 	ym2612.OPN.lfo_cnt += ym2612.OPN.lfo_inc * length;
 }
 
-static UINT32 update_lfo_phase(const FM_SLOT *SLOT, UINT32 block_fnum)
+/* calculate the 20bit (Q10) phase increment as in the real chip */
+static INLINE UINT32 get_phase_increment(FM_SLOT *SLOT, UINT32 fnum12, UINT32 blk, UINT32 kcode)
 {
-	UINT32 fnum_lfo;
+	UINT32 inc;
+	int detune = dt_tab[SLOT->detune & 3][kcode];
+	if (SLOT->detune & 4)
+		detune = -detune;
+	inc = (fnum12 << blk) >> 2;
+	inc += detune;
+	SLOT->detune_overflow = inc >> 31;
+	inc &= (1u << 17) - 1;
+	inc = inc * SLOT->mul >> 1;
+	inc &= (1u << 20) - 1;
+	return inc;
+}
+
+static UINT32 update_lfo_phase(FM_SLOT *SLOT, UINT32 freqbase, UINT32 block_fnum, UINT32 kcode)
+{
+	UINT32 fnum_lfo, incr;
 	INT32  lfo_fn_table_index_offset;
 	UINT8  blk;
 	UINT32 fn;
-	int fc,fdt;
 
 	fnum_lfo   = ((block_fnum & 0x7f0) >> 4) * 32 * 8;
 	lfo_fn_table_index_offset = lfo_pm_table[ fnum_lfo + crct.CH->pms + ((crct.pack>>16)&0xff) ];
@@ -1253,19 +1273,15 @@ static UINT32 update_lfo_phase(const FM_SLOT *SLOT, UINT32 block_fnum)
 		blk = (block_fnum&0x7000) >> 12;
 		fn  = block_fnum & 0xfff;
 
-		/* phase increment counter */
-		fc = (fn_table[fn]>>(7-blk));
-
-		fdt = fc + SLOT->DT[crct.CH->kcode];
-		if (fdt < 0) fdt += fn_table[0x7ff*2] >> 2;
-
-		return (fdt * SLOT->mul) >> 1;
+		incr = get_phase_increment(SLOT, fn, blk, kcode);
+		return incr * freqbase >> (FREQBASE_SH - (FREQ_SH-10));
 	} else
 		return SLOT->Incr;
 }
 
 static int chan_render(s32 *buffer, int length, int c, UINT32 flags) // flags: stereo, ?, disabled, ?, pan_r, pan_l
 {
+	UINT32 freqbase = ym2612.OPN.ST.freqbase_ui;
 	crct.CH = &ym2612.CH[c];
 	crct.mem = crct.CH->mem_value;		/* one sample delay memory */
 	crct.lfo_cnt = ym2612.OPN.lfo_cnt;
@@ -1298,19 +1314,21 @@ static int chan_render(s32 *buffer, int length, int c, UINT32 flags) // flags: s
 	if (ym2612.OPN.ST.flags & ST_DAC)
 		crct.algo |= 0x80;
 
-	if(crct.CH->pms && (ym2612.OPN.ST.mode & 0xC0) && c == 2) {
-		/* 3 slot mode */
-		crct.incr1 = update_lfo_phase(&crct.CH->SLOT[SLOT1], ym2612.OPN.SL3.block_fnum[1]);
-		crct.incr2 = update_lfo_phase(&crct.CH->SLOT[SLOT2], ym2612.OPN.SL3.block_fnum[2]);
-		crct.incr3 = update_lfo_phase(&crct.CH->SLOT[SLOT3], ym2612.OPN.SL3.block_fnum[0]);
-		crct.incr4 = update_lfo_phase(&crct.CH->SLOT[SLOT4], crct.CH->block_fnum);
-	}
-	else if(crct.CH->pms)
-	{
-		crct.incr1 = update_lfo_phase(&crct.CH->SLOT[SLOT1], crct.CH->block_fnum);
-		crct.incr2 = update_lfo_phase(&crct.CH->SLOT[SLOT2], crct.CH->block_fnum);
-		crct.incr3 = update_lfo_phase(&crct.CH->SLOT[SLOT3], crct.CH->block_fnum);
-		crct.incr4 = update_lfo_phase(&crct.CH->SLOT[SLOT4], crct.CH->block_fnum);
+	if (crct.CH->pms) {
+		UINT32 block_fnum = crct.CH->block_fnum, kcode = crct.CH->kcode;
+		if ((ym2612.OPN.ST.mode & 0xC0) && c == 2) {
+			/* 3 slot mode */
+			const FM_3SLOT *SL3 = &ym2612.OPN.SL3;
+			crct.incr1 = update_lfo_phase(&crct.CH->SLOT[SLOT1], freqbase, SL3->block_fnum[1], SL3->kcode[1]);
+			crct.incr2 = update_lfo_phase(&crct.CH->SLOT[SLOT2], freqbase, SL3->block_fnum[2], SL3->kcode[2]);
+			crct.incr3 = update_lfo_phase(&crct.CH->SLOT[SLOT3], freqbase, SL3->block_fnum[0], SL3->kcode[0]);
+		}
+		else {
+			crct.incr1 = update_lfo_phase(&crct.CH->SLOT[SLOT1], freqbase, block_fnum, kcode);
+			crct.incr2 = update_lfo_phase(&crct.CH->SLOT[SLOT2], freqbase, block_fnum, kcode);
+			crct.incr3 = update_lfo_phase(&crct.CH->SLOT[SLOT3], freqbase, block_fnum, kcode);
+		}
+		crct.incr4 = update_lfo_phase(&crct.CH->SLOT[SLOT4], freqbase, block_fnum, kcode);
 	}
 	else	/* no LFO phase modulation */
 	{
@@ -1339,16 +1357,16 @@ static int chan_render(s32 *buffer, int length, int c, UINT32 flags) // flags: s
 }
 
 /* update phase increment and envelope generator */
-static INLINE void refresh_fc_eg_slot(FM_SLOT *SLOT, int fc, int kc)
+static void refresh_incr_eg_slot(FM_SLOT *SLOT, UINT32 freqbase, UINT32 fnum, UINT32 kc)
 {
-	int ksr, fdt;
+	int ksr;
 
-	/* (frequency) phase increment counter */
-	fdt = fc+SLOT->DT[kc];
-	/* detect overflow */
-//	if (fdt < 0) fdt += fn_table[0x7ff*2] >> (7-blk-1);
-	if (fdt < 0) fdt += fn_table[0x7ff*2] >> 2;
-	SLOT->Incr = fdt*SLOT->mul >> 1;
+	SLOT->Incr = get_phase_increment(SLOT, fnum << 1, kc >> 2, kc);
+	if (SLOT->detune_overflow)
+		// always force the native rate phase increment, seems to sound a bit better when w/o filter
+		SLOT->Incr <<= FREQ_SH-10;
+	else
+		SLOT->Incr = SLOT->Incr * freqbase >> (FREQBASE_SH - (FREQ_SH-10));
 
 	ksr = kc >> SLOT->KSR;
 	if( SLOT->ksr != ksr )
@@ -1389,45 +1407,29 @@ static INLINE void refresh_fc_eg_slot(FM_SLOT *SLOT, int fc, int kc)
 }
 
 /* update phase increment counters */
-static INLINE void refresh_fc_eg_chan(FM_CH *CH)
+static INLINE void refresh_fc_eg_chan(FM_CH *CH, UINT32 freqbase)
 {
-	if( CH->SLOT[SLOT1].Incr==-1){
-		int fc = CH->fc;
-		int kc = CH->kcode;
-		refresh_fc_eg_slot(&CH->SLOT[SLOT1] , fc , kc );
-		refresh_fc_eg_slot(&CH->SLOT[SLOT2] , fc , kc );
-		refresh_fc_eg_slot(&CH->SLOT[SLOT3] , fc , kc );
-		refresh_fc_eg_slot(&CH->SLOT[SLOT4] , fc , kc );
-	}
-}
-
-static INLINE void refresh_fc_eg_chan_sl3(void)
-{
-	if( ym2612.CH[2].SLOT[SLOT1].Incr==-1)
+	if (CH->SLOT[SLOT1].Incr == -1)
 	{
-		refresh_fc_eg_slot(&ym2612.CH[2].SLOT[SLOT1], ym2612.OPN.SL3.fc[1], ym2612.OPN.SL3.kcode[1] );
-		refresh_fc_eg_slot(&ym2612.CH[2].SLOT[SLOT2], ym2612.OPN.SL3.fc[2], ym2612.OPN.SL3.kcode[2] );
-		refresh_fc_eg_slot(&ym2612.CH[2].SLOT[SLOT3], ym2612.OPN.SL3.fc[0], ym2612.OPN.SL3.kcode[0] );
-		refresh_fc_eg_slot(&ym2612.CH[2].SLOT[SLOT4], ym2612.CH[2].fc , ym2612.CH[2].kcode );
+		int kc = CH->kcode;
+		int fnum = CH->block_fnum & 0x7ff;
+		refresh_incr_eg_slot(&CH->SLOT[SLOT1], freqbase, fnum, kc);
+		refresh_incr_eg_slot(&CH->SLOT[SLOT2], freqbase, fnum, kc);
+		refresh_incr_eg_slot(&CH->SLOT[SLOT3], freqbase, fnum, kc);
+		refresh_incr_eg_slot(&CH->SLOT[SLOT4], freqbase, fnum, kc);
 	}
 }
 
-/* initialize time tables */
-static void init_timetables(const UINT8 *dttable)
+static INLINE void refresh_fc_eg_chan_sl3(FM_CH *CH2, const FM_3SLOT *SL3, UINT32 freqbase)
 {
-	int i,d;
-	double rate;
-
-	/* DeTune table */
-	for (d = 0;d <= 3;d++){
-		for (i = 0;i <= 31;i++){
-			rate = ((double)dttable[d*32 + i]) * ym2612.OPN.ST.freqbase  * (1<<(FREQ_SH-10));
-			ym2612.OPN.ST.dt_tab[d][i]   = (INT32) rate;
-			ym2612.OPN.ST.dt_tab[d+4][i] = -ym2612.OPN.ST.dt_tab[d][i];
-		}
+	if (CH2->SLOT[SLOT1].Incr == -1)
+	{
+		refresh_incr_eg_slot(&CH2->SLOT[SLOT1], freqbase, SL3->block_fnum[1] & 0x7ff, SL3->kcode[1]);
+		refresh_incr_eg_slot(&CH2->SLOT[SLOT2], freqbase, SL3->block_fnum[2] & 0x7ff, SL3->kcode[2]);
+		refresh_incr_eg_slot(&CH2->SLOT[SLOT3], freqbase, SL3->block_fnum[0] & 0x7ff, SL3->kcode[0]);
+		refresh_incr_eg_slot(&CH2->SLOT[SLOT4], freqbase, CH2->block_fnum & 0x7ff, CH2->kcode);
 	}
 }
-
 
 static void reset_channels(FM_CH *CH)
 {
@@ -1441,21 +1443,16 @@ static void reset_channels(FM_CH *CH)
 
 	for( c = 0 ; c < 6 ; c++ )
 	{
-		CH[c].fc = 0;
+		memset(&CH[c], 0, sizeof(CH[c]));
 		for(s = 0 ; s < 4 ; s++ )
 		{
 			CH[c].SLOT[s].Incr = -1;
-			CH[c].SLOT[s].key = 0;
-			CH[c].SLOT[s].phase = 0;
-			CH[c].SLOT[s].ar = CH[c].SLOT[s].ksr = 0;
-			CH[c].SLOT[s].ar_ksr = 0;
-			CH[c].SLOT[s].ssg = CH[c].SLOT[s].ssgn = 0;
-			CH[c].SLOT[s].state= EG_OFF;
+			CH[c].SLOT[s].state = EG_OFF;
 			CH[c].SLOT[s].volume = MAX_ATT_INDEX;
 			CH[c].SLOT[s].vol_out = MAX_ATT_INDEX;
 		}
-		CH[c].mem_value = CH[c].op1_out = 0;
 	}
+	memset(&ym2612.OPN.SL3, 0, sizeof(ym2612.OPN.SL3));
 	ym2612.slot_mask = 0;
 	ym2612.ssg_mask = 0;
 }
@@ -1593,19 +1590,8 @@ static void OPNSetPres(int pres)
 
 	ym2612.OPN.eg_timer_add  = (1<<EG_SH) * freqbase;
 	ym2612.OPN.ST.freqbase = freqbase;
-
-	/* make time tables */
-	init_timetables( dt_tab );
-
-	/* there are 2048 FNUMs that can be generated using FNUM/BLK registers
-        but LFO works with one more bit of a precision so we really need 4096 elements */
-	/* calculate fnumber -> increment counter table */
-	for(i = 0; i < 4096; i++)
-	{
-		/* freq table for octave 7 */
-		/* OPN phase increment counter = 20bit */
-		fn_table[i] = (UINT32)( (double)i * 32 * ym2612.OPN.ST.freqbase * (1<<(FREQ_SH-10)) ); /* -10 because chip works with 10.10 fixed point, while we use 16.16 */
-	}
+	ym2612.OPN.ST.freqbase_ui = round((1 << FREQBASE_SH) * freqbase);
+	//printf("freqbase %f %x\n", freqbase, ym2612.OPN.ST.freqbase_ui);
 
 	/* LFO freq. table */
 	for(i = 0; i < 8; i++)
@@ -1678,8 +1664,6 @@ static int OPNWriteReg(int r, int v)
 				UINT8 blk = ym2612.OPN.ST.fn_h >> 3;
 				/* keyscale code */
 				CH->kcode = (blk<<2) | opn_fktable[fn >> 7];
-				/* phase increment counter */
-				CH->fc = fn_table[fn*2]>>(7-blk);
 
 				/* store fnum in clear form for LFO PM calculations */
 				CH->block_fnum = (blk<<11) | fn;
@@ -1698,8 +1682,6 @@ static int OPNWriteReg(int r, int v)
 				UINT8 blk = ym2612.OPN.SL3.fn_h>>3;
 				/* keyscale code */
 				ym2612.OPN.SL3.kcode[c]= (blk<<2) | opn_fktable[fn >> 7];
-				/* phase increment counter */
-				ym2612.OPN.SL3.fc[c] = fn_table[fn*2]>>(7-blk);
 				ym2612.OPN.SL3.block_fnum[c] = (blk<<11) | fn;
 				ym2612.CH[2].SLOT[SLOT1].Incr=-1;
 			}
@@ -1760,6 +1742,7 @@ static int OPNWriteReg(int r, int v)
 /* Generate samples for YM2612 */
 int YM2612UpdateOne_(s32 *buffer, int length, int stereo, int is_buf_empty)
 {
+	UINT32 freqbase = ym2612.OPN.ST.freqbase_ui;
 	int pan;
 	int active_chs = 0;
 	int flags = stereo ? 1:0;
@@ -1786,16 +1769,16 @@ int YM2612UpdateOne_(s32 *buffer, int length, int stereo, int is_buf_empty)
 	}
 */
 	/* refresh PG and EG */
-	refresh_fc_eg_chan( &ym2612.CH[0] );
-	refresh_fc_eg_chan( &ym2612.CH[1] );
+	refresh_fc_eg_chan(&ym2612.CH[0], freqbase);
+	refresh_fc_eg_chan(&ym2612.CH[1], freqbase);
 	if( (ym2612.OPN.ST.mode & 0xc0) )
 		/* 3SLOT MODE */
-		refresh_fc_eg_chan_sl3();
+		refresh_fc_eg_chan_sl3(&ym2612.CH[2], &ym2612.OPN.SL3, freqbase);
 	else
-		refresh_fc_eg_chan( &ym2612.CH[2] );
-	refresh_fc_eg_chan( &ym2612.CH[3] );
-	refresh_fc_eg_chan( &ym2612.CH[4] );
-	refresh_fc_eg_chan( &ym2612.CH[5] );
+		refresh_fc_eg_chan(&ym2612.CH[2], freqbase);
+	refresh_fc_eg_chan(&ym2612.CH[3], freqbase);
+	refresh_fc_eg_chan(&ym2612.CH[4], freqbase);
+	refresh_fc_eg_chan(&ym2612.CH[5], freqbase);
 
 	pan = ym2612.OPN.pan;
 
@@ -2253,11 +2236,10 @@ int YM2612PicoStateLoad2(int *tat, int *tbt, int *busy)
 
 static size_t save_slot(u8 *buf, const FM_SLOT *slot)
 {
-	size_t tmp, b = 0;
+	size_t b = 0;
 
 	b++; // length, assumes slot state won't grow beyond 255
-	tmp = (slot->DT - ym2612.OPN.ST.dt_tab[0]) / sizeof(ym2612.OPN.ST.dt_tab[0]);
-	save_u8_(buf, &b, tmp);
+	save_u8_(buf, &b, slot->detune);
 	save_u8_(buf, &b, slot->ar);
 	save_u8_(buf, &b, slot->d1r);
 	save_u8_(buf, &b, slot->d2r);
@@ -2283,9 +2265,8 @@ static size_t save_slot(u8 *buf, const FM_SLOT *slot)
 static void load_slot(const u8 *buf, FM_SLOT *slot)
 {
 	size_t b = 0;
-	u8 dt_reg;
 
-	dt_reg       = load_u8_(buf, &b);
+	slot->detune = load_u8_(buf, &b);
 	slot->ar     = load_u8_(buf, &b);
 	slot->d1r    = load_u8_(buf, &b);
 	slot->d2r    = load_u8_(buf, &b);
@@ -2301,8 +2282,6 @@ static void load_slot(const u8 *buf, FM_SLOT *slot)
 	slot->ssg     = load_u8_(buf, &b);
 	slot->ssgn    = load_u8_(buf, &b);
 
-	assert(dt_reg < 8);
-	slot->DT = ym2612.OPN.ST.dt_tab[dt_reg & 7];
 	recalc_volout( slot );
 
 	// trigger a refresh
@@ -2338,7 +2317,6 @@ static size_t save_channel(u8 *buf, const FM_CH *ch)
 static size_t load_channel(const u8 *buf, size_t size, FM_CH *ch)
 {
 	size_t i, b = 0, slot_size = 0, ch_size;
-	u32 fn, blk;
 
 	for (i = 0; i < 4; i++) {
 		u8 size_next = load_u8_(buf, &slot_size);
@@ -2363,10 +2341,6 @@ static size_t load_channel(const u8 *buf, size_t size, FM_CH *ch)
 	ch->upd_cnt    = load_u8_(buf, &b);
 	ch->block_fnum = load_u16(buf, &b) & 0x3fff;
 	ch->AMmasks    = load_u8_(buf, &b);
-
-	fn = ch->block_fnum & 0x7ff;
-	blk = ch->block_fnum >> 11;
-	ch->fc = fn_table[fn*2] >> (7 - blk);
 
 	assert(ch_size >= b - slot_size - 1);
 	return slot_size + 1 + ch_size;
@@ -2437,13 +2411,8 @@ void YM2612PicoStateLoad3(const void *buf_, size_t size)
 	ym2612.OPN.ST.fn_h    = load_u8_(buf, &b);
 	ym2612.OPN.SL3.fn_h   = load_u8_(buf, &b);
 	for (i = 0; i < 3; i++) {
-		u32 fn, blk;
 		ym2612.OPN.SL3.kcode[i] = load_u8_(buf, &b);
 		ym2612.OPN.SL3.block_fnum[i] = load_u16(buf, &b) & 0x3fff;
-
-		fn = ym2612.OPN.SL3.block_fnum[i] & 0x7ff;
-		blk = ym2612.OPN.SL3.block_fnum[i] >> 11;
-		ym2612.OPN.SL3.fc[i] = fn_table[fn*2] >> (7 - blk);
 	}
 	ym2612.OPN.pan      = load_u16(buf, &b);
 	ym2612.OPN.eg_cnt   = load_u16(buf, &b);
