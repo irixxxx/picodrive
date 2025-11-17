@@ -1948,9 +1948,9 @@ static void update_variables(bool first_run)
    var.value = NULL;
    var.key = "picodrive_overclk68k";
    if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value) {
-      PicoIn.overclockM68k = 0;
-      if (var.value[0] == '+')
-         PicoIn.overclockM68k = atoi(var.value + 1);
+      PicoIn.overclockM68k = 100;
+      if (strcmp(var.value, "100%") != 0)
+         PicoIn.overclockM68k = atoi(var.value);
    }
 
 #ifdef DRC_SH2
