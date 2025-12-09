@@ -676,6 +676,7 @@ void emu_prep_defconfig(void)
 	defaultConfig.Frameskip = -1; // auto
 	defaultConfig.input_dev0 = PICO_INPUT_PAD_3BTN;
 	defaultConfig.input_dev1 = PICO_INPUT_PAD_3BTN;
+	defaultConfig.overclock_68k = 100;
 	defaultConfig.volume = 50;
 	defaultConfig.gamma = 100;
 	defaultConfig.scaling = 0;
@@ -742,6 +743,9 @@ int emu_read_config(const char *rom_fname, int no_defaults)
 	}
 
 	pemu_validate_config();
+	if (currentConfig.overclock_68k == 0)
+		currentConfig.overclock_68k = 100;
+
 	PicoIn.overclockM68k = currentConfig.overclock_68k;
 	PicoIn.gunx = currentConfig.gunx;
 	PicoIn.guny = currentConfig.guny;

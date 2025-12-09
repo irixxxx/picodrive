@@ -301,10 +301,10 @@ static int PicoFrameHints(void)
     pevt_log_m68k_o(EVT_NEXT_LINE);
   }
 
-  if (unlikely(PicoIn.overclockM68k)) {
-    unsigned int l = PicoIn.overclockM68k * lines / 100;
+  if (unlikely(PicoIn.overclockM68k != 100)) {
+    unsigned int l = abs(PicoIn.overclockM68k - 100) * lines / 100;
     while (l-- > 0) {
-      Pico.t.m68c_cnt -= CYCLES_M68K_LINE;
+      Pico.t.m68c_cnt += (PicoIn.overclockM68k < 100 ? CYCLES_M68K_LINE : -CYCLES_M68K_LINE);
       do_timing_hacks_start(pv);
       SekSyncM68k(0);
       do_timing_hacks_end(pv);
