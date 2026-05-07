@@ -95,7 +95,7 @@ static retro_environment_t environ_cb;
 static retro_audio_sample_batch_t audio_batch_cb;
 
 #define VOUT_MAX_WIDTH 320
-#define VOUT_MAX_HEIGHT 240
+#define VOUT_MAX_HEIGHT 480
 
 #define SND_RATE_DEFAULT 44100
 #define SND_RATE_MAX     53267
@@ -545,6 +545,13 @@ static void apply_renderer()
       PicoDrawSetOutBuf(Pico.est.Draw2FB, 328);
 }
 
+static int get_interlace_display_height(int height)
+{
+   if (height > 240)
+      return height >> 1;
+   return height;
+}
+
 void emu_video_mode_change(int start_line, int line_count, int start_col, int col_count)
 {
    vm_current_start_line = start_line;
@@ -573,7 +580,7 @@ void emu_video_mode_change(int start_line, int line_count, int start_col, int co
    }
 #else
    vout_width = col_count;
-   memset(vout_buf, 0, VOUT_MAX_WIDTH * VOUT_MAX_HEIGHT * 2);  
+   memset(vout_buf, 0, VOUT_MAX_WIDTH * VOUT_MAX_HEIGHT * 2);
    if (vout_16bit)
       PicoDrawSetOutBuf(vout_buf, vout_width * 2);
 
@@ -691,22 +698,23 @@ void retro_get_system_info(struct retro_system_info *info)
 
 void retro_get_system_av_info(struct retro_system_av_info *info)
 {
-   float tv_height = (vout_height > 144 ? Pico.m.pal ? 240 : 224 : 144);
+   int display_height = get_interlace_display_height(vout_height);
+   float tv_height = (display_height > 144 ? Pico.m.pal ? 240 : 224 : 144);
    float common_width;
 
    memset(info, 0, sizeof(*info));
    info->timing.fps            = Pico.m.pal ? 50 : 60;
    info->timing.sample_rate    = PicoIn.sndRate;
    info->geometry.base_width   = vout_width;
-   info->geometry.base_height  = vout_height;
-   info->geometry.max_width    = vout_width;
-   info->geometry.max_height   = vout_height;
+   info->geometry.base_height  = display_height;
+   info->geometry.max_width    = VOUT_MAX_WIDTH;
+   info->geometry.max_height   = VOUT_MAX_HEIGHT;
 
    common_width = vout_width;
    if (vout_aspect != 0)
       common_width = vout_aspect * tv_height;
 
-   info->geometry.aspect_ratio = common_width / vout_height;
+   info->geometry.aspect_ratio = common_width / display_height;
 }
 
 /* savestates */
@@ -2585,7 +2593,7 @@ void retro_init(void)
    PicoIn.autoRgnOrder = 0x184; // US, EU, JP
 
    vout_width = VOUT_MAX_WIDTH;
-   vout_height = VOUT_MAX_HEIGHT;
+   vout_height = get_interlace_display_height(VOUT_MAX_HEIGHT);
 #ifdef _3DS
    vout_buf = linearMemAlign(VOUT_MAX_WIDTH * VOUT_MAX_HEIGHT * 2, 0x80);
 #elif defined(RENDER_GSKIT_PS2)

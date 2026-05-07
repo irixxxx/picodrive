@@ -108,6 +108,27 @@ int rendstatus_old;
 int rendlines;
 
 static int skip_next_line=0;
+static int draw_interlace_line=0;
+
+static int DrawInterlaceScanline(const struct PicoEState *est)
+{
+  return (est->DrawScanline << 1) | draw_interlace_line;
+}
+
+static int DrawOutputScanline(const struct PicoEState *est, int line, int offs, int subline)
+{
+  if (est->rendstatus & PDRAW_INTERLACE)
+    return (line << 1) | subline;
+  return line + offs;
+}
+
+static void DrawSetOutputLine(struct PicoEState *est, int line)
+{
+  if (HighColIncrement != 0)
+    est->HighCol = HighColBase + line * HighColIncrement;
+  if (DrawLineDestIncrement != 0)
+    est->DrawLineDest = (char *)DrawLineDestBase + line * DrawLineDestIncrement;
+}
 
 struct TileStrip
 {
@@ -409,7 +430,8 @@ void funcname(struct TileStrip *ts, int lflags, int cellskip)		\
   int tilex, dx, ty = 0, cell = 0, nametabadd = 0;			\
   u32 code, oldcode = -1, blank = -1; /* The tile we know is blank */	\
   u32 pal = 0, pack = 0, sh, plane, mask;				\
-  int scan = Pico.est.DrawScanline<<(yshift-4);				\
+  int scan = (yshift == 5) ? DrawInterlaceScanline(&Pico.est)		\
+                           : Pico.est.DrawScanline;			\
 									\
   /* Draw tiles across screen: */					\
   sh = (lflags & LF_SH) << 6; /* shadow */				\
@@ -434,7 +456,7 @@ void funcname(struct TileStrip *ts, int lflags, int cellskip)		\
     /* Find the line in the name table */				\
     line=(vscroll+scan)&(u16)ts->line;    /* ts->line is really ymask, */ \
     nametabadd=(line>>(yshift-1))<<(ts->line>>24); /* and shift[width] */ \
-    ty=((line<<(yshift-4))&ymask)<<1; /* Y-Offset into tile */		\
+    ty=(line&ymask)<<1; /* Y-Offset into tile */			\
   }									\
   if (dx & 7) {								\
     code = PicoMem.vram[ts->nametab + nametabadd + (tilex & ts->xmask)]; \
@@ -459,7 +481,7 @@ void funcname(struct TileStrip *ts, int lflags, int cellskip)		\
       /* Find the line in the name table */				\
       line=(vscroll+scan)&(u16)ts->line;    /* ts->line is really ymask, */ \
       nametabadd=(line>>(yshift-1))<<(ts->line>>24); /* and shift[width] */ \
-      ty=((line<<(yshift-4))&ymask)<<1; /* Y-Offset into tile */	\
+      ty=(line&ymask)<<1; /* Y-Offset into tile */			\
     }									\
 									\
     code = PicoMem.vram[ts->nametab + nametabadd + (tilex & ts->xmask)]; \
@@ -478,7 +500,7 @@ void funcname(struct TileStrip *ts, int lflags, int cellskip)		\
       /* Find the line in the name table */				\
       line=(vscroll+scan)&(u16)ts->line;    /* ts->line is really ymask, */ \
       nametabadd=(line>>(yshift-1))<<(ts->line>>24); /* and shift[width] */ \
-      ty=((line<<(yshift-4))&ymask)<<1; /* Y-Offset into tile */	\
+      ty=(line&ymask)<<1; /* Y-Offset into tile */			\
     }									\
 									\
     code = PicoMem.vram[ts->nametab + nametabadd + (tilex & ts->xmask)]; \
@@ -563,7 +585,7 @@ void funcname(int plane_sh, u32 *hcache, int cellskip, int maxcells, struct Pico
       /* interlace mode 2 */						\
 									\
       /* Find the line in the name table */				\
-      ts.line=(vscroll+(est->DrawScanline<<1))&((ymask<<1)|1);		\
+      ts.line=(vscroll+DrawInterlaceScanline(est))&((ymask<<1)|1);	\
       ts.nametab+=(ts.line>>4)<<shift[width];				\
 									\
       drawstripinterlace(&ts, plane_sh, cellskip);			\
@@ -599,6 +621,7 @@ static void DrawWindow(int tstart, int tend, int prio, int sh,
   unsigned char *pd = est->HighCol;
   struct PicoVideo *pvid = &est->Pico->video;
   int tilex,ty,nametab,code,oldcode=-1,blank=-1; // The tile we know is blank
+  int scanline;
   int yshift,ymask;
   u32 pack=0, pal=0;
   u32 *hc=NULL, lflags=0; // referenced in DrawTile
@@ -606,18 +629,19 @@ static void DrawWindow(int tstart, int tend, int prio, int sh,
   yshift = 4, ymask = 0x7;
   if(likely((pvid->reg[12]&6) == 6))
     yshift = 5, ymask = 0xf;
-  ty=((est->DrawScanline<<(yshift-4))&ymask)<<1; // Y-Offset into tile
+  scanline = (yshift == 5) ? DrawInterlaceScanline(est) : est->DrawScanline;
+  ty=(scanline&ymask)<<1; // Y-Offset into tile
 
   // Find name table line:
   if (pvid->reg[12]&1)
   {
     nametab=(pvid->reg[3]&0x3c)<<9; // 40-cell mode
-    nametab+=(est->DrawScanline>>(yshift-1))<<6;
+    nametab+=(scanline>>(yshift-1))<<6;
   }
   else
   {
     nametab=(pvid->reg[3]&0x3e)<<9; // 32-cell mode
-    nametab+=(est->DrawScanline>>(yshift-1))<<5;
+    nametab+=(scanline>>(yshift-1))<<5;
   }
 
   if (prio && !(est->rendstatus & PDRAW_WND_DIFF_PRIO)) {
@@ -826,7 +850,7 @@ static void DrawSpriteInterlace(u32 *sprite)
   width=(height>>2)&3; height&=3;
   width++; height++; // Width and height in tiles
 
-  row=(Pico.est.DrawScanline<<1)-sy; // Row of the sprite we are on
+  row=DrawInterlaceScanline(&Pico.est)-sy; // Row of the sprite we are on
 
   code=CPU_LE2(sprite[1]);
   sx=((code>>16)&0x1ff)-0x78; // X
@@ -860,7 +884,7 @@ static void DrawSpriteInterlace(u32 *sprite)
 static NOINLINE void DrawAllSpritesInterlace(int pri, int sh)
 {
   struct PicoVideo *pvid=&Pico.video;
-  int i,u,table,link=0,sline=Pico.est.DrawScanline<<1;
+  int i,u,table,link=0,sline=DrawInterlaceScanline(&Pico.est);
   u32 *sprites[80]; // Sprite index
   int max_sprites = pvid->reg[12]&1 ? 80 : 64;
 
@@ -1739,7 +1763,7 @@ static int DrawDisplay(int sh)
 PICO_INTERNAL void PicoFrameStart(void)
 {
   struct PicoEState *est = &Pico.est;
-  int loffs = 8, lines = 224, coffs = 0, columns = 320;
+  int loffs = 8, lines = 224, out_loffs, out_lines, coffs = 0, columns = 320;
   int sprep = est->rendstatus & PDRAW_DIRTY_SPRITES;
   int skipped = est->rendstatus & PDRAW_SKIP_FRAME;
   int sync = est->rendstatus & (PDRAW_SYNC_NEEDED | PDRAW_SYNC_NEXT);
@@ -1773,11 +1797,18 @@ PICO_INTERNAL void PicoFrameStart(void)
   if (!(est->rendstatus & PDRAW_BORDER_32))
     coffs = 0;
 
+  out_loffs = loffs;
+  out_lines = lines;
+  if (est->rendstatus & PDRAW_INTERLACE) {
+    out_loffs = 0;
+    out_lines <<= 1;
+  }
+
   if (est->rendstatus != rendstatus_old || lines != rendlines) {
     rendlines = lines;
     // mode_change() might reset rendstatus_old by calling SetOutFormat
     int rendstatus = est->rendstatus;
-    emu_video_mode_change(loffs, lines, coffs, columns);
+    emu_video_mode_change(out_loffs, out_lines, coffs, columns);
     rendstatus_old = rendstatus;
     // mode_change() might clear buffers, redraw needed
     est->rendstatus |= PDRAW_SYNC_NEEDED;
@@ -1790,10 +1821,11 @@ PICO_INTERNAL void PicoFrameStart(void)
   if (sprep | skipped)
     est->rendstatus |= PDRAW_PARSE_SPRITES;
 
-  est->HighCol = HighColBase + loffs * HighColIncrement;
-  est->DrawLineDest = (char *)DrawLineDestBase + loffs * DrawLineDestIncrement;
+  est->HighCol = HighColBase + out_loffs * HighColIncrement;
+  est->DrawLineDest = (char *)DrawLineDestBase + out_loffs * DrawLineDestIncrement;
   est->DrawScanline = 0;
   skip_next_line = 0;
+  draw_interlace_line = 0;
 
   if (FinalizeLine == FinalizeLine8bit) {
     // make a backup of the current palette in case Sonic mode is detected later
@@ -1806,67 +1838,96 @@ PICO_INTERNAL void PicoFrameStart(void)
 static void DrawBlankedLine(int line, int offs, int sh, int bgc)
 {
   struct PicoEState *est = &Pico.est;
+  int interlace = !!(est->rendstatus & PDRAW_INTERLACE);
   int skip = skip_next_line;
+  int sub;
 
-  if (PicoScanBegin != NULL && skip == 0)
-    skip = PicoScanBegin(line + offs);
+  for (sub = 0; sub <= interlace; sub++) {
+    int out_line = DrawOutputScanline(est, line, offs, sub);
+    draw_interlace_line = sub;
 
-  if (skip) {
-    skip_next_line = skip - 1;
-    return;
+    if (interlace)
+      DrawSetOutputLine(est, out_line);
+    if (PicoScanBegin != NULL && skip == 0)
+      skip = PicoScanBegin(out_line);
+
+    if (skip) {
+      skip--;
+      continue;
+    }
+
+    BackFill(bgc, sh, est);
+
+    if (FinalizeLine != NULL)
+      FinalizeLine(sh, interlace ? out_line : line, est);
+
+    if (PicoScanEnd != NULL)
+      skip = PicoScanEnd(out_line);
+
+    if (!interlace) {
+      est->HighCol += HighColIncrement;
+      est->DrawLineDest = (char *)est->DrawLineDest + DrawLineDestIncrement;
+    }
   }
 
-  BackFill(bgc, sh, est);
-
-  if (FinalizeLine != NULL)
-    FinalizeLine(sh, line, est);
-
-  if (PicoScanEnd != NULL)
-    skip_next_line = PicoScanEnd(line + offs);
-
-  est->HighCol += HighColIncrement;
-  est->DrawLineDest = (char *)est->DrawLineDest + DrawLineDestIncrement;
+  draw_interlace_line = 0;
+  skip_next_line = skip;
 }
 
 static void PicoLine(int line, int offs, int sh, int bgc, int off, int on)
 {
   struct PicoEState *est = &Pico.est;
+  int interlace = !!(est->rendstatus & PDRAW_INTERLACE);
   int skip = skip_next_line;
+  int sub;
 
   est->DrawScanline = line;
-  if (PicoScanBegin != NULL && skip == 0)
-    skip = PicoScanBegin(line + offs);
 
-  if (skip) {
-    skip_next_line = skip - 1;
-    return;
-  }
+  for (sub = 0; sub <= interlace; sub++) {
+    int out_line = DrawOutputScanline(est, line, offs, sub);
+    draw_interlace_line = sub;
 
-  if (est->Pico->video.debug_p & (PVD_FORCE_A | PVD_FORCE_B | PVD_FORCE_S))
-    bgc = 0x3f;
+    if (interlace)
+      DrawSetOutputLine(est, out_line);
+    if (PicoScanBegin != NULL && skip == 0)
+      skip = PicoScanBegin(out_line);
 
-  // Draw screen:
-  BackFill(bgc, sh, est);
-  if (est->Pico->video.reg[1]&0x40) {
-    int width = (est->Pico->video.reg[12]&1) ? 320 : 256;
-    DrawDisplay(sh);
-    // partial line blanking (display on or off inside the line)
-    if (unlikely(off|on)) {
-      if (off > 0)
-        memset(est->HighCol+8 + off, bgc, width-off);
-      if (on > 0)
-        memset(est->HighCol+8, bgc, on);
+    if (skip) {
+      skip--;
+      continue;
+    }
+
+    if (est->Pico->video.debug_p & (PVD_FORCE_A | PVD_FORCE_B | PVD_FORCE_S))
+      bgc = 0x3f;
+
+    // Draw screen:
+    BackFill(bgc, sh, est);
+    if (est->Pico->video.reg[1]&0x40) {
+      int width = (est->Pico->video.reg[12]&1) ? 320 : 256;
+      DrawDisplay(sh);
+      // partial line blanking (display on or off inside the line)
+      if (unlikely(off|on)) {
+        if (off > 0)
+          memset(est->HighCol+8 + off, bgc, width-off);
+        if (on > 0)
+          memset(est->HighCol+8, bgc, on);
+      }
+    }
+
+    if (FinalizeLine != NULL)
+      FinalizeLine(sh, interlace ? out_line : line, est);
+
+    if (PicoScanEnd != NULL)
+      skip = PicoScanEnd(out_line);
+
+    if (!interlace) {
+      est->HighCol += HighColIncrement;
+      est->DrawLineDest = (char *)est->DrawLineDest + DrawLineDestIncrement;
     }
   }
 
-  if (FinalizeLine != NULL)
-    FinalizeLine(sh, line, est);
-
-  if (PicoScanEnd != NULL)
-    skip_next_line = PicoScanEnd(line + offs);
-
-  est->HighCol += HighColIncrement;
-  est->DrawLineDest = (char *)est->DrawLineDest + DrawLineDestIncrement;
+  draw_interlace_line = 0;
+  skip_next_line = skip;
 }
 
 void PicoDrawSync(int to, int off, int on)
@@ -1878,7 +1939,7 @@ void PicoDrawSync(int to, int off, int on)
 
   pprof_start(draw);
 
-  offs = (240-rendlines) >> 1;
+  offs = (est->rendstatus & PDRAW_INTERLACE) ? 0 : (240-rendlines) >> 1;
   if (to >= rendlines)
     to = rendlines-1;
 
@@ -1888,8 +1949,10 @@ void PicoDrawSync(int to, int off, int on)
   else if (!(est->rendstatus & PDRAW_SYNC_NEEDED)) {
     // nothing has changed in VDP/VRAM and buffer is the same -> no sync needed
     int count = to+1 - est->DrawScanline;
-    est->HighCol += count*HighColIncrement;
-    est->DrawLineDest = (char *)est->DrawLineDest + count*DrawLineDestIncrement;
+    if (!(est->rendstatus & PDRAW_INTERLACE)) {
+      est->HighCol += count*HighColIncrement;
+      est->DrawLineDest = (char *)est->DrawLineDest + count*DrawLineDestIncrement;
+    }
     est->DrawScanline = to+1;
     return;
   }
