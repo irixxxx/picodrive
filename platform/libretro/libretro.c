@@ -124,6 +124,9 @@ static int vout_ghosting = 0;
 static bool libretro_update_av_info = false;
 static bool libretro_update_geometry = false;
 
+static int msh2_khz = PICO_MSH2_HZ / 1000;
+static int ssh2_khz = PICO_SSH2_HZ / 1000;
+
 #if defined(RENDER_GSKIT_PS2)
 #define VOUT_8BIT_WIDTH 328
 #define VOUT_8BIT_HEIGHT 256
@@ -1802,6 +1805,7 @@ static void update_variables(bool first_run)
    double new_sound_rate;
    unsigned short old_snd_filter;
    int32_t old_snd_filter_range;
+   int old_msh2_khz, old_ssh2_khz;
 
    var.value = NULL;
    var.key = "picodrive_input1";
@@ -1953,6 +1957,20 @@ static void update_variables(bool first_run)
          PicoIn.overclockM68k = atoi(var.value + 1);
    }
 
+   old_msh2_khz = msh2_khz;
+   var.value = NULL;
+   var.key = "picodrive_msh2clk";
+   if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value) {
+         msh2_khz = atoi(var.value);
+   }
+
+   old_ssh2_khz = ssh2_khz;
+   var.value = NULL;
+   var.key = "picodrive_ssh2clk";
+   if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value) {
+         ssh2_khz = atoi(var.value);
+   }
+
 #ifdef DRC_SH2
    var.value = NULL;
    var.key = "picodrive_drc";
@@ -2063,6 +2081,15 @@ static void update_variables(bool first_run)
          emu_video_mode_change(
                vm_current_start_line, vm_current_line_count,
                vm_current_start_col, vm_current_col_count);
+   }
+
+   /* setup 32X CPU if required */
+   if (PicoIn.AHW & PAHW_32X || first_run) // hw type is not present at firstrun
+   {
+      if (msh2_khz != old_msh2_khz || ssh2_khz != old_ssh2_khz)
+         Pico32xSetClocks(
+         msh2_khz != old_msh2_khz ? msh2_khz * 1000 : 0,
+         ssh2_khz != old_ssh2_khz ? ssh2_khz * 1000 : 0);
    }
 
    /* Reinitialise frameskipping, if required */
