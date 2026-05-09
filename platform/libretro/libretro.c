@@ -858,7 +858,7 @@ void retro_cheat_reset(void)
 		if (addr < Pico.romsize) {
 			if (PicoPatches[i].active)
 				*(unsigned short *)(Pico.rom + addr) = PicoPatches[i].data_old;
-		} else {
+		} else if (!(PicoIn.AHW & PAHW_SMS)) {
 			if (PicoPatches[i].active)
 				m68k_write16(PicoPatches[i].addr,PicoPatches[i].data_old);
 		}
@@ -909,7 +909,7 @@ void retro_cheat_set(unsigned index, bool enabled, const char *code)
 		PicoPatches[PicoPatchCount].comp = pt.comp;
 		if (PicoPatches[PicoPatchCount].addr < Pico.romsize)
 			PicoPatches[PicoPatchCount].data_old = *(uint16_t *)(Pico.rom + PicoPatches[PicoPatchCount].addr);
-		else
+		else if (!(PicoIn.AHW & PAHW_SMS))
 			PicoPatches[PicoPatchCount].data_old = (uint16_t) m68k_read16(PicoPatches[PicoPatchCount].addr);
 		PicoPatchCount++;
 
