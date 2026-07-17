@@ -688,7 +688,7 @@ static void p32x_vdp_write8(u32 a, u32 d, SH2 *sh2)
   switch (a) {
     case 0x01:
       // priority inversion is handled in palette
-      if ((r[0] ^ d) & P32XV_PRI) {
+      if ((r[0] ^ d) & (P32XV_PRI|P32XV_Mx)) {
         Pico32xDrawSync(sh2);
         Pico32x.dirty_pal = 1;
       }
