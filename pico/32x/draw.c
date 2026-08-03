@@ -92,11 +92,11 @@ static void convert_pal555(int invert_prio)
   int i = 320;                                                    \
   while (i > 0) {                                                 \
     for (; i > 0 && (*pmd & 0x3f) == mdbg; pd++, pmd++, i--) {    \
-      t = pal[*(unsigned char *)(MEM_BE2((uintptr_t)(p32x++)))];  \
+      t = pal[*(u8 *)(MEM_BE2((uintptr_t)(p32x++)))];             \
       *pd = t;                                                    \
     }                                                             \
     for (; i > 0 && (*pmd & 0x3f) != mdbg; pd++, pmd++, i--) {    \
-      t = pal[*(unsigned char *)(MEM_BE2((uintptr_t)(p32x++)))];  \
+      t = pal[*(u8 *)(MEM_BE2((uintptr_t)(p32x++)))];             \
       if (t & PXPRIO)                                             \
         *pd = t;                                                  \
       else                                                        \
@@ -106,13 +106,14 @@ static void convert_pal555(int invert_prio)
 }
 
 // run length mode
-#define do_line_rl(pd, p32x, pmd, pmd_draw_code)                  \
+#define do_line_rl(pd, p32x, pmd, offs, pmd_draw_code)            \
 {                                                                 \
-  unsigned short len, t;                                          \
+  short len = offs, t;                                            \
   int i;                                                          \
   for (i = 320; i > 0; p32x++) {                                  \
     t = pal[*p32x & 0xff];                                        \
-    for (len = (*p32x >> 8) + 1; len > 0 && i > 0; len--, i--, pd++, pmd++) { \
+    len += (*p32x >> 8) + 1;                                      \
+    for (; len > 0 && i > 0; len--, i--, pd++, pmd++) {           \
       if ((*pmd & 0x3f) == mdbg || (t & PXPRIO))                  \
         *pd = t;                                                  \
       else                                                        \
@@ -190,13 +191,12 @@ void FinalizeLine32xRGB555(int sh, int line, struct PicoEState *est)
     if (lines_sft_offs & (2<<8)) {
       if (lines_sft_offs & (4<<8)) {
         pmd += H32_OFFSET;
-        do_line_rl(dst, p32x, pmd, MD_LAYER_CODE_H32);
+        do_line_rl(dst, p32x, pmd, 0, MD_LAYER_CODE_H32);
       } else {
-        p32x -= H32_OFFSET;
-        do_line_rl(dst, p32x, pmd,);
+        do_line_rl(dst, p32x, pmd, H32_OFFSET, );
       }
     } else
-      do_line_rl(dst, p32x, pmd,);
+      do_line_rl(dst, p32x, pmd, 0,);
   }
 }
 
@@ -222,14 +222,14 @@ static void do_loop_dc##name(unsigned short *dst,               \
   unsigned short *palmd = Pico.est.HighPal;                     \
   unsigned short *p32x;                                         \
   int lines = (lines_sft_offs >> 16) & 0xff;                    \
-  int h32 = (lines_sft_offs & (2<<8));                          \
+  int h32 = (lines_sft_offs & (2<<8)) ? H32_OFFSET : 0;         \
   int l;                                                        \
-  if (h32 && (lines_sft_offs & (4<<8))) pmd += H32_OFFSET;      \
+  if (lines_sft_offs & (4<<8)) pmd += h32, h32 = 0;             \
   (void)palmd;                                                  \
   for (l = 0; l < lines; l++, pmd += 8) {                       \
     pre_code;                                                   \
     p32x = dram + dram[l + (lines_sft_offs >> 24)];             \
-    if (h32 && !(lines_sft_offs & (4<<8))) p32x -= H32_OFFSET;  \
+    p32x -= h32;                                                \
     do_line_dc(dst, p32x, pmd, inv_bit, md_code);               \
     post_code;                                                  \
     dst += DrawLineDestIncrement32x/2 - 320;                    \
@@ -246,15 +246,15 @@ static void do_loop_pp##name(unsigned short *dst,               \
   unsigned short *palmd = Pico.est.HighPal;                     \
   unsigned char  *p32x;                                         \
   int lines = (lines_sft_offs >> 16) & 0xff;                    \
-  int h32 = (lines_sft_offs & (2<<8));                          \
+  int h32 = (lines_sft_offs & (2<<8)) ? H32_OFFSET : 0;         \
   int l;                                                        \
-  if (h32 && (lines_sft_offs & (4<<8))) pmd += H32_OFFSET;      \
+  if (lines_sft_offs & (4<<8)) pmd += h32, h32 = 0;             \
   (void)palmd;                                                  \
   for (l = 0; l < lines; l++, pmd += 8) {                       \
     pre_code;                                                   \
     p32x = (void *)(dram + dram[l + (lines_sft_offs >> 24)]);   \
     p32x += (lines_sft_offs >> 8) & 1;                          \
-    if (h32 && !(lines_sft_offs & (4<<8))) p32x -= H32_OFFSET;  \
+    p32x -= h32;                                                \
     do_line_pp(dst, p32x, pmd, md_code);                        \
     post_code;                                                  \
     dst += DrawLineDestIncrement32x/2 - 320;                    \
@@ -271,15 +271,14 @@ static void do_loop_rl##name(unsigned short *dst,               \
   unsigned short *palmd = Pico.est.HighPal;                     \
   unsigned short *p32x;                                         \
   int lines = (lines_sft_offs >> 16) & 0xff;                    \
-  int h32 = (lines_sft_offs & (2<<8));                          \
+  int h32 = (lines_sft_offs & (2<<8)) ? H32_OFFSET : 0;         \
   int l;                                                        \
-  if (h32 && (lines_sft_offs & (4<<8))) pmd += H32_OFFSET;      \
   (void)palmd;                                                  \
+  if (lines_sft_offs & (4<<8)) pmd += h32, h32 = 0;             \
   for (l = 0; l < lines; l++, pmd += 8) {                       \
     pre_code;                                                   \
     p32x = dram + dram[l + (lines_sft_offs >> 24)];             \
-    if (h32 && !(lines_sft_offs & (4<<8))) p32x -= H32_OFFSET;  \
-    do_line_rl(dst, p32x, pmd, md_code);                        \
+    do_line_rl(dst, p32x, pmd, h32, md_code);                   \
     post_code;                                                  \
     dst += DrawLineDestIncrement32x/2 - 320;                    \
   }                                                             \
