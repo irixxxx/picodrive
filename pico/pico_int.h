@@ -827,6 +827,7 @@ extern void (*PicoLineHook)(void);
 PICO_INTERNAL int  CheckDMA(int cycles);
 PICO_INTERNAL void PicoDetectRegion(void);
 PICO_INTERNAL void PicoSyncZ80(unsigned int m68k_cycles_done);
+PICO_INTERNAL void PicoSyncVideo(int to, int off, int on);
 
 // cd/mcd.c
 #define PCDS_IEN1     (1<<1)

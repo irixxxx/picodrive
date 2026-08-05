@@ -277,7 +277,7 @@ static void Pico32xRenderSync(int lines)
 void Pico32xDrawSync(SH2 *sh2)
 {
   // the fast renderer isn't operating on a line-by-line base
-  if (sh2 && !(PicoIn.opt & POPT_ALT_RENDERER)) {
+  if (sh2 && !(PicoIn.opt & POPT_ALT_RENDERER) && !PicoIn.skipFrame) {
     unsigned int cycle = (sh2 ? sh2_cycles_done_m68k(sh2) : SekCyclesDone());
     int line = DIVQ32(cycle - Pico.t.m68c_frame_start, 488.5);
 

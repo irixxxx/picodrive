@@ -863,19 +863,19 @@ void PicoVideoSync(int skip)
     if (unlikely(linedisabled >= 0 && linedisabled <= last)) {
       if (Pico.est.DrawScanline <= linedisabled) {
         int sl = vf->fifo_hcounts[lineoffset/clkdiv];
-        PicoDrawSync(linedisabled, sl ? sl : 1, 0);
+        PicoSyncVideo(linedisabled, sl ? sl : 1, 0);
       }
       linedisabled = -1;
     }
     if (unlikely(lineenabled >= 0 && lineenabled <= last)) {
       if (Pico.est.DrawScanline <= lineenabled) {
         int sl = vf->fifo_hcounts[lineoffset/clkdiv];
-        PicoDrawSync(lineenabled, 0, sl ? sl : 1);
+        PicoSyncVideo(lineenabled, 0, sl ? sl : 1);
       }
       lineenabled = -1;
     }
     if (Pico.est.DrawScanline <= last)
-      PicoDrawSync(last, 0, 0);
+      PicoSyncVideo(last, 0, 0);
   }
   if (skip >= 0)
     Pico.est.rendstatus |= PDRAW_SYNC_NEEDED;
