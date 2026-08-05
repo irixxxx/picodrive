@@ -114,6 +114,8 @@
     add     r11,r11,#8
     mov     r6, #320/2
     add     r5, r1, r12, lsl #1 @ p32x = dram + dram[l]
+    and     r12,r2, #0x100      @ shift
+    add     r5, r5, r12,lsr #7
 
     and     lr, r2, #(2|4)<<8
     cmp     lr, #2<<8        @ H32 mode, MD layer centered?
@@ -544,13 +546,20 @@
     mov     r6, #320
     add     r5, r1, r12, lsl #1 @ p32x = dram + dram[l]
 
+    mov     r8, #0
+    and     r12,r2, #0x100   @ shift
+    sub     r8, r8, r12, lsr #8
+
     and     lr, r2, #(2|4)<<8
     cmp     lr, #2<<8        @ H32 mode, MD layer centered?
-    subeq   r5, r5, #3*2     @ MD layer centered
+    addeq   r8, r8, #3       @ MD layer centered
 
 2: @ loop_inner:
-    ldrh    r8, [r5], #2     @ control word
-    and     r12,r8, #0xff
+    ldrh    r12, [r5], #2    @ control word
+    add     r8, r8, r12, lsr #8
+    adds    r8, r8, #1
+    ble     2b
+    and     r12,r12, #0xff
     mov     r12,r12,lsl #1
     ldrh    lr, [r10,r12]    @ t = 32x pixel
     eor     lr, lr, #0x20
@@ -575,8 +584,8 @@
     add     r0, r0, #2
 .endif
 .endif
-    subs    r8, r8, #0x100
-    bge     3b @ loop_innermost
+    subs    r8, r8, #1
+    bgt     3b @ loop_innermost
     b       2b @ loop_inner
 .endm
 

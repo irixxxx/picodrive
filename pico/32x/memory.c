@@ -699,7 +699,7 @@ static void p32x_vdp_write8(u32 a, u32 d, SH2 *sh2)
     case 0x03: // shift (for pp mode)
       if ((r[2 / 2] ^ d) & P32XV_SFT)
         Pico32xDrawSync(sh2);
-      r[2 / 2] = d & 1;
+      r[2 / 2] = d & P32XV_SFT;
       break;
     case 0x05: // fill len
       r[4 / 2] = d & 0xff;
