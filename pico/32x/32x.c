@@ -265,10 +265,10 @@ static void Pico32xRenderSync(int lines)
       int md_bg = Pico.video.reg[7] & 0x3f;
 
       // we draw lines up to the sync point (not line-by-line)
-      PicoDraw32xLayer(offs, lines-Pico32x.sync_line, md_bg);
+      PicoDraw32xLayer(offs, lines-Pico32x.sync_line + 1, md_bg);
     }
     else if (Pico32xDrawMode == PDM32X_BOTH)
-      PicoDraw32xLayerMdOnly(offs, lines-Pico32x.sync_line);
+      PicoDraw32xLayerMdOnly(offs, lines-Pico32x.sync_line + 1);
 
     pprof_end(draw);
   }
@@ -281,7 +281,10 @@ void Pico32xDrawSync(SH2 *sh2)
     unsigned int cycle = (sh2 ? sh2_cycles_done_m68k(sh2) : SekCyclesDone());
     int line = DIVQ32(cycle - Pico.t.m68c_frame_start, 488.5);
 
-    if (Pico32x.sync_line < line && line < (Pico.video.reg[1] & 8 ? 240 : 224)) {
+    cycle = cycle - Pico.t.m68c_frame_start - (int)(488.5*2)*line/2;
+    if (cycle < 50) line--;
+
+    if (Pico32x.sync_line <= line && line < (Pico.video.reg[1] & 8 ? 240 : 224)) {
       // make sure the MD image is also sync'ed to this line for merging
       PicoDrawSync(line, 0, 0);
 
@@ -293,8 +296,8 @@ void Pico32xDrawSync(SH2 *sh2)
       Pico.est.DrawLineDestIncr = incr;
     }
 
-    // remember line we sync'ed to
-    Pico32x.sync_line = line;
+    // remember next line to draw
+    Pico32x.sync_line = line+1;
   }
 }
 
@@ -309,7 +312,7 @@ static void p32x_render_frame(void)
     if (Pico.video.reg[1] & 8)
       lines = 240;
 
-    Pico32xRenderSync(lines);
+    Pico32xRenderSync(lines-1);
   }
 }
 
