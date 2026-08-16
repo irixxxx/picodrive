@@ -1,7 +1,7 @@
 /*
  * PicoDrive
  * (C) notaz, 2009,2010
- * (C) irixxxx, 2019-2024
+ * (C) irixxxx, 2019-2026
  *
  * This work is licensed under the terms of MAME license.
  * See COPYING file in the top-level directory.
@@ -221,17 +221,18 @@ static void do_loop_dc##name(unsigned short *dst,               \
   unsigned char  *pmd = Pico.est.Draw2FB +                      \
                           328 * (lines_sft_offs & 0xff) + 8;    \
   unsigned short *palmd = Pico.est.HighPal;                     \
-  unsigned short *p32x;                                         \
+  unsigned short *p32x, loffs;                                  \
   int lines = (lines_sft_offs >> 16) & 0xff;                    \
   int h32 = (lines_sft_offs & (2<<8)) ? H32_OFFSET : 0;         \
   int l;                                                        \
   if (lines_sft_offs & (4<<8)) pmd += h32, h32 = 0;             \
-  h32 -= (lines_sft_offs >> 8) & 1;                             \
   (void)palmd;                                                  \
   for (l = 0; l < lines; l++, pmd += 8) {                       \
     pre_code;                                                   \
-    p32x = dram + dram[l + (lines_sft_offs >> 24)];             \
-    p32x -= h32;                                                \
+    loffs = dram[l + (lines_sft_offs >> 24)];                   \
+    p32x = dram + loffs - h32;                                  \
+    if ((u8)(loffs+1))                                          \
+      p32x += (lines_sft_offs >> 8) & 1;                        \
     do_line_dc(dst, p32x, pmd, inv_bit, md_code);               \
     post_code;                                                  \
     dst += DrawLineDestIncrement32x/2 - 320;                    \
@@ -247,16 +248,18 @@ static void do_loop_pp##name(unsigned short *dst,               \
                           328 * (lines_sft_offs & 0xff) + 8;    \
   unsigned short *palmd = Pico.est.HighPal;                     \
   unsigned char  *p32x;                                         \
+  unsigned short loffs;                                         \
   int lines = (lines_sft_offs >> 16) & 0xff;                    \
   int h32 = (lines_sft_offs & (2<<8)) ? H32_OFFSET : 0;         \
   int l;                                                        \
   if (lines_sft_offs & (4<<8)) pmd += h32, h32 = 0;             \
-  h32 -= (lines_sft_offs >> 8) & 1;                             \
   (void)palmd;                                                  \
   for (l = 0; l < lines; l++, pmd += 8) {                       \
     pre_code;                                                   \
-    p32x = (void *)(dram + dram[l + (lines_sft_offs >> 24)]);   \
-    p32x -= h32;                                                \
+    loffs = dram[l + (lines_sft_offs >> 24)];                   \
+    p32x = (u8 *)(dram + loffs) - h32;                          \
+    if ((u8)(loffs+1))                                          \
+      p32x += (lines_sft_offs >> 8) & 1;                        \
     do_line_pp(dst, p32x, pmd, md_code);                        \
     post_code;                                                  \
     dst += DrawLineDestIncrement32x/2 - 320;                    \
@@ -271,17 +274,18 @@ static void do_loop_rl##name(unsigned short *dst,               \
   unsigned char  *pmd = Pico.est.Draw2FB +                      \
                           328 * (lines_sft_offs & 0xff) + 8;    \
   unsigned short *palmd = Pico.est.HighPal;                     \
-  unsigned short *p32x;                                         \
+  unsigned short *p32x, loffs;                                  \
   int lines = (lines_sft_offs >> 16) & 0xff;                    \
   int h32 = (lines_sft_offs & (2<<8)) ? H32_OFFSET : 0;         \
   int l;                                                        \
   (void)palmd;                                                  \
   if (lines_sft_offs & (4<<8)) pmd += h32, h32 = 0;             \
-  h32 -= (lines_sft_offs >> 8) & 1;                             \
   for (l = 0; l < lines; l++, pmd += 8) {                       \
     pre_code;                                                   \
-    p32x = dram + dram[l + (lines_sft_offs >> 24)];             \
-    do_line_rl(dst, p32x, pmd, h32, md_code);                   \
+    loffs = dram[l + (lines_sft_offs >> 24)];                   \
+    p32x = dram + loffs;                                        \
+    loffs = (lines_sft_offs & (1<<8)) && ((loffs+1) & 0xff);    \
+    do_line_rl(dst, p32x, pmd, h32-loffs, md_code);             \
     post_code;                                                  \
     dst += DrawLineDestIncrement32x/2 - 320;                    \
   }                                                             \
@@ -352,7 +356,7 @@ void PicoDraw32xLayer(int offs, int lines, int md_bg)
 
 do_it:
   lines_sft_offs = (Pico32x.sync_line << 24) | (lines << 16) | offs;
-  if ((Pico32x.vdp_regs[2 / 2] & P32XV_SFT) && ((dram[offs]+1) & 0xff))
+  if ((Pico32x.vdp_regs[2 / 2] & P32XV_SFT))
     lines_sft_offs |= 1 << 8;
   if (!(Pico.video.reg[12] & 1)) // H32, mind layer offset bit
     lines_sft_offs |= 2 << 8;

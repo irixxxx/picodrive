@@ -1,7 +1,7 @@
 @*
 @* PicoDrive
 @* (C) notaz, 2010
-@* (C) irixxxx, 2019-2023
+@* (C) irixxxx, 2019-2026
 @*
 @* This work is licensed under the terms of MAME license.
 @* See COPYING file in the top-level directory.
@@ -114,8 +114,10 @@
     add     r11,r11,#8
     mov     r6, #320/2
     add     r5, r1, r12, lsl #1 @ p32x = dram + dram[l]
-    and     r12,r2, #0x100      @ shift
-    add     r5, r5, r12,lsr #7
+    add     r12,r12,#1          @ shift, only if line offset != 0xff (hw bug)
+    tst     r12,#0xff
+    andne   r12,r2, #0x100      @ shift
+    addne   r5, r5, r12,lsr #7
 
     and     lr, r2, #(2|4)<<8
     cmp     lr, #2<<8        @ H32 mode, MD layer centered?
@@ -332,8 +334,10 @@
     add     r11,r11,#8
     mov     r6, #320/2
     add     r5, r1, r12, lsl #1 @ p32x = dram + dram[l]
-    and     r12,r2, #0x100      @ shift
-    add     r5, r5, r12,lsr #8
+    add     r12,r12,#1          @ shift, only if line offset != 0xff (hw bug)
+    tst     r12,#0xff
+    andne   r12,r2, #0x100      @ shift
+    addne   r5, r5, r12,lsr #8
 
     and     lr, r2, #(2|4)<<8
     cmp     lr, #2<<8        @ H32 mode, MD layer centered?
@@ -546,9 +550,11 @@
     mov     r6, #320
     add     r5, r1, r12, lsl #1 @ p32x = dram + dram[l]
 
+    add     r12,r12,#1       @ shift, only if line offset != 0xff (hw bug)
+    tst     r12,#0xff
     mov     r8, #0
-    and     r12,r2, #0x100   @ shift
-    sub     r8, r8, r12, lsr #8
+    andne   r12,r2, #0x100   @ shift
+    subne   r8, r8, r12, lsr #8
 
     and     lr, r2, #(2|4)<<8
     cmp     lr, #2<<8        @ H32 mode, MD layer centered?
