@@ -8087,7 +8087,7 @@ opcode_ED_A2:
 	writemem8HL
 	and r2,r1,#0x07<<24			;@ (HL)&7^B
 	ldr r1,[cpucontext,#tables]
-	eor r2,z80bc
+	eor r2,r2,z80bc
 	ldrb r2,[r1,r2,lsr #24]			;@ PZS[(HL)&7^B] & VF
 	copyFlag35 z80bc
 	and r2,r2,#1<<VFlag
@@ -8109,7 +8109,7 @@ opcode_ED_A3:
 	orrcs z80f,z80f,#(1<<CFlag)|(1<<HFlag)	;@ CF & HF set if (HL)+L > 0xFF
 	and r2,r1,#0x07<<24			;@ (HL)&7^B
 	ldr r1,[cpucontext,#tables]
-	eor r2,z80bc
+	eor r2,r2,z80bc
 	ldrb r2,[r1,r2,lsr #24]			;@ PZS[(HL)&7^B] & VF
 	copyFlag35 z80bc
 	and r2,r2,#1<<VFlag
@@ -8171,7 +8171,7 @@ opcode_ED_AA:
 	writemem8HL
 	and r2,r1,#0x07<<24			;@ (HL)&7^B
 	ldr r1,[cpucontext,#tables]
-	eor r2,z80bc
+	eor r2,r2,z80bc
 	ldrb r2,[r1,r2,lsr #24]			;@ PZS[(HL)&7^B] & VF
 	copyFlag35 z80bc
 	and r2,r2,#1<<VFlag
@@ -8192,7 +8192,7 @@ opcode_ED_AB:
 	adds r1,r1,r0,lsl#24
 	orrcs z80f,z80f,#(1<<CFlag)|(1<<HFlag)	;@ CF & HF set if (HL)+L > 0xFF
 	and r2,r1,#0x07<<24			;@ (HL)&7^B
-	eor r2,z80bc
+	eor r2,r2,z80bc
 	ldr r1,[cpucontext,#tables]
 	ldrb r2,[r1,r2,lsr #24]			;@ PZS[(HL)&7^B] & VF
 	and r2,r2,#1<<VFlag
@@ -8260,7 +8260,7 @@ opcode_ED_B2:
 	writemem8HL
 	and r2,r1,#0x07<<24			;@ (HL)&7^B
 	ldr r1,[cpucontext,#tables]
-	eor r2,z80bc
+	eor r2,r2,z80bc
 	ldrb r2,[r1,r2,lsr #24]			;@ PZS[(HL)&7^B] & VF
 	copyFlag35 z80bc
 	and r2,r2,#1<<VFlag
@@ -8283,7 +8283,7 @@ opcode_ED_B3:
 	orrcs z80f,z80f,#(1<<CFlag)|(1<<HFlag)	;@ CF & HF set if (HL)+L > 0xFF
 	and r2,r1,#0x07<<24			;@ (HL)&7^B
 	ldr r1,[cpucontext,#tables]
-	eor r2,z80bc
+	eor r2,r2,z80bc
 	ldrb r2,[r1,r2,lsr #24]			;@ PZS[(HL)&7^B] & VF
 	copyFlag35 z80bc
 	and r2,r2,#1<<VFlag
@@ -8352,7 +8352,7 @@ opcode_ED_BA:
 	writemem8HL
 	and r2,r1,#0x07<<24			;@ (HL)&7^B
 	ldr r1,[cpucontext,#tables]
-	eor r2,z80bc
+	eor r2,r2,z80bc
 	ldrb r2,[r1,r2,lsr #24]			;@ PZS[(HL)&7^B] & VF
 	copyFlag35 z80bc
 	and r2,r2,#1<<VFlag
@@ -8375,7 +8375,7 @@ opcode_ED_BB:
 	orrcs z80f,z80f,#(1<<CFlag)|(1<<HFlag)	;@ CF & HF set if (HL)+L > 0xFF
 	and r2,r1,#0x07<<24			;@ (HL)&7^B
 	ldr r1,[cpucontext,#tables]
-	eor r2,z80bc
+	eor r2,r2,z80bc
 	ldrb r2,[r1,r2,lsr #24]			;@ PZS[(HL)&7^B] & VF
 	copyFlag35 z80bc
 	and r2,r2,#1<<VFlag
