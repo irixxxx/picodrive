@@ -1179,7 +1179,7 @@ static NOINLINE void ParseSprites(int max_lines, int limit)
 {
   const struct PicoEState *est=&Pico.est;
   const struct PicoVideo *pvid=&est->Pico->video;
-  int u,link=0,sh;
+  int u,link=0;
   int table=0;
   s32 *pd = HighPreSpr + HighPreSprBank*2;
   int max_sprites = 80, max_width = 328;
@@ -1199,8 +1199,6 @@ static NOINLINE void ParseSprites(int max_lines, int limit)
     max_sprites = 64, max_line_sprites = 16, max_width = 264;
   if (*est->PicoOpt & POPT_DIS_SPRITE_LIM)
     max_line_sprites = MAX_LINE_SPRITES;
-
-  sh = pvid->reg[0xC]&8; // shadow/hilight?
 
   table=pvid->reg[5]&0x7f;
   if (pvid->reg[12]&1) table&=0x7e; // Lowest bit 0 in 40-cell mode
@@ -1236,7 +1234,7 @@ static NOINLINE void ParseSprites(int max_lines, int limit)
 
       sx_min = 8-(width<<3);
       onscr_x = sx_min < sx && sx < max_width;
-      if (sh && (code2 & 0x6000) == 0x6000)
+      if ((code2 & 0x6000) == 0x6000)
         maybe_op = SPRL_MAY_HAVE_OP;
 
       entry = (((pd - HighPreSpr) / 2) & 0x7f) | ((code2>>8)&0x80);
