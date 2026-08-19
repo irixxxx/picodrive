@@ -255,9 +255,7 @@ static void Pico32xRenderSync(int lines)
 
     pprof_start(draw);
 
-    offs = 8;
-    if (Pico.video.reg[1] & 8)
-      offs = 0;
+    offs = (240 - rendlines) >> 1;
 
     if ((Pico32x.vdp_regs[0] & P32XV_Mx) != 0 && // 32x not blanking
         (!(Pico.video.debug_p & PVD_KILL_32X)))
@@ -284,7 +282,8 @@ void Pico32xDrawSync(SH2 *sh2)
     cycle = cycle - Pico.t.m68c_frame_start - (int)(488.5*2)*line/2;
     if (cycle < 50) line--;
 
-    if (Pico32x.sync_line <= line && line < (Pico.video.reg[1] & 8 ? 240 : 224)) {
+    if (line >= rendlines) line = rendlines-1;
+    if (Pico32x.sync_line <= line) {
       // make sure the MD image is also sync'ed to this line for merging
       PicoDrawSync(line, 0, 0);
 
@@ -303,17 +302,9 @@ void Pico32xDrawSync(SH2 *sh2)
 
 static void p32x_render_frame(void)
 {
-  if (Pico32xDrawMode != PDM32X_OFF && !PicoIn.skipFrame) {
-    int lines;
-
-    pprof_start(draw);
-
-    lines = 224;
-    if (Pico.video.reg[1] & 8)
-      lines = 240;
-
-    Pico32xRenderSync(lines-1);
-  }
+  if (Pico32xDrawMode != PDM32X_OFF && !PicoIn.skipFrame)
+    Pico32xRenderSync(rendlines-1);
+  Pico32x.sync_line = rendlines;
 }
 
 static void p32x_start_blank(void)
@@ -658,6 +649,8 @@ void sync_sh2s_lockstep(unsigned int m68k_target)
 
 void PicoFrame32x(void)
 {
+  int offs = (240-rendlines)>>1;
+
   if (PicoIn.AHW & PAHW_MCD)
     pcd_prepare_frame();
 
@@ -665,6 +658,7 @@ void PicoFrame32x(void)
   Pico32x.sync_line = 0;
   if (Pico32xDrawMode != PDM32X_BOTH)
     Pico.est.rendstatus |= PDRAW_SYNC_NEEDED;
+  DrawLineDest32x = DrawLineDestBase32x + offs * DrawLineDestIncrement32x;
   PicoFrameHints();
 
   p32x_timer_do(&msh2, Pico.t.m68c_aim);

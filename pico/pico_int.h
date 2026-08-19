@@ -1128,6 +1128,9 @@ enum {
   PDM32X_BOTH,
 };
 extern int Pico32xDrawMode;
+extern void *DrawLineDestBase32x;
+extern int DrawLineDestIncrement32x;
+extern void *DrawLineDest32x;
 
 // 32x/pwm.c
 unsigned int p32x_pwm_read16(u32 a, SH2 *sh2, unsigned int m68k_cycles);

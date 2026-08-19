@@ -38,6 +38,8 @@ int Pico32xDrawMode;
 void *DrawLineDestBase32x;
 int DrawLineDestIncrement32x;
 
+void *DrawLineDest32x;
+
 static void convert_pal555(int invert_prio)
 {
   u32 *ps = (void *)Pico32xMem->pal;
@@ -326,7 +328,7 @@ void PicoDraw32xLayer(int offs, int lines, int md_bg)
 
   offs += Pico32x.sync_line;
 
-  Pico.est.DrawLineDest = (char *)DrawLineDestBase32x + offs * DrawLineDestIncrement32x;
+  Pico.est.DrawLineDest = DrawLineDest32x;
   Pico.est.DrawLineDestIncr = DrawLineDestIncrement32x;
   dram = Pico32xMem->dram[Pico32x.vdp_regs[0x0a/2] & P32XV_FS];
 
@@ -374,6 +376,10 @@ do_it:
     which_func = have_scan ? DO_LOOP_SCAN : DO_LOOP;
 
   do_loop[which_func](Pico.est.DrawLineDest, dram, lines_sft_offs, md_bg);
+
+  if (DrawLineDest32x == Pico.est.DrawLineDest)
+    Pico.est.DrawLineDest = (char *)Pico.est.DrawLineDest + lines * DrawLineDestIncrement32x;
+  DrawLineDest32x = Pico.est.DrawLineDest;
 }
 
 // mostly unused, games tend to keep 32X layer on
