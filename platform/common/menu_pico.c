@@ -1079,12 +1079,15 @@ static int menu_loop_gfx_options(int id, int keys)
 static const char *men_confirm_save[] = { "OFF", "writes", "loads", "both", NULL };
 static const char h_confirm_save[]    = "Ask for confirmation when overwriting save,\n"
 					"loading state or both";
+static const char *men_sort_order[] = { "ignore case", "mind case", NULL };
 
 static menu_entry e_menu_ui_options[] =
 {
 	mee_onoff     ("Show FPS",                 MA_OPT_SHOW_FPS,       currentConfig.EmuOpt, EOPT_SHOW_FPS),
 	mee_enum_h    ("Confirm save/load",        MA_OPT_CONFIRM_STATES, currentConfig.confirm_save, men_confirm_save, h_confirm_save),
+	mee_onoff     ("Autoload newest savestate",MA_OPT_AUTOLOAD_SAVE,  g_autostateld_opt, 1),
 	mee_onoff     ("Don't save last used game", MA_OPT2_NO_LAST_ROM,  currentConfig.EmuOpt, EOPT_NO_AUTOSVCFG),
+	mee_enum      ("File selector sort order", MA_OPT_AUTOLOAD_SAVE,  g_alphasort_opt, men_sort_order),
 	mee_end,
 };
 
