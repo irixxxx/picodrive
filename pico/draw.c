@@ -1527,15 +1527,16 @@ void FinalizeLine555(int sh, int line, struct PicoEState *est)
   if ((est->rendstatus & PDRAW_SOFTSCALE) && len < 320) {
     if (len >= 240 && len <= 256) {
       pd += (256-len)>>1;
-      switch (PicoIn.filter) {
+      if (est->rendstatus & PDRAW_32X_SCALE) { // 32X needs scaled CLUT data
+        // always use nearest to avoid aliasing with the scaled CLUT data
+        unsigned char *psc = ps, *pdc = psc;
+        h_upscale_nn_4_5(pd, 320, ps, 256, len, f_pal);
+        rh_upscale_nn_4_5(pdc, 320, psc, 256, 256, f_nop);
+      } else switch (PicoIn.filter) {
       case 3: h_upscale_bl4_4_5(pd, 320, ps, 256, len, f_pal); break;
       case 2: h_upscale_bl2_4_5(pd, 320, ps, 256, len, f_pal); break;
       case 1: h_upscale_snn_4_5(pd, 320, ps, 256, len, f_pal); break;
       default: h_upscale_nn_4_5(pd, 320, ps, 256, len, f_pal); break;
-      }
-      if (est->rendstatus & PDRAW_32X_SCALE) { // 32X needs scaled CLUT data
-        unsigned char *psc = ps - 256, *pdc = psc;
-        rh_upscale_nn_4_5(pdc, 320, psc, 256, 256, f_nop);
       }
     } else if (len == 160)
       switch (PicoIn.filter) {
