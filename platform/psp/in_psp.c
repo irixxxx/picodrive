@@ -86,6 +86,9 @@ static int in_psp_update(void *drv_data, const int *binds, int *result)
 	int i, t;
 	unsigned keys;
 
+	if (!binds)
+		return 0;
+
 	keys = in_psp_get_bits();
 
 	if (keys & in_psp_combo_keys) {

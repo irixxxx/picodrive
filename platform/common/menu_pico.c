@@ -21,12 +21,6 @@
 #include <pico/pico_int.h>
 #include <pico/patch.h>
 
-#if defined(PANDORA) || defined(__PS2__)
-#define MENU_X2 1
-#else
-#define MENU_X2 0
-#endif
-
 #define COL_ROM PXMAKE(0xbf, 0xbf, 0xff)
 #define COL_OTH PXMAKE(0xaf, 0xff, 0xaf)
 
@@ -431,14 +425,14 @@ static void kbd_draw(struct key *desc[], int shift, int xoffs, int yoffs, struct
 	int i, j;
 	struct key *key;
 
-	if (g_menuscreen_w >= (MENU_X2 ? 960 : 480))
+	if (g_menuscreen_w >= 60 * me_mfont_w)
 		xoffs -= 50;
 	for (i = 0; desc[i]; i++) {
 		for (j = 0, key = &desc[i][j]; key->lower; j++, key++) {
 			int color = (key != hi ? PXMAKE(0xa0, 0xa0, 0xa0) :
 						 PXMAKE(0xff, 0xff, 0xff));
 			char *text = (shift ? key->upper : key->lower);
-			if (g_menuscreen_w >= (MENU_X2 ? 960 : 480))
+			if (g_menuscreen_w >= 60 * me_mfont_w)
 			text_out16_(xoffs + key->xpos*me_mfont_w, yoffs + i*me_mfont_h, text, color);
 			else
 			smalltext_out16(xoffs + key->xpos*me_sfont_w, yoffs + i*me_sfont_h, text, color);
@@ -1086,8 +1080,8 @@ static menu_entry e_menu_ui_options[] =
 	mee_onoff     ("Show FPS",                 MA_OPT_SHOW_FPS,       currentConfig.EmuOpt, EOPT_SHOW_FPS),
 	mee_enum_h    ("Confirm save/load",        MA_OPT_CONFIRM_STATES, currentConfig.confirm_save, men_confirm_save, h_confirm_save),
 	mee_onoff     ("Autoload newest savestate",MA_OPT_AUTOLOAD_SAVE,  g_autostateld_opt, 1),
-	mee_onoff     ("Don't save last used game", MA_OPT2_NO_LAST_ROM,  currentConfig.EmuOpt, EOPT_NO_AUTOSVCFG),
-	mee_enum      ("File selector sort order", MA_OPT_AUTOLOAD_SAVE,  g_alphasort_opt, men_sort_order),
+	mee_onoff     ("Don't save last used game",MA_OPT2_NO_LAST_ROM,   currentConfig.EmuOpt, EOPT_NO_AUTOSVCFG),
+	mee_enum      ("File selector sort order", MA_OPT_SORT_ORDER,     g_alphasort_opt, men_sort_order),
 	mee_end,
 };
 
@@ -1904,6 +1898,10 @@ void menu_init(void)
 	int i;
 
 	menu_init_base();
+
+#if defined(PANDORA) || defined(__PS2__)
+	menu_init_base_scale(2);
+#endif
 
 	i = 0;
 #if defined(_SVP_DRC) || defined(DRC_SH2)
