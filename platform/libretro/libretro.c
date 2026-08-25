@@ -159,8 +159,13 @@ static bool retro_audio_buff_underrun      = false;
 
 static unsigned audio_latency              = 0;
 static bool update_audio_latency           = false;
-static uint16_t pico_events;
+
+// mouse/pointer
+static int mouse_speed = 10;
+static int mouse_pos[2];
+
 // Sega Pico stuff
+static uint16_t pico_events;
 int pico_inp_mode;
 int pico_pen_x = 320/2, pico_pen_y = 240/2;
 static int pico_page;
@@ -676,8 +681,60 @@ unsigned retro_api_version(void)
    return RETRO_API_VERSION;
 }
 
+#define RETRO_DEVICE_MD_3BTN      RETRO_DEVICE_SUBCLASS(RETRO_DEVICE_JOYPAD, 0)
+#define RETRO_DEVICE_MD_6BTN      RETRO_DEVICE_SUBCLASS(RETRO_DEVICE_JOYPAD, 1)
+#define RETRO_DEVICE_MD_TEAM      RETRO_DEVICE_SUBCLASS(RETRO_DEVICE_JOYPAD, 2)
+#define RETRO_DEVICE_MD_4WAY      RETRO_DEVICE_SUBCLASS(RETRO_DEVICE_JOYPAD, 3)
+#define RETRO_DEVICE_MD_MOUSE     RETRO_DEVICE_SUBCLASS(RETRO_DEVICE_MOUSE, 0)
+#define RETRO_DEVICE_MD_MENACER   RETRO_DEVICE_SUBCLASS(RETRO_DEVICE_LIGHTGUN, 0)
+#define RETRO_DEVICE_MD_JUSTIFIER RETRO_DEVICE_SUBCLASS(RETRO_DEVICE_LIGHTGUN, 1)
+
+static int has_4_pads;
+
 void retro_set_controller_port_device(unsigned port, unsigned device)
 {
+   if (port > 1)
+      return;
+
+   if (port == 0)
+      has_4_pads = (device == RETRO_DEVICE_MD_TEAM || device == RETRO_DEVICE_MD_4WAY);
+
+   switch (device)
+   {
+   case RETRO_DEVICE_NONE:
+      PicoSetInputDevice(port, PICO_INPUT_NOTHING);
+      break;
+   case RETRO_DEVICE_MOUSE:
+   case RETRO_DEVICE_MD_MOUSE:
+      PicoSetInputDevice(port, PICO_INPUT_MOUSE);
+      break;
+   case RETRO_DEVICE_LIGHTGUN:
+   case RETRO_DEVICE_MD_MENACER:
+      PicoSetInputDevice(port, PICO_INPUT_LIGHT_GUN);
+      break;
+   case RETRO_DEVICE_MD_JUSTIFIER:
+      if (port == 1)
+         PicoSetInputDevice(1, PICO_INPUT_JUSTIFIER);
+      else
+         PicoSetInputDevice(port, PICO_INPUT_LIGHT_GUN);
+      break;
+   case RETRO_DEVICE_MD_6BTN:
+      PicoSetInputDevice(port, PICO_INPUT_PAD_6BTN);
+      break;
+   case RETRO_DEVICE_MD_TEAM:
+      if (port == 0)
+         PicoSetInputDevice(0, PICO_INPUT_PAD_TEAM);
+      break;
+   case RETRO_DEVICE_MD_4WAY:
+      if (port == 0)
+         PicoSetInputDevice(0, PICO_INPUT_PAD_4WAY);
+      break;
+   case RETRO_DEVICE_JOYPAD:
+   case RETRO_DEVICE_MD_3BTN:
+   default:
+      PicoSetInputDevice(port, PICO_INPUT_PAD_3BTN);
+      break;
+   }
 }
 
 void retro_get_system_info(struct retro_system_info *info)
@@ -1395,6 +1452,44 @@ bool retro_load_game(const struct retro_game_info *info)
    unsigned int cd_index = 0;
    bool is_m3u           = false;
 
+   static const struct retro_controller_description controller_descriptions_port0[] = {
+      { "3 Button Pad", RETRO_DEVICE_JOYPAD },
+      { "6 Button Pad", RETRO_DEVICE_MD_6BTN },
+      { "Sega Mouse", RETRO_DEVICE_MOUSE },
+      { "Menacer / Phaser", RETRO_DEVICE_LIGHTGUN },
+      { "Sega 4 Player Adaptor", RETRO_DEVICE_MD_TEAM },
+      { "EA 4way Play Adaptor", RETRO_DEVICE_MD_4WAY },
+      { "None", RETRO_DEVICE_NONE },
+   };
+
+   static const struct retro_controller_description controller_descriptions_port1[] = {
+      { "3 Button Pad", RETRO_DEVICE_JOYPAD },
+      { "6 Button Pad", RETRO_DEVICE_MD_6BTN },
+      { "Sega Mouse", RETRO_DEVICE_MOUSE },
+      { "Menacer / Phaser", RETRO_DEVICE_LIGHTGUN },
+      { "Konami Justifier", RETRO_DEVICE_MD_JUSTIFIER },
+      { "None", RETRO_DEVICE_NONE },
+   };
+
+   static const struct retro_controller_info controller_info[] = {
+      { controller_descriptions_port0, sizeof(controller_descriptions_port0) / sizeof(controller_descriptions_port0[0]) },
+      { controller_descriptions_port1, sizeof(controller_descriptions_port1) / sizeof(controller_descriptions_port1[0]) },
+      { NULL, 0 }
+   };
+
+   static const struct retro_controller_description controller_descriptions_pico_pad[] = {
+      { "Gamepad", RETRO_DEVICE_JOYPAD },
+   };
+   static const struct retro_controller_description controller_descriptions_pico_pen[] = {
+      { "Mouse / Pen", RETRO_DEVICE_MOUSE },
+   };
+
+   static const struct retro_controller_info controller_info_pico[] = {
+      { controller_descriptions_pico_pad, sizeof(controller_descriptions_pico_pad) / sizeof(controller_descriptions_pico_pad[0]) },
+      { controller_descriptions_pico_pen, sizeof(controller_descriptions_pico_pen) / sizeof(controller_descriptions_pico_pen[0]) },
+      { NULL, 0 }
+   };
+
    struct retro_input_descriptor desc[] = {
       { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_LEFT,  "D-Pad Left" },
       { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_UP,    "D-Pad Up" },
@@ -1408,6 +1503,20 @@ bool retro_load_game(const struct retro_game_info *info)
       { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_R,     "Z" },
       { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_SELECT,"Mode" },
       { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_START, "Start" },
+      { 0, RETRO_DEVICE_MOUSE,  0, RETRO_DEVICE_ID_MOUSE_X,      "Mouse X" },
+      { 0, RETRO_DEVICE_MOUSE,  0, RETRO_DEVICE_ID_MOUSE_Y,      "Mouse Y" },
+      { 0, RETRO_DEVICE_MOUSE,  0, RETRO_DEVICE_ID_MOUSE_LEFT,   "Mouse Left (B)" },
+      { 0, RETRO_DEVICE_MOUSE,  0, RETRO_DEVICE_ID_MOUSE_RIGHT,  "Mouse Right (C)" },
+      { 0, RETRO_DEVICE_MOUSE,  0, RETRO_DEVICE_ID_MOUSE_MIDDLE, "Mouse Middle (Start)" },
+      { 0, RETRO_DEVICE_MOUSE,  0, RETRO_DEVICE_ID_MOUSE_BUTTON_4,"Mouse Button 4 (A)" },
+      { 0, RETRO_DEVICE_LIGHTGUN, 0, RETRO_DEVICE_ID_LIGHTGUN_SCREEN_X,     "Gun Screen X" },
+      { 0, RETRO_DEVICE_LIGHTGUN, 0, RETRO_DEVICE_ID_LIGHTGUN_SCREEN_Y,     "Gun Screen Y" },
+      { 0, RETRO_DEVICE_LIGHTGUN, 0, RETRO_DEVICE_ID_LIGHTGUN_TRIGGER,      "Gun Trigger" },
+      { 0, RETRO_DEVICE_LIGHTGUN, 0, RETRO_DEVICE_ID_LIGHTGUN_AUX_A,        "Gun Aux A (B)" },
+      { 0, RETRO_DEVICE_LIGHTGUN, 0, RETRO_DEVICE_ID_LIGHTGUN_AUX_B,        "Gun Aux B (C)" },
+      { 0, RETRO_DEVICE_LIGHTGUN, 0, RETRO_DEVICE_ID_LIGHTGUN_START,        "Gun Start" },
+      { 0, RETRO_DEVICE_LIGHTGUN, 0, RETRO_DEVICE_ID_LIGHTGUN_RELOAD,       "Gun Reload" },
+      { 0, RETRO_DEVICE_LIGHTGUN, 0, RETRO_DEVICE_ID_LIGHTGUN_IS_OFFSCREEN, "Gun Offscreen" },
 
       { 1, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_LEFT,  "D-Pad Left" },
       { 1, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_UP,    "D-Pad Up" },
@@ -1421,6 +1530,20 @@ bool retro_load_game(const struct retro_game_info *info)
       { 1, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_R,     "Z" },
       { 1, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_SELECT,"Mode" },
       { 1, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_START, "Start" },
+      { 1, RETRO_DEVICE_MOUSE,  0, RETRO_DEVICE_ID_MOUSE_X,      "Mouse X" },
+      { 1, RETRO_DEVICE_MOUSE,  0, RETRO_DEVICE_ID_MOUSE_Y,      "Mouse Y" },
+      { 1, RETRO_DEVICE_MOUSE,  0, RETRO_DEVICE_ID_MOUSE_LEFT,   "Mouse Left (B)" },
+      { 1, RETRO_DEVICE_MOUSE,  0, RETRO_DEVICE_ID_MOUSE_RIGHT,  "Mouse Right (C)" },
+      { 1, RETRO_DEVICE_MOUSE,  0, RETRO_DEVICE_ID_MOUSE_MIDDLE, "Mouse Middle (Start)" },
+      { 1, RETRO_DEVICE_MOUSE,  0, RETRO_DEVICE_ID_MOUSE_BUTTON_4,"Mouse Button 4 (A)" },
+      { 1, RETRO_DEVICE_LIGHTGUN, 0, RETRO_DEVICE_ID_LIGHTGUN_SCREEN_X,     "Gun Screen X" },
+      { 1, RETRO_DEVICE_LIGHTGUN, 0, RETRO_DEVICE_ID_LIGHTGUN_SCREEN_Y,     "Gun Screen Y" },
+      { 1, RETRO_DEVICE_LIGHTGUN, 0, RETRO_DEVICE_ID_LIGHTGUN_TRIGGER,      "Gun Trigger" },
+      { 1, RETRO_DEVICE_LIGHTGUN, 0, RETRO_DEVICE_ID_LIGHTGUN_AUX_A,        "Gun Aux A (B)" },
+      { 1, RETRO_DEVICE_LIGHTGUN, 0, RETRO_DEVICE_ID_LIGHTGUN_AUX_B,        "Gun Aux B (C)" },
+      { 1, RETRO_DEVICE_LIGHTGUN, 0, RETRO_DEVICE_ID_LIGHTGUN_START,        "Gun Start" },
+      { 1, RETRO_DEVICE_LIGHTGUN, 0, RETRO_DEVICE_ID_LIGHTGUN_RELOAD,       "Gun Reload" },
+      { 1, RETRO_DEVICE_LIGHTGUN, 0, RETRO_DEVICE_ID_LIGHTGUN_IS_OFFSCREEN, "Gun Offscreen" },
 
 
       { 2, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_LEFT,  "D-Pad Left" },
@@ -1461,6 +1584,16 @@ bool retro_load_game(const struct retro_game_info *info)
       { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_B,     "Button 1 Start" },
       { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_A,     "Button 2" },
       { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_START, "Button Pause" },
+      { 0, RETRO_DEVICE_MOUSE,  0, RETRO_DEVICE_ID_MOUSE_X,      "Mouse X" },
+      { 0, RETRO_DEVICE_MOUSE,  0, RETRO_DEVICE_ID_MOUSE_Y,      "Mouse Y" },
+      { 0, RETRO_DEVICE_MOUSE,  0, RETRO_DEVICE_ID_MOUSE_LEFT,   "Button 1" },
+      { 0, RETRO_DEVICE_MOUSE,  0, RETRO_DEVICE_ID_MOUSE_RIGHT,  "Button 2" },
+      { 0, RETRO_DEVICE_MOUSE,  0, RETRO_DEVICE_ID_MOUSE_MIDDLE, "Button Pause" },
+      { 0, RETRO_DEVICE_LIGHTGUN, 0, RETRO_DEVICE_ID_LIGHTGUN_SCREEN_X,     "Gun Screen X" },
+      { 0, RETRO_DEVICE_LIGHTGUN, 0, RETRO_DEVICE_ID_LIGHTGUN_SCREEN_Y,     "Gun Screen Y" },
+      { 0, RETRO_DEVICE_LIGHTGUN, 0, RETRO_DEVICE_ID_LIGHTGUN_TRIGGER,      "Gun Trigger (Button 1)" },
+      { 0, RETRO_DEVICE_LIGHTGUN, 0, RETRO_DEVICE_ID_LIGHTGUN_START,        "Gun Pause" },
+      { 0, RETRO_DEVICE_LIGHTGUN, 0, RETRO_DEVICE_ID_LIGHTGUN_IS_OFFSCREEN, "Gun Offscreen" },
 
       { 1, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_LEFT,  "D-Pad Left" },
       { 1, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_UP,    "D-Pad Up" },
@@ -1469,6 +1602,16 @@ bool retro_load_game(const struct retro_game_info *info)
       { 1, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_B,     "Button 1 Start" },
       { 1, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_A,     "Button 2" },
       { 1, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_START, "Button Pause" },
+      { 1, RETRO_DEVICE_MOUSE,  0, RETRO_DEVICE_ID_MOUSE_X,      "Mouse X" },
+      { 1, RETRO_DEVICE_MOUSE,  0, RETRO_DEVICE_ID_MOUSE_Y,      "Mouse Y" },
+      { 1, RETRO_DEVICE_MOUSE,  0, RETRO_DEVICE_ID_MOUSE_LEFT,   "Button 1" },
+      { 1, RETRO_DEVICE_MOUSE,  0, RETRO_DEVICE_ID_MOUSE_RIGHT,  "Button 2" },
+      { 1, RETRO_DEVICE_MOUSE,  0, RETRO_DEVICE_ID_MOUSE_MIDDLE, "Button Pause" },
+      { 1, RETRO_DEVICE_LIGHTGUN, 0, RETRO_DEVICE_ID_LIGHTGUN_SCREEN_X,     "Gun Screen X" },
+      { 1, RETRO_DEVICE_LIGHTGUN, 0, RETRO_DEVICE_ID_LIGHTGUN_SCREEN_Y,     "Gun Screen Y" },
+      { 1, RETRO_DEVICE_LIGHTGUN, 0, RETRO_DEVICE_ID_LIGHTGUN_TRIGGER,      "Gun Trigger (Button 1)" },
+      { 1, RETRO_DEVICE_LIGHTGUN, 0, RETRO_DEVICE_ID_LIGHTGUN_START,        "Gun Pause" },
+      { 1, RETRO_DEVICE_LIGHTGUN, 0, RETRO_DEVICE_ID_LIGHTGUN_IS_OFFSCREEN, "Gun Offscreen" },
 
       { 0 },
    };
@@ -1485,6 +1628,11 @@ bool retro_load_game(const struct retro_game_info *info)
       { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_X,     "Pen on Pad" },
       { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_L,     "Previous Page" },
       { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_R,     "Next Page" },
+      { 1, RETRO_DEVICE_MOUSE,  0, RETRO_DEVICE_ID_MOUSE_X,      "Pen X" },
+      { 1, RETRO_DEVICE_MOUSE,  0, RETRO_DEVICE_ID_MOUSE_Y,      "Pen Y" },
+      { 1, RETRO_DEVICE_MOUSE,  0, RETRO_DEVICE_ID_MOUSE_LEFT,   "Pen Button" },
+      { 1, RETRO_DEVICE_MOUSE,  0, RETRO_DEVICE_ID_MOUSE_RIGHT,  "Pen State (Up/Down)" },
+      { 1, RETRO_DEVICE_MOUSE,  0, RETRO_DEVICE_ID_MOUSE_MIDDLE, "Red Button" },
 
       { 0 },
    };
@@ -1626,11 +1774,20 @@ bool retro_load_game(const struct retro_game_info *info)
 
    strncpy(pico_overlay_path, content_path, sizeof(pico_overlay_path)-4);
    if (PicoIn.AHW & PAHW_PICO)
+   {
+      environ_cb(RETRO_ENVIRONMENT_SET_CONTROLLER_INFO, (void *)controller_info_pico);
       environ_cb(RETRO_ENVIRONMENT_SET_INPUT_DESCRIPTORS, desc_pico);
+   }
    else if (PicoIn.AHW & PAHW_SMS)
+   {
+      environ_cb(RETRO_ENVIRONMENT_SET_CONTROLLER_INFO, (void *)controller_info);
       environ_cb(RETRO_ENVIRONMENT_SET_INPUT_DESCRIPTORS, desc_sms);
+   }
    else
+   {
+      environ_cb(RETRO_ENVIRONMENT_SET_CONTROLLER_INFO, (void *)controller_info);
       environ_cb(RETRO_ENVIRONMENT_SET_INPUT_DESCRIPTORS, desc);
+   }
 
    PicoLoopPrepare();
 
@@ -1766,30 +1923,10 @@ static const unsigned short retro_pico_map[] = {
    [RETRO_DEVICE_ID_JOYPAD_R]      = 1 << GBTN_Z,
 };
 #define RETRO_PICO_MAP_LEN (sizeof(retro_pico_map) / sizeof(retro_pico_map[0]))
-
-static int has_4_pads;
-
+ 
 static void snd_write(int len)
 {
    audio_batch_cb(PicoIn.sndOut, len / 4);
-}
-
-static enum input_device input_name_to_val(const char *name)
-{
-   if (strcmp(name, "3 button pad") == 0)
-      return PICO_INPUT_PAD_3BTN;
-   if (strcmp(name, "6 button pad") == 0)
-      return PICO_INPUT_PAD_6BTN;
-   if (strcmp(name, "team player") == 0)
-      return PICO_INPUT_PAD_TEAM;
-   if (strcmp(name, "4way play") == 0)
-      return PICO_INPUT_PAD_4WAY;
-   if (strcmp(name, "None") == 0)
-      return PICO_INPUT_NOTHING;
-
-   if (log_cb)
-      log_cb(RETRO_LOG_WARN, "invalid picodrive_input: '%s'\n", name);
-   return PICO_INPUT_PAD_3BTN;
 }
 
 static void update_variables(bool first_run)
@@ -1804,17 +1941,11 @@ static void update_variables(bool first_run)
    int32_t old_snd_filter_range;
 
    var.value = NULL;
-   var.key = "picodrive_input1";
-   if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value) {
-      int input = input_name_to_val(var.value);
-      PicoSetInputDevice(0, input);
-      has_4_pads = input == PICO_INPUT_PAD_TEAM || input == PICO_INPUT_PAD_4WAY;
-   }
-
-   var.value = NULL;
-   var.key = "picodrive_input2";
+   var.key = "picodrive_mouse_speed";
    if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)
-      PicoSetInputDevice(1, input_name_to_val(var.value));
+      mouse_speed = 10 * atof(var.value);
+   else
+      mouse_speed = 10;
 
    var.value = NULL;
    var.key = "picodrive_ramcart";
@@ -2364,14 +2495,85 @@ void retro_run(void)
 	 if (input[pad] & (1 << i))
 	     PicoIn.pad[pad] |= retro_pico_map[i];
 
+   for (pad = 0; pad < 2; pad++)
+   {
+      if (port_type[pad] == PICO_INPUT_MOUSE)
+      {
+         // Sega Mouse / Pico Pen
+         int16_t dx = input_state_cb(pad, RETRO_DEVICE_MOUSE, 0, RETRO_DEVICE_ID_MOUSE_X);
+         int16_t dy = input_state_cb(pad, RETRO_DEVICE_MOUSE, 0, RETRO_DEVICE_ID_MOUSE_Y);
+         int16_t btn_l = input_state_cb(pad, RETRO_DEVICE_MOUSE, 0, RETRO_DEVICE_ID_MOUSE_LEFT);
+         int16_t btn_r = input_state_cb(pad, RETRO_DEVICE_MOUSE, 0, RETRO_DEVICE_ID_MOUSE_RIGHT);
+         int16_t btn_m = input_state_cb(pad, RETRO_DEVICE_MOUSE, 0, RETRO_DEVICE_ID_MOUSE_MIDDLE);
+         int16_t btn_4 = input_state_cb(pad, RETRO_DEVICE_MOUSE, 0, RETRO_DEVICE_ID_MOUSE_BUTTON_4);
+
+         mouse_pos[0] += dx;
+         mouse_pos[1] += dy;
+         PicoIn.mouse[0] = mouse_pos[0] * mouse_speed / 10;
+         PicoIn.mouse[1] = mouse_pos[1] * mouse_speed / 10;
+         pico_pen_x = PicoIn.mouse[0];
+         pico_pen_y = PicoIn.mouse[1];
+
+         if (btn_l) PicoIn.pad[pad] |= 1 << GBTN_B;
+         if (btn_r) PicoIn.pad[pad] |= 1 << GBTN_C;
+         if (btn_m) PicoIn.pad[pad] |= 1 << GBTN_START;
+         if (btn_4) PicoIn.pad[pad] |= 1 << GBTN_A;
+      }
+      else if (port_type[pad] == PICO_INPUT_LIGHT_GUN || port_type[pad] == PICO_INPUT_JUSTIFIER)
+      {
+         // Menacer / Justifier
+         int16_t sx = input_state_cb(pad, RETRO_DEVICE_LIGHTGUN, 0, RETRO_DEVICE_ID_LIGHTGUN_SCREEN_X);
+         int16_t sy = input_state_cb(pad, RETRO_DEVICE_LIGHTGUN, 0, RETRO_DEVICE_ID_LIGHTGUN_SCREEN_Y);
+         int16_t offscreen = input_state_cb(pad, RETRO_DEVICE_LIGHTGUN, 0, RETRO_DEVICE_ID_LIGHTGUN_IS_OFFSCREEN);
+
+         int16_t trig = input_state_cb(pad, RETRO_DEVICE_LIGHTGUN, 0, RETRO_DEVICE_ID_LIGHTGUN_TRIGGER);
+         int16_t aux_a = input_state_cb(pad, RETRO_DEVICE_LIGHTGUN, 0, RETRO_DEVICE_ID_LIGHTGUN_AUX_A);
+         int16_t aux_b = input_state_cb(pad, RETRO_DEVICE_LIGHTGUN, 0, RETRO_DEVICE_ID_LIGHTGUN_AUX_B);
+         int16_t start = input_state_cb(pad, RETRO_DEVICE_LIGHTGUN, 0, RETRO_DEVICE_ID_LIGHTGUN_START);
+         int16_t reload = input_state_cb(pad, RETRO_DEVICE_LIGHTGUN, 0, RETRO_DEVICE_ID_LIGHTGUN_RELOAD);
+
+         if (!offscreen)
+         {
+            int x = (sx + 0x8000) * 320 / 0x10000;
+            int y = (sy + 0x8000) * 240 / 0x10000;
+            PicoIn.mouse[0] = x;
+            PicoIn.mouse[1] = y;
+         }
+
+         if (reload)
+            PicoIn.pad[pad] |= 1 << GBTN_B;
+         if (trig)
+            PicoIn.pad[pad] |= 1 << GBTN_A;
+         if (aux_a)
+            PicoIn.pad[pad] |= 1 << GBTN_C;
+         if (start)
+            PicoIn.pad[pad] |= 1 << GBTN_START;
+      }
+   }
+
    if (PicoIn.AHW == PAHW_PICO) {
-       uint16_t ev = input[0] &
-             ((1 << RETRO_DEVICE_ID_JOYPAD_L) | (1 << RETRO_DEVICE_ID_JOYPAD_R) |
-              (1 << RETRO_DEVICE_ID_JOYPAD_X) | (1 << RETRO_DEVICE_ID_JOYPAD_Y) |
-              (1 << RETRO_DEVICE_ID_JOYPAD_START));
-       uint16_t new_ev = ev & ~pico_events;
-       pico_events = ev;
-       run_events_pico(new_ev);
+      // mouse handling (in case it's enabled) already done above
+
+      static int prev_rclick = 0;
+      int rclick = input_state_cb(1, RETRO_DEVICE_MOUSE, 0, RETRO_DEVICE_ID_MOUSE_RIGHT);
+      if (rclick && !prev_rclick) {
+          PicoPicohw.pen_pos[0] ^= 0x8000;
+          PicoPicohw.pen_pos[1] ^= 0x8000;
+          emu_status_msg("Pen %s", PicoPicohw.pen_pos[0] & 0x8000 ? "Up" : "Down");
+      }
+      prev_rclick = rclick;
+
+      uint16_t ev = input[0] &
+            ((1 << RETRO_DEVICE_ID_JOYPAD_L) | (1 << RETRO_DEVICE_ID_JOYPAD_R) |
+             (1 << RETRO_DEVICE_ID_JOYPAD_X) | (1 << RETRO_DEVICE_ID_JOYPAD_Y) |
+             (1 << RETRO_DEVICE_ID_JOYPAD_START));
+      uint16_t new_ev = ev & ~pico_events;
+      pico_events = ev;
+      run_events_pico(new_ev);
+
+      // copy clipped values back for next mouse handler run
+      PicoIn.mouse[0] = pico_pen_x;
+      PicoIn.mouse[1] = pico_pen_y;
    }
 
    if (PicoPatches)
