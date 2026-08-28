@@ -316,7 +316,19 @@ u32 cyclone_crashed(u32 pc, struct Cyclone *context)
 #endif
 
 // -----------------------------------------------------------------
-// memmap helpers
+// I/O ports
+
+static int padTHLatency[3];
+static int padTLLatency[3];
+static int padTHTimeout[3];
+static int port_init;
+
+int port_type[3] = {
+  PICO_INPUT_PAD_3BTN,
+  PICO_INPUT_PAD_3BTN,
+  PICO_INPUT_NOTHING
+};
+int port_lightgun;
 
 static u32 read_pad_3btn(int i, u32 out_bits)
 {
@@ -454,6 +466,14 @@ static u32 read_pad_mouse(int i, u32 out_bits)
   }
 
   value |= (out_bits & 0x40) | ((out_bits & 0x20)>>1);
+
+  // Sega mouse uses the TL/TR lines for req/ack. For buggy drivers, make sure
+  // there's some delay before ack is sent by taking over the new TL line level
+  if (CYCLES_GE(SekCyclesDone(), padTLLatency[i]))
+    padTLLatency[i] = SekCyclesDone();
+  else
+    value ^= 0x10; // TL
+
   return value;
 }
 
@@ -481,6 +501,92 @@ static u32 read_pad_justifier(int i, u32 out_bits)
   return value;
 }
 
+static u32 read_pad_xe_1ap(int i, u32 out_bits)
+{
+  u32 pad = ~PicoIn.padInt[i]; // Get inverse of pad .... MXYZ SACB RLDU
+  int phase = Pico.m.padTHPhase[i];
+  u32 value;
+  int x, y;
+
+  if (port_init & (1<<i)) {
+    // store center value when here for 1st time
+    PicoIn.mouseInt[2] = PicoIn.mouse[0];
+    PicoIn.mouseInt[3] = PicoIn.mouse[1];
+    port_init &= ~(1<<i);
+  }
+  if (phase == 0) {
+    // store mouse value to prevent hazards
+    PicoIn.mouseInt[0] = PicoIn.mouse[0];
+    PicoIn.mouseInt[1] = PicoIn.mouse[1];
+  }
+
+  // analog stick: left/top=0x00 center=0x7f/0x80 right/bottom=0xff
+  x = PicoIn.mouseInt[0] - PicoIn.mouseInt[2] + 0x80;
+  y = PicoIn.mouseInt[1] - PicoIn.mouseInt[3] + 0x80;
+  x = (x < 0x00 ? 0x00 : x > 0xff ? 0xff : x);
+  y = (y < 0x00 ? 0x00 : y > 0xff ? 0xff : y);
+
+  // pad key mapping: MXYZ SACB -> sEeD SACB; a,b key not mapped
+#define xeBIT(v,p,q)	(((v>>p)&1)<<q)
+#define xe4BIT(v,q,t,s,p) (xeBIT(v,q,3)|xeBIT(v,t,2)|xeBIT(v,s,1)|xeBIT(v,p,0))
+
+  switch (phase>>1) {
+  case 0: // E e Start select
+    value = xe4BIT(pad,10,9,7,11); // XYSM
+    break;
+  case 1: // A|a B|b C D
+    value = xe4BIT(pad,6,4,5,8); // ABCZ
+    break;
+  case 2: // left X high
+    value = (x >> 4) & 0x0f;
+    break;
+  case 3: // left Y high
+    value = (y >> 4) & 0x0f;
+    break;
+  case 4:
+    value = 0;
+    break;
+  case 5: // right . high
+    value = 0x8;
+    value = (y >> 4) & 0x0f;
+    break;
+  case 6: // left X low
+    value = x & 0x0f;
+    break;
+  case 7: // left Y high
+    value = y & 0x0f;
+    break;
+  case 8:
+    value = 0;
+    break;
+  case 9: // right . low
+    value = 0x0;
+    value = y & 0x0f;
+    break;
+  case 10:
+    value = 0;
+    break;
+  case 11: // A B a b
+    value = xe4BIT(pad,6,4,6,4) & 0xc; // ABAB
+    break;
+  default:
+    value = 0xf;
+  }
+
+  value |= (out_bits & 0x40) | ((phase & 0x2) << 3);
+
+  // if reading outside the delay, phase changes
+  if (CYCLES_GE(SekCyclesDone(), padTLLatency[i])) {
+    Pico.m.padTHPhase[i] ++;
+    // according to https://archive.org/details/micomBASIC_1990-10/page/80/mode/2up,
+    // these delays are quite high, 50us-200us for 2 nibbles (~400-1500 cycles)
+    padTLLatency[i] = SekCyclesDone() + 200;
+  }
+  value |= (~phase & 1) << 5; // TR
+
+  return value;
+}
+
 static u32 read_nothing(int i, u32 out_bits)
 {
   return 0xff;
@@ -488,22 +594,11 @@ static u32 read_nothing(int i, u32 out_bits)
 
 typedef u32 (port_read_func)(int index, u32 out_bits);
 
-int port_type[3] = {
-  PICO_INPUT_PAD_3BTN,
-  PICO_INPUT_PAD_3BTN,
-  PICO_INPUT_NOTHING
-};
-int port_lightgun;
-
 static port_read_func *port_readers[3] = {
   read_pad_3btn,
   read_pad_3btn,
   read_nothing
 };
-
-static int padTHLatency[3];
-static int padTLLatency[3];
-static int padTHTimeout[3];
 
 static NOINLINE u32 port_read(int i)
 {
@@ -532,13 +627,6 @@ static NOINLINE u32 port_read(int i)
   out |= mask & ~ctrl_reg;
 
   in = port_readers[i](i, out);
-
-  // Sega mouse uses the TL/TR lines for req/ack. For buggy drivers, make sure
-  // there's some delay before ack is sent by taking over the new TL line level
-  if (CYCLES_GE(cycles, padTLLatency[i]))
-    padTLLatency[i] = cycles;
-  else
-    in ^= 0x10; // TL
 
   return (in & ~ctrl_reg) | (data_reg & ctrl_reg);
 }
@@ -577,6 +665,11 @@ void PicoPortTrigger(void)
   }
 }
 
+void PicoPortCenter(void)
+{
+  port_init |= 0x3;
+}
+
 // pad export for J-Cart
 u32 PicoReadPad(int i, u32 out_bits)
 {
@@ -599,12 +692,14 @@ void PicoSetInputDevice(int port, enum input_device device)
   case PICO_INPUT_MOUSE:      func = read_pad_mouse; break;
   case PICO_INPUT_LIGHT_GUN:  func = read_pad_menacer; break;
   case PICO_INPUT_JUSTIFIER:  func = read_pad_justifier; break;
+  case PICO_INPUT_XE_1AP:     func = read_pad_xe_1ap; break;
   default:                    func = read_nothing; break;
   }
 
   if (port == 1 && port_type[0] == PICO_INPUT_PAD_TEAM)
     func = read_nothing;
 
+  port_init |= 1<<port;
   port_lightgun &= ~(1<<port);
   port_lightgun |= is_lg<<port;
   port_type[port] = device;
@@ -661,9 +756,15 @@ NOINLINE void io_ports_write(u32 a, u32 d)
         // 1->0 transition starts the readout protocol
         Pico.m.padTHPhase[a - 1] = !(d & 0x40);
       }
+    } else if (port_type[a - 1] == PICO_INPUT_XE_1AP) {
+      if (a == 1 && (PicoMem.ioports[a] & 0x40) && !(d & 0x40)) {
+        // 1->0 transition starts the readout protocol
+        Pico.m.padTHPhase[a - 1] = 0;
+        padTLLatency[a - 1] = SekCyclesDone() + 100;
+      }
     } else if (!(PicoMem.ioports[a] & 0x40) && (d & 0x40))
       Pico.m.padTHPhase[a - 1]++;
-  }
+}
 
   // after switching TH to input there's a latency before the pullup value is
   // read back as input (see Decap Attack, not in Samurai Showdown, 32x WWF Raw)
@@ -735,6 +836,7 @@ void io_ports_unpack(const void *buf, size_t size)
   assert(b <= size);
 }
 
+// memmap helpers
 static int z80_cycles_from_68k(void)
 {
   int m68k_cnt = SekCyclesDone() - Pico.t.m68c_frame_start;
