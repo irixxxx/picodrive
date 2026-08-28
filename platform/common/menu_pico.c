@@ -539,7 +539,7 @@ int key_config_kbd_loop(int id, int keys)
 }
 
 
-const char *indev_names[] = { "none", "3 button pad", "6 button pad", "Mouse", "Light gun", "Justifier", "Team player", "4 way play", NULL };
+const char *indev_names[] = { "none", "3 button pad", "6 button pad", "XE-1AP", "Mouse", "Light gun", "Justifier", "Team player", "4 way play", NULL };
 
 static char h_play12[55];
 static char h_play34[] = "Works only for Mega Drive/CD/32X games having\n"

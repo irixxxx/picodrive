@@ -1331,6 +1331,8 @@ static void run_events_ui(unsigned int which)
 			in_update_pointer(0, 3, &mouse_y);
 			in_update_pointer(0, 0, &mouse_x);
 			in_update_pointer(0, 1, &mouse_y);
+extern void PicoPortCenter(void);
+PicoPortCenter();
 			emu_status_msg("Mouse capture %s", grab_mode ? "on" : "off");
 		} else {
 			grab_mode = 0;
@@ -1369,7 +1371,8 @@ static int map_pointer_buttons(int msbtns, int device)
 		if (msbtns & 1) buttons |= 1<<GBTN_B;	// as Sega Mouse
 		if (msbtns & 2) buttons |= 1<<GBTN_START;
 		if (msbtns & 4) buttons |= 1<<GBTN_C;
-	} else if (device == PICO_INPUT_LIGHT_GUN || device == PICO_INPUT_JUSTIFIER) {
+	} else if (device == PICO_INPUT_LIGHT_GUN || device == PICO_INPUT_JUSTIFIER ||
+		   device == PICO_INPUT_XE_1AP) {
 		if (msbtns & 1) buttons |= 1<<GBTN_A;	// as Sega Menacer
 		if (msbtns & 2) buttons |= 1<<GBTN_B;
 		if (msbtns & 4) buttons |= 1<<GBTN_START;
@@ -1625,7 +1628,7 @@ void emu_sound_wait(void)
 
 static void emu_loop_prep(void)
 {
-	static int pointer[] = { PICO_INPUT_MOUSE, PICO_INPUT_LIGHT_GUN, PICO_INPUT_JUSTIFIER };
+	static int pointer[] = { PICO_INPUT_XE_1AP, PICO_INPUT_MOUSE, PICO_INPUT_LIGHT_GUN, PICO_INPUT_JUSTIFIER };
 	static int pal_old = -1;
 	static int filter_old = -1;
 	int i;
