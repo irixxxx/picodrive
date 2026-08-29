@@ -343,14 +343,36 @@ me_bind_action me_ctrl_actions[] =
 	{ "A      ", 0x0040 },
 	{ "B      ", 0x0010 },
 	{ "C      ", 0x0020 },
-	{ "A turbo", 0x4000 },
-	{ "B turbo", 0x1000 },
-	{ "C turbo", 0x2000 },
+	{ "A turbo", 0x40000 },
+	{ "B turbo", 0x10000 },
+	{ "C turbo", 0x20000 },
 	{ "START  ", 0x0080 },
 	{ "MODE   ", 0x0800 },
 	{ "X      ", 0x0400 },
 	{ "Y      ", 0x0200 },
 	{ "Z      ", 0x0100 },
+	{ NULL,      0 },
+};
+
+me_bind_action me_xe1ap_actions[] =
+{
+	{ "UP     ", 0x0001 },
+	{ "DOWN   ", 0x0002 },
+	{ "LEFT   ", 0x0004 },
+	{ "RIGHT  ", 0x0008 },
+	{ "A      ", 0x0040 },
+	{ "B      ", 0x0010 },
+	{ "C      ", 0x0020 },
+	{ "D      ", 0x0100 },
+	{ "E1     ", 0x0400 },
+	{ "E2     ", 0x0200 },
+	{ "A'     ", 0x4000 },
+	{ "B'     ", 0x1000 },
+	{ "A turbo", 0x40000 },
+	{ "B turbo", 0x10000 },
+	{ "C turbo", 0x20000 },
+	{ "START  ", 0x0080 },
+	{ "SELECT ", 0x0800 },
 	{ NULL,      0 },
 };
 
@@ -567,8 +589,12 @@ static int key_config_players(int id, int keys)
 	player[strlen(player)-1] = pid + '0';
 	e_menu_keyconfig[x].help = (pid >= 3 ? h_play34 : h_play12);
 
-	if (keys & PBTN_MOK)
-		key_config_loop(me_ctrl_actions, array_size(me_ctrl_actions) - 1, pid-1);
+	if (keys & PBTN_MOK) {
+		int dev = (pid == 1 ? currentConfig.input_dev0 : currentConfig.input_dev1);
+		if (pid < 2 & dev == PICO_INPUT_XE_1AP)
+			key_config_loop(me_xe1ap_actions, array_size(me_xe1ap_actions) - 1, pid-1);
+		else	key_config_loop(me_ctrl_actions, array_size(me_ctrl_actions) - 1, pid-1);
+	}
 
 	return 0;
 }
