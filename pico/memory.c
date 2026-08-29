@@ -505,8 +505,8 @@ static u32 read_pad_xe_1ap(int i, u32 out_bits)
 {
   u32 pad = ~PicoIn.padInt[i]; // Get inverse of pad .... MXYZ SACB RLDU
   int phase = Pico.m.padTHPhase[i];
-  u32 value;
-  int x, y;
+  u32 value = 0;
+  int x, y, z;
 
   if (port_init & (1<<i)) {
     // store center value when here for 1st time
@@ -525,6 +525,8 @@ static u32 read_pad_xe_1ap(int i, u32 out_bits)
   y = PicoIn.mouseInt[1] - PicoIn.mouseInt[3] + 0x80;
   x = (x < 0x00 ? 0x00 : x > 0xff ? 0xff : x);
   y = (y < 0x00 ? 0x00 : y > 0xff ? 0xff : y);
+  z = (PicoIn.mouse[3]) + 0x80;
+  x = (x < 0x00 ? 0x00 : x > 0xff ? 0xff : x);
 
   // pad key mapping: MXYZ SACB -> sEeD SACB; a,b key not mapped
 #define xeBIT(v,p,q)	(((v>>p)&1)<<q)
@@ -544,11 +546,9 @@ static u32 read_pad_xe_1ap(int i, u32 out_bits)
     value = (y >> 4) & 0x0f;
     break;
   case 4:
-    value = 0;
     break;
-  case 5: // right . high
-    value = 0x8;
-    value = (y >> 4) & 0x0f;
+  case 5: // right Z high
+    value = (z >> 4) & 0x0f;
     break;
   case 6: // left X low
     value = x & 0x0f;
@@ -557,20 +557,17 @@ static u32 read_pad_xe_1ap(int i, u32 out_bits)
     value = y & 0x0f;
     break;
   case 8:
-    value = 0;
     break;
-  case 9: // right . low
-    value = 0x0;
-    value = y & 0x0f;
+  case 9: // right Z low
+    value = z & 0x0f;
     break;
   case 10:
-    value = 0;
     break;
   case 11: // A B a b
-    value = xe4BIT(pad,6,4,6,4) & 0xc; // ABAB
+    value = xe4BIT(pad,6,4,14,12) & 0xf; // ABab
     break;
   default:
-    value = 0xf;
+    value = 0x0f;
   }
 
   value |= (out_bits & 0x40) | ((phase & 0x2) << 3);
@@ -579,8 +576,8 @@ static u32 read_pad_xe_1ap(int i, u32 out_bits)
   if (CYCLES_GE(SekCyclesDone(), padTLLatency[i])) {
     Pico.m.padTHPhase[i] ++;
     // according to https://archive.org/details/micomBASIC_1990-10/page/80/mode/2up,
-    // these delays are quite high, 50us-200us for 2 nibbles (~400-1500 cycles)
-    padTLLatency[i] = SekCyclesDone() + 200;
+    // these delays are quite high, 50-200us for 2 nibbles (~400-1500 cycles)
+    padTLLatency[i] = SekCyclesDone() + 100;
   }
   value |= (~phase & 1) << 5; // TR
 

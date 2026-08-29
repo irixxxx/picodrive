@@ -14,6 +14,8 @@
 #define GBTN_Y          9
 #define GBTN_X          10
 #define GBTN_MODE       11
+#define GBTN_B_		12
+#define GBTN_A_		14
 
 /* ui events */
 #define PEVB_VOL_DOWN   30

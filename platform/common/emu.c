@@ -1417,6 +1417,15 @@ void emu_update_input(void)
 		in_update_pointer(0, -1, &i); // get mouse buttons, bit 2-0 = RML
 		pl_actions[0] |= map_pointer_buttons(i, currentConfig.input_dev0);
 		pl_actions[1] |= map_pointer_buttons(i, currentConfig.input_dev1);
+
+		// for XE-1AP, right stick (throttle)
+		if (PicoIn.pad[0] & 1) PicoIn.mouse[3]-=4;
+		if (PicoIn.pad[0] & 2) PicoIn.mouse[3]+=4;
+		if (PicoIn.pad[0] & 4) PicoIn.mouse[3]-=4;
+		if (PicoIn.pad[0] & 8) PicoIn.mouse[3]+=4;
+		PicoIn.mouse[3] = PicoIn.mouse[3] < -0x7f ? -0x7f :
+				PicoIn.mouse[3] > 0x7f ? 0x7f : PicoIn.mouse[3];
+		PicoIn.pad[0] &= ~0x0f; // release UDLR
 	}
 
 	if (kbd_mode) {
@@ -1445,13 +1454,13 @@ void emu_update_input(void)
 		PicoIn.pad[2] = pl_actions[2] & 0xfff;
 		PicoIn.pad[3] = pl_actions[3] & 0xfff;
 
-		if (pl_actions[0] & 0x7000)
+		if (pl_actions[0] & 0x70000)
 			do_turbo(&PicoIn.pad[0], pl_actions[0]);
-		if (pl_actions[1] & 0x7000)
+		if (pl_actions[1] & 0x70000)
 			do_turbo(&PicoIn.pad[1], pl_actions[1]);
-		if (pl_actions[2] & 0x7000)
+		if (pl_actions[2] & 0x70000)
 			do_turbo(&PicoIn.pad[2], pl_actions[2]);
-		if (pl_actions[3] & 0x7000)
+		if (pl_actions[3] & 0x70000)
 			do_turbo(&PicoIn.pad[3], pl_actions[3]);
 
 		if ((events ^ prev_events) & PEV_FF) {
