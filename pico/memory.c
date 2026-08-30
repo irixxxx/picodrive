@@ -503,9 +503,9 @@ static u32 read_pad_justifier(int i, u32 out_bits)
 
 static u32 read_pad_xe_1ap(int i, u32 out_bits)
 {
-  u32 pad = ~PicoIn.padInt[i]; // Get inverse of pad .... MXYZ SACB RLDU
+  u32 pad = ~PicoIn.padInt[i]; // Get inverse of pad .a.b MXYZ SACB ....
   int phase = Pico.m.padTHPhase[i];
-  u32 value = 0;
+  u32 value;
   int x, y, z;
 
   if (port_init & (1<<i)) {
@@ -528,16 +528,19 @@ static u32 read_pad_xe_1ap(int i, u32 out_bits)
   z = (PicoIn.mouse[3]) + 0x80;
   x = (x < 0x00 ? 0x00 : x > 0xff ? 0xff : x);
 
-  // pad key mapping: MXYZ SACB -> sEeD SACB; a,b key not mapped
+  // pad key mapping: EeSs -> XYSM, ABCD -> ABCZ|abCZ, ABab -> ABab
 #define xeBIT(v,p,q)	(((v>>p)&1)<<q)
 #define xe4BIT(v,q,t,s,p) (xeBIT(v,q,3)|xeBIT(v,t,2)|xeBIT(v,s,1)|xeBIT(v,p,0))
 
-  switch (phase>>1) {
+  if (!(phase&1))
+    value = 0x0f; // no data in NAK phase
+  else switch (phase>>1) {
   case 0: // E e Start select
-    value = xe4BIT(pad,10,9,7,11); // XYSM
+    value = xe4BIT(pad,10/*X*/,9/*Y*/,7/*START*/,11/*MODE*/); // XYSM
     break;
   case 1: // A|a B|b C D
-    value = xe4BIT(pad,6,4,5,8); // ABCZ
+    value = xe4BIT(pad,6/*A*/,4/*B*/,5/*C*/,8/*Z*/); // ABCZ
+    value &= xe4BIT(pad,14/*A_*/,12/*B_*/,5/*C*/,8/*Z*/); // abCZ
     break;
   case 2: // left X high
     value = (x >> 4) & 0x0f;
@@ -546,6 +549,7 @@ static u32 read_pad_xe_1ap(int i, u32 out_bits)
     value = (y >> 4) & 0x0f;
     break;
   case 4:
+    value = 0;
     break;
   case 5: // right Z high
     value = (z >> 4) & 0x0f;
@@ -557,14 +561,16 @@ static u32 read_pad_xe_1ap(int i, u32 out_bits)
     value = y & 0x0f;
     break;
   case 8:
+    value = 0;
     break;
   case 9: // right Z low
     value = z & 0x0f;
     break;
   case 10:
+    value = 0x0f;
     break;
   case 11: // A B a b
-    value = xe4BIT(pad,6,4,14,12) & 0xf; // ABab
+    value = xe4BIT(pad,6/*A*/,4/*B*/,14/*A_*/,12/*B_*/) & 0xf; // ABab
     break;
   default:
     value = 0x0f;
@@ -761,7 +767,7 @@ NOINLINE void io_ports_write(u32 a, u32 d)
       }
     } else if (!(PicoMem.ioports[a] & 0x40) && (d & 0x40))
       Pico.m.padTHPhase[a - 1]++;
-}
+  }
 
   // after switching TH to input there's a latency before the pullup value is
   // read back as input (see Decap Attack, not in Samurai Showdown, 32x WWF Raw)

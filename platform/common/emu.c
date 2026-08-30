@@ -1243,17 +1243,17 @@ static void do_turbo(unsigned short *pad, int acts)
 	static unsigned char turbo_cnt[3] = { 0, 0, 0 };
 	int inc = currentConfig.turbo_rate * 2;
 
-	if (acts & 0x1000) {
+	if (acts & 0x10000) {
 		turbo_cnt[0] += inc;
 		if (turbo_cnt[0] >= 60)
 			turbo_pad ^= 0x10, turbo_cnt[0] = 0;
 	}
-	if (acts & 0x2000) {
+	if (acts & 0x20000) {
 		turbo_cnt[1] += inc;
 		if (turbo_cnt[1] >= 60)
 			turbo_pad ^= 0x20, turbo_cnt[1] = 0;
 	}
-	if (acts & 0x4000) {
+	if (acts & 0x40000) {
 		turbo_cnt[2] += inc;
 		if (turbo_cnt[2] >= 60)
 			turbo_pad ^= 0x40, turbo_cnt[2] = 0;
