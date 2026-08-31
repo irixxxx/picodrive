@@ -1331,8 +1331,6 @@ static void run_events_ui(unsigned int which)
 			in_update_pointer(0, 3, &mouse_y);
 			in_update_pointer(0, 0, &mouse_x);
 			in_update_pointer(0, 1, &mouse_y);
-extern void PicoPortCenter(void);
-PicoPortCenter();
 			emu_status_msg("Mouse capture %s", grab_mode ? "on" : "off");
 		} else {
 			grab_mode = 0;
