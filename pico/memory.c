@@ -321,7 +321,6 @@ u32 cyclone_crashed(u32 pc, struct Cyclone *context)
 static int padTHLatency[3];
 static int padTLLatency[3];
 static int padTHTimeout[3];
-static int port_init;
 
 int port_type[3] = {
   PICO_INPUT_PAD_3BTN,
@@ -508,25 +507,12 @@ static u32 read_pad_xe_1ap(int i, u32 out_bits)
   u32 value;
   int x, y, z;
 
-  if (port_init & (1<<i)) {
-    // store center value when here for 1st time
-    PicoIn.mouseInt[2] = PicoIn.mouse[0];
-    PicoIn.mouseInt[3] = PicoIn.mouse[1];
-    port_init &= ~(1<<i);
-  }
-  if (phase == 0) {
-    // store mouse value to prevent hazards
-    PicoIn.mouseInt[0] = PicoIn.mouse[0];
-    PicoIn.mouseInt[1] = PicoIn.mouse[1];
-  }
-
   // analog stick: left/top=0x00 center=0x7f/0x80 right/bottom=0xff
-  x = PicoIn.mouseInt[0] - PicoIn.mouseInt[2] + 0x80;
-  y = PicoIn.mouseInt[1] - PicoIn.mouseInt[3] + 0x80;
-  x = (x < 0x00 ? 0x00 : x > 0xff ? 0xff : x);
-  y = (y < 0x00 ? 0x00 : y > 0xff ? 0xff : y);
+  x = PicoIn.mouseInt[0] * 255 / 320;
+  y = PicoIn.mouseInt[1] * 255 / 240;
+
   z = (PicoIn.mouse[3]) + 0x80;
-  x = (x < 0x00 ? 0x00 : x > 0xff ? 0xff : x);
+  z = (z < 0x00 ? 0x00 : z > 0xff ? 0xff : z);
 
   // pad key mapping: EeSs -> XYSM, ABCD -> ABCZ|abCZ, ABab -> ABab
 #define xeBIT(v,p,q)	(((v>>p)&1)<<q)
@@ -668,11 +654,6 @@ void PicoPortTrigger(void)
   }
 }
 
-void PicoPortCenter(void)
-{
-  port_init |= 0x3;
-}
-
 // pad export for J-Cart
 u32 PicoReadPad(int i, u32 out_bits)
 {
@@ -682,7 +663,7 @@ u32 PicoReadPad(int i, u32 out_bits)
 void PicoSetInputDevice(int port, enum input_device device)
 {
   port_read_func *func;
-  int is_lg = device == PICO_INPUT_LIGHT_GUN || device == PICO_INPUT_JUSTIFIER;
+  int is_lg = device == PICO_INPUT_LIGHT_GUN || device == PICO_INPUT_JUSTIFIER || device == PICO_INPUT_XE_1AP;
 
   if (port < 0 || port > 2)
     return;
@@ -702,7 +683,6 @@ void PicoSetInputDevice(int port, enum input_device device)
   if (port == 1 && port_type[0] == PICO_INPUT_PAD_TEAM)
     func = read_nothing;
 
-  port_init |= 1<<port;
   port_lightgun &= ~(1<<port);
   port_lightgun |= is_lg<<port;
   port_type[port] = device;
