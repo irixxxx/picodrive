@@ -82,7 +82,7 @@
 
 #define INVQ(n,m)      (long long)((1LL<<(m))/(n)+1) // to replace div by mult with inverse
 #define MULQ(n,d,m)    ((n)*(d) >> (m))
-#define DIVQ(n,d,m)    ((n)*INVQ32(d) >> (m))
+#define DIVQ(n,d,m)    ((n)*INVQ(d,m) >> (m))
 
 #define INVQ32(n)      INVQ(n,32)
 #define MULQ32(n,d)    MULQ(n,d,32)

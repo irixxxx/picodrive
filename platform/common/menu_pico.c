@@ -684,6 +684,8 @@ static int mh_indev(int id, int keys)
 	x = currentConfig.input_dev0 == PICO_INPUT_LIGHT_GUN ||
 		currentConfig.input_dev1 == PICO_INPUT_LIGHT_GUN ||
 		currentConfig.input_dev1 == PICO_INPUT_JUSTIFIER;
+	x |= currentConfig.input_dev0 == PICO_INPUT_XE_1AP ||
+		currentConfig.input_dev1 == PICO_INPUT_XE_1AP;
 	me_enable(e_menu_keyconfig, MA_CTRL_LIGHTGUN, x);
 	return 0;
 }
@@ -755,6 +757,8 @@ static int menu_loop_keyconfig(int id, int keys)
 	x = currentConfig.input_dev0 == PICO_INPUT_LIGHT_GUN ||
 		currentConfig.input_dev1 == PICO_INPUT_LIGHT_GUN ||
 		currentConfig.input_dev1 == PICO_INPUT_JUSTIFIER;
+	x |= currentConfig.input_dev0 == PICO_INPUT_XE_1AP ||
+		currentConfig.input_dev1 == PICO_INPUT_XE_1AP;
 	me_enable(e_menu_keyconfig, MA_CTRL_LIGHTGUN, x);
 
 	me_loop_d(e_menu_keyconfig, &sel, menu_draw_prep, NULL);

@@ -327,7 +327,7 @@ int port_type[3] = {
   PICO_INPUT_PAD_3BTN,
   PICO_INPUT_NOTHING
 };
-int port_lightgun;
+int port_lightgun, port_xe1ap;
 
 static u32 read_pad_3btn(int i, u32 out_bits)
 {
@@ -507,9 +507,9 @@ static u32 read_pad_xe_1ap(int i, u32 out_bits)
   u32 value;
   int x, y, z;
 
-  // analog stick: left/top=0x00 center=0x7f/0x80 right/bottom=0xff
+  // analog stick/slider: left/top=0x00 center=0x7f/0x80 right/bottom=0xff
   x = PicoIn.mouseInt[0] * 255 / 320;
-  y = PicoIn.mouseInt[1] * 255 / 240;
+  y = PicoIn.mouseInt[1] * 255 / rendlines;
 
   z = (PicoIn.mouse[3]) + 0x80;
   z = (z < 0x00 ? 0x00 : z > 0xff ? 0xff : z);
@@ -623,15 +623,27 @@ static NOINLINE u32 port_read(int i)
 // update ports
 void PicoPortUpdate(void)
 {
-  if (port_lightgun || (Pico.m.hardware & PMS_HW_LG)) {
-    PicoIn.mouseInt[0] += PicoIn.mouse[0] - PicoIn.mouseInt[2];
-    PicoIn.mouseInt[1] += PicoIn.mouse[1] - PicoIn.mouseInt[3];
+  if (port_lightgun || port_xe1ap) {
+    static int mouseTime;
+    int dx = PicoIn.mouse[0] - PicoIn.mouseInt[2];
+    int dy = PicoIn.mouse[1] - PicoIn.mouseInt[3];
     PicoIn.mouseInt[2] = PicoIn.mouse[0];
     PicoIn.mouseInt[3] = PicoIn.mouse[1];
+    PicoIn.mouseInt[0] += dx;
+    PicoIn.mouseInt[1] += dy;
+
+    if (port_xe1ap && dx == 0 && dy == 0) {
+      if (CYCLES_GE(SekCyclesDone(), mouseTime)) {
+        dx = PicoIn.mouseInt[0] - 320/2, dy = PicoIn.mouseInt[1] - rendlines/2;
+        PicoIn.mouseInt[0] -= dx * 3/100 + (dx >= 3 ? 1 : dx <= -3 ? -1 : 0);
+        PicoIn.mouseInt[1] -= dy * 3/100 + (dy >= 3 ? 1 : dy <= -3 ? -1 : 0);
+      }
+    } else
+      mouseTime = SekCyclesDone() + OSC_NTSC/7 * 25/100;
     if (PicoIn.mouseInt[0] < 0) PicoIn.mouseInt[0] = 0;
     if (PicoIn.mouseInt[0] > 320 ) PicoIn.mouseInt[0] = 320;
     if (PicoIn.mouseInt[1] < 0) PicoIn.mouseInt[1] = 0;
-    if (PicoIn.mouseInt[1] > 240) PicoIn.mouseInt[1] = 240;
+    if (PicoIn.mouseInt[1] > rendlines) PicoIn.mouseInt[1] = rendlines;
   }
 }
 
@@ -641,7 +653,7 @@ void PicoPortTrigger(void)
   int mx = PicoIn.mouseInt[0] + PicoIn.gunx;
   int my = PicoIn.mouseInt[1] + PicoIn.guny;
 
-  if (unlikely(Pico.m.scanline == my) && port_lightgun &&
+  if (port_lightgun && Pico.m.scanline == my &&
       ((PicoMem.ioports[4]|PicoMem.ioports[5]) & 0x80)) {
     // there's a rather massive delay from VDP, TV, light sensor, infrared
     // transmission, to the TH pin; it lasts well into the next line.
@@ -663,7 +675,7 @@ u32 PicoReadPad(int i, u32 out_bits)
 void PicoSetInputDevice(int port, enum input_device device)
 {
   port_read_func *func;
-  int is_lg = device == PICO_INPUT_LIGHT_GUN || device == PICO_INPUT_JUSTIFIER || device == PICO_INPUT_XE_1AP;
+  int is_lg = device == PICO_INPUT_LIGHT_GUN || device == PICO_INPUT_JUSTIFIER;
 
   if (port < 0 || port > 2)
     return;
@@ -685,6 +697,8 @@ void PicoSetInputDevice(int port, enum input_device device)
 
   port_lightgun &= ~(1<<port);
   port_lightgun |= is_lg<<port;
+  port_xe1ap &=  ~(1<<port);
+  port_xe1ap |= (device == PICO_INPUT_XE_1AP)<<port;
   port_type[port] = device;
   port_readers[port] = func;
 

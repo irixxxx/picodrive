@@ -229,7 +229,7 @@ void pemu_finalize_frame(const char *fps, const char *notice)
 	}
 
 	// TODO correct ptr position for hard/soft/no scaling?
-#define is_lightgun(d) (d == PICO_INPUT_LIGHT_GUN || d == PICO_INPUT_JUSTIFIER)
+#define is_lightgun(d) (d == PICO_INPUT_LIGHT_GUN || d == PICO_INPUT_JUSTIFIER || d == PICO_INPUT_XE_1AP)
 	if ((currentConfig.EmuOpt & EOPT_GUN_CURSOR) &&
 	    (is_lightgun(currentConfig.input_dev0) || is_lightgun(currentConfig.input_dev1))) {
 		pico_inp_mode = 2;
