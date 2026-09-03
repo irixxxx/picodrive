@@ -623,6 +623,7 @@ static NOINLINE u32 port_read(int i)
 // update ports
 void PicoPortUpdate(void)
 {
+  // TODO this is wrong here. Should be done in the frontend!
   if (port_lightgun || port_xe1ap) {
     static int mouseTime;
     int dx = PicoIn.mouse[0] - PicoIn.mouseInt[2];
@@ -632,14 +633,18 @@ void PicoPortUpdate(void)
     PicoIn.mouseInt[0] += dx;
     PicoIn.mouseInt[1] += dy;
 
-    if (port_xe1ap && dx == 0 && dy == 0) {
+    if (port_xe1ap && (PicoIn.opt & POPT_XE_CENTERING) && (dx|dy) == 0) {
       if (CYCLES_GE(SekCyclesDone(), mouseTime)) {
-        dx = PicoIn.mouseInt[0] - 320/2, dy = PicoIn.mouseInt[1] - rendlines/2;
-        PicoIn.mouseInt[0] -= dx * 3/100 + (dx >= 3 ? 1 : dx <= -3 ? -1 : 0);
-        PicoIn.mouseInt[1] -= dy * 3/100 + (dy >= 3 ? 1 : dy <= -3 ? -1 : 0);
+        int r = PicoIn.stkRate; // r in %
+        dx = PicoIn.mouseInt[0] - 320/2;
+        dy = PicoIn.mouseInt[1] - rendlines/2;
+        PicoIn.mouseInt[0] -= dx * r/100 + (dx >= r ? 1 : dx <= -r ? -1 : 0);
+        PicoIn.mouseInt[1] -= dy * r/100 + (dy >= r ? 1 : dy <= -r ? -1 : 0);
       }
-    } else
-      mouseTime = SekCyclesDone() + OSC_NTSC/7 * 25/100;
+    } else {
+      int t = PicoIn.stkTime; // t in 1/10s
+      mouseTime = SekCyclesDone() + OSC_NTSC/7 * t/10;
+    }
     if (PicoIn.mouseInt[0] < 0) PicoIn.mouseInt[0] = 0;
     if (PicoIn.mouseInt[0] > 320 ) PicoIn.mouseInt[0] = 320;
     if (PicoIn.mouseInt[1] < 0) PicoIn.mouseInt[1] = 0;

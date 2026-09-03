@@ -684,15 +684,16 @@ static int mh_indev(int id, int keys)
 	x = currentConfig.input_dev0 == PICO_INPUT_LIGHT_GUN ||
 		currentConfig.input_dev1 == PICO_INPUT_LIGHT_GUN ||
 		currentConfig.input_dev1 == PICO_INPUT_JUSTIFIER;
-	x |= currentConfig.input_dev0 == PICO_INPUT_XE_1AP ||
-		currentConfig.input_dev1 == PICO_INPUT_XE_1AP;
 	me_enable(e_menu_keyconfig, MA_CTRL_LIGHTGUN, x);
+	x = currentConfig.input_dev0 == PICO_INPUT_XE_1AP ||
+		currentConfig.input_dev1 == PICO_INPUT_XE_1AP;
+	me_enable(e_menu_keyconfig, MA_CTRL_STICK, x);
 	return 0;
 }
 
 static menu_entry e_menu_gunconfig[] =
 {
-	mee_onoff     ("Gun crosshair",     MA_CTRL_GUN_CURSOR, currentConfig.EmuOpt, EOPT_GUN_CURSOR),
+	mee_onoff     ("Crosshair",         MA_CTRL_CROSSHAIR, currentConfig.EmuOpt, EOPT_CROSSHAIR),
 	mee_range     ("Gun x offset",      MA_CTRL_GUN_XOFFS,currentConfig.gunx, -50, 50),
 	mee_range     ("Gun y offset",      MA_CTRL_GUN_YOFFS,currentConfig.guny, -50, 50),
 	mee_end,
@@ -710,6 +711,27 @@ static int gun_config_loop(int id, int keys)
 	return 0;
 }
 
+static menu_entry e_menu_stickconfig[] =
+{
+	mee_onoff     ("Crosshair",         MA_CTRL_CROSSHAIR, currentConfig.EmuOpt, EOPT_CROSSHAIR),
+	mee_onoff     ("Stick centering",   MA_CTRL_STICK_CENTER, PicoIn.opt, POPT_XE_CENTERING),
+	mee_range     ("Centering timeout", MA_CTRL_STICK_TIME, currentConfig.stick_timeout, 1, 10),
+	mee_range     ("Centering rate",    MA_CTRL_STICK_RATE, currentConfig.stick_rate, 1, 10),
+	mee_end,
+};
+
+static int stick_config_loop(int id, int keys)
+{
+	static int sel = 0;
+
+	me_loop_d(e_menu_stickconfig, &sel, menu_draw_prep, NULL);
+
+	PicoIn.stkTime = currentConfig.stick_timeout;
+	PicoIn.stkRate = currentConfig.stick_rate;
+
+	return 0;
+}
+
 static menu_entry e_menu_keyconfig[] =
 {
 	mee_cust_nosave(player,             MA_CTRL_PLAYER1,    key_config_players, mgn_nothing),
@@ -721,6 +743,7 @@ static menu_entry e_menu_keyconfig[] =
 	mee_range     ("Turbo rate",        MA_CTRL_TURBO_RATE, currentConfig.turbo_rate, 1, 30),
 	mee_range     ("Analog deadzone",   MA_CTRL_DEADZONE,   currentConfig.analog_deadzone, 1, 99),
 	mee_handler_id("Gun configuration", MA_CTRL_LIGHTGUN,   gun_config_loop),
+	mee_handler_id("Stick configuration",MA_CTRL_STICK,     stick_config_loop),
 	mee_label     (""),
 	mee_label     ("Input devices:"),
 	mee_label_mk  (MA_CTRL_DEV_FIRST, mgn_dev_name),
@@ -757,9 +780,10 @@ static int menu_loop_keyconfig(int id, int keys)
 	x = currentConfig.input_dev0 == PICO_INPUT_LIGHT_GUN ||
 		currentConfig.input_dev1 == PICO_INPUT_LIGHT_GUN ||
 		currentConfig.input_dev1 == PICO_INPUT_JUSTIFIER;
-	x |= currentConfig.input_dev0 == PICO_INPUT_XE_1AP ||
-		currentConfig.input_dev1 == PICO_INPUT_XE_1AP;
 	me_enable(e_menu_keyconfig, MA_CTRL_LIGHTGUN, x);
+	x = currentConfig.input_dev0 == PICO_INPUT_XE_1AP ||
+		currentConfig.input_dev1 == PICO_INPUT_XE_1AP;
+	me_enable(e_menu_keyconfig, MA_CTRL_STICK, x);
 
 	me_loop_d(e_menu_keyconfig, &sel, menu_draw_prep, NULL);
 
