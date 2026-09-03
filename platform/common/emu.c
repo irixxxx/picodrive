@@ -680,6 +680,8 @@ void emu_prep_defconfig(void)
 	defaultConfig.gamma = 100;
 	defaultConfig.scaling = 0;
 	defaultConfig.turbo_rate = 15;
+	defaultConfig.stick_timeout = 3;
+	defaultConfig.stick_rate = 3;
 	defaultConfig.msh2_khz = PICO_MSH2_HZ / 1000;
 	defaultConfig.ssh2_khz = PICO_SSH2_HZ / 1000;
 	defaultConfig.max_skip = 4;
