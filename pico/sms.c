@@ -23,9 +23,6 @@
 extern void YM2413_regWrite(unsigned reg);
 extern void YM2413_dataWrite(unsigned data);
 
-extern unsigned sprites_status; // TODO put in some hdr file!
-extern int sprites_zoom, xscroll;
-
 static unsigned char vdp_data_read(void)
 {
   struct PicoVideo *pv = &Pico.video;
@@ -111,18 +108,18 @@ static NOINLINE void vdp_reg_write(struct PicoVideo *pv, u8 a, u8 d)
     elprintf(EL_INTS, "hint %d", l);
     z80_int_assert(l);
     if (z80_cyclesDone() - Pico.t.z80c_line_start < 228 - (int)(10*1.5)+2)
-      sprites_zoom = (pv->reg[1] & 0x3) | (pv->reg[0] & 0x8);
+      Pico.ms.vdp_spzlatch = (pv->reg[1] & 0x3) | (pv->reg[0] & 0x8);
     break;
   case 1: // mode control 2
     l = pv->pending_ints & (d >> 5) & 1;
     elprintf(EL_INTS, "vint %d", l);
     z80_int_assert(l);
     if (z80_cyclesDone() - Pico.t.z80c_line_start < 228 - (int)(10*1.5)+2)
-      sprites_zoom = (pv->reg[1] & 0x3) | (pv->reg[0] & 0x8);
+      Pico.ms.vdp_spzlatch = (pv->reg[1] & 0x3) | (pv->reg[0] & 0x8);
     break;
   case 8: // horizontal scroll
     if (z80_cyclesDone() - Pico.t.z80c_line_start < 228 - (int)(2*1.5)+2)
-      xscroll = d;
+      Pico.ms.vdp_scrlatch = d;
     break;
   }
 }
@@ -1295,8 +1292,8 @@ void PicoFrameMS(void)
       PicoParseSATSMS(y-1-lines);
 
     // take over status bits from previously rendered line TODO: cycle exact?
-    pv->status |= sprites_status;
-    sprites_status = 0;
+    pv->status |= Pico.ms.vdp_statlatch;
+    Pico.ms.vdp_statlatch = 0;
 
     // Interrupt handling. Simulate interrupt flagged and immediately reset in
     // same insn by flagging the irq, execute for 1 insn, then checking if the

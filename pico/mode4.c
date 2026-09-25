@@ -23,11 +23,6 @@ static int sprites_x[32]; // x position
 static int sprites; // count
 static unsigned char sprites_map[2+256/8+2]; // collision detection map
 
-unsigned int sprites_status;
-
-int sprites_zoom; // latched sprite zoom flag
-int xscroll; // horizontal scroll
-
 /* sprite collision detection */
 static int CollisionDetect(u8 *mb, u16 sx, unsigned int pack, int zoomed)
 {
@@ -159,7 +154,7 @@ static void ParseSpritesM4(int scanline)
   u8 *sat;
   int xoff = line_offset;
   int sprite_base, addr_mask;
-  int zoomed = sprites_zoom & 0x1; // zoomed sprites, e.g. Earthworm Jim
+  int zoomed = Pico.ms.vdp_spzlatch & 0x1; // zoomed sprites, e.g. Earthworm Jim
   unsigned int pack;
   int i, s, h, m;
 
@@ -169,7 +164,7 @@ static void ParseSpritesM4(int scanline)
     xoff -= 48; // GG LCD, adjust to center 160 px
 
   sat = (u8 *)PicoMem.vram + ((pv->reg[5] & 0x7e) << 7);
-  if (sprites_zoom & 2) {
+  if (Pico.ms.vdp_spzlatch & 2) {
     addr_mask = 0xfe; h = 16;
   } else {
     addr_mask = 0xff; h = 8;
@@ -191,7 +186,7 @@ static void ParseSpritesM4(int scanline)
     if (y + h <= scanline || scanline < y)
       continue; // not on this line
     if (s >= 8) {
-      if (scanline >= 0) sprites_status |= SR_SOVR;
+      if (scanline >= 0) Pico.ms.vdp_statlatch |= SR_SOVR;
       if (!(PicoIn.opt & POPT_DIS_SPRITE_LIM) || s >= 32)
         break;
     }
@@ -214,14 +209,14 @@ static void ParseSpritesM4(int scanline)
     }
   }
   if (m)
-    sprites_status |= SR_C;
+    Pico.ms.vdp_statlatch |= SR_C;
   sprites = s;
 }
 
 static void DrawSpritesM4(void)
 {
   unsigned int pack;
-  int zoomed = sprites_zoom & 0x1; // zoomed sprites, e.g. Earthworm Jim
+  int zoomed = Pico.ms.vdp_spzlatch & 0x1; // zoomed sprites, e.g. Earthworm Jim
   int s = sprites;
 
   // now draw all sprites backwards
@@ -290,7 +285,7 @@ static void DrawDisplayM4(int scanline)
   nametab2 = nametab + ((scanline>>3) << (6-1));
   nametab  = nametab + ((line>>3)     << (6-1));
 
-  dx = xscroll; // hscroll
+  dx = Pico.ms.vdp_scrlatch; // hscroll
   if (scanline < 16 && (pv->reg[0] & 0x40))
     dx = 0; // hscroll disabled for top 2 rows (e.g. Fantasy Zone II)
 
@@ -436,13 +431,13 @@ static void ParseSpritesTMS(int scanline)
   u8 *sat;
   int xoff;
   int sprite_base, addr_mask;
-  int zoomed = sprites_zoom & 0x1; // zoomed sprites
+  int zoomed = Pico.ms.vdp_spzlatch & 0x1; // zoomed sprites
   int i, s, h, m;
 
   xoff = line_offset;
 
   sat = (u8 *)PicoMem.vramb + ((pv->reg[5] & 0x7f) << 7);
-  if (sprites_zoom & 2) {
+  if (Pico.ms.vdp_spzlatch & 2) {
     addr_mask = 0xfc; h = 16;
   } else {
     addr_mask = 0xff; h = 8;
@@ -465,7 +460,7 @@ static void ParseSpritesTMS(int scanline)
     if (y + h <= scanline || scanline < y)
       continue; // not on this line
     if (s >= 4) {
-      if (scanline >= 0) sprites_status |= SR_SOVR | i;
+      if (scanline >= 0) Pico.ms.vdp_statlatch |= SR_SOVR | i;
       if (!(PicoIn.opt & POPT_DIS_SPRITE_LIM) || s >= 32)
         break;
     }
@@ -484,7 +479,7 @@ static void ParseSpritesTMS(int scanline)
         if (!m) m = CollisionDetect(sprites_map, x, pack, zoomed);
       }
       x += (zoomed ? 16:8);
-      if (sprites_c[s] && (sprites_zoom & 0x2) && x > 0 && x < 8+256) {
+      if (sprites_c[s] && (Pico.ms.vdp_spzlatch & 0x2) && x > 0 && x < 8+256) {
         pack = PicoMem.vramb[MEM_LE2(sprites_addr[s]+0x10)];
         if (!m) m = CollisionDetect(sprites_map, x, pack, zoomed);
       }
@@ -492,7 +487,7 @@ static void ParseSpritesTMS(int scanline)
     s++;
   }
   if (m)
-    sprites_status |= SR_C;
+    Pico.ms.vdp_statlatch |= SR_C;
   sprites = s;
 }
 
@@ -500,7 +495,7 @@ static void ParseSpritesTMS(int scanline)
 static void DrawSpritesTMS(void)
 {
   unsigned int pack;
-  int zoomed = sprites_zoom & 0x1; // zoomed sprites
+  int zoomed = Pico.ms.vdp_spzlatch & 0x1; // zoomed sprites
   int s = sprites;
 
   // now draw all sprites backwards
@@ -514,7 +509,7 @@ static void DrawSpritesTMS(void)
       if (zoomed) TileDoubleSprTMS(x, pack, c);
       else        TileNormSprTMS(x, pack, c);
     }
-    if (c && (sprites_zoom & 0x2) && (x+=w) > 0 && x < 8+256) {
+    if (c && (Pico.ms.vdp_spzlatch & 0x2) && (x+=w) > 0 && x < 8+256) {
       pack = PicoMem.vramb[MEM_LE2(sprites_addr[s]+0x10)];
       if (zoomed) TileDoubleSprTMS(x, pack, c);
       else        TileNormSprTMS(x, pack, c);
@@ -847,8 +842,8 @@ void PicoLineSMS(int line)
   }
 
   // latch current register values (may be overwritten by VDP reg writes later)
-  sprites_zoom = (Pico.video.reg[1] & 0x3) | (Pico.video.reg[0] & 0x8);
-  xscroll = Pico.video.reg[8];
+  Pico.ms.vdp_spzlatch = (Pico.video.reg[1] & 0x3) | (Pico.video.reg[0] & 0x8);
+  Pico.ms.vdp_scrlatch = Pico.video.reg[8];
 
   if (FinalizeLineSMS != NULL)
     FinalizeLineSMS(line);

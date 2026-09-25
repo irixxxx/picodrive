@@ -379,11 +379,14 @@ struct PicoMS
   unsigned char mapper;
   unsigned char fm_ctl;
   unsigned char vdp_buffer;
-  unsigned char vdp_hlatch;
+  unsigned char vdp_hlatch; // h pos for phaser
   unsigned char io_gg[0x08];
   unsigned char mapcnt;
   unsigned char io_sg;
-  unsigned char pad[0x40];
+  unsigned char vdp_scrlatch; // h scroll latch
+  unsigned char vdp_spzlatch; // sprite zoom latch
+  unsigned char vdp_statlatch; // status
+  unsigned char pad[0x3d];
 };
 
 // emu state and data for the asm code
