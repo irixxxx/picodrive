@@ -83,7 +83,6 @@ extern void *p32x_bios_g, *p32x_bios_m, *p32x_bios_s;
 #define POPT_EN_FM_FILTER   (1<<25)
 #define POPT_EN_KBD         (1<<26)
 #define POPT_H32_LAYER_32X  (1<<27)
-#define POPT_XE_CENTERING   (1<<28)//x000 0000
 
 #define PAHW_MCD    (1<<0)
 #define PAHW_32X    (1<<1)
@@ -123,6 +122,7 @@ typedef struct PicoInterface
 	short mouse[4];                // x,y mouse coordinates
 	short mouseInt[4];             // internal copy
 	short gunx, guny;              // light gun offsets
+	short stkCenter;               // stick centering axes (1=x, 2=y)
 	short stkTime, stkRate;        // stick centering timeout, rate
 
 	unsigned short quirks;         // game-specific quirks: PQUIRK_*

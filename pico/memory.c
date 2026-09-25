@@ -633,13 +633,16 @@ void PicoPortUpdate(void)
     PicoIn.mouseInt[0] += dx;
     PicoIn.mouseInt[1] += dy;
 
-    if (port_xe1ap && (PicoIn.opt & POPT_XE_CENTERING) && (dx|dy) == 0) {
+    if (port_xe1ap && PicoIn.stkCenter && (dx|dy) == 0) {
       if (CYCLES_GE(SekCyclesDone(), mouseTime)) {
         int r = PicoIn.stkRate; // r in %
         dx = PicoIn.mouseInt[0] - 320/2;
         dy = PicoIn.mouseInt[1] - rendlines/2;
-        PicoIn.mouseInt[0] -= dx * r/100 + (dx >= r ? 1 : dx <= -r ? -1 : 0);
-        PicoIn.mouseInt[1] -= dy * r/100 + (dy >= r ? 1 : dy <= -r ? -1 : 0);
+        if (PicoIn.stkCenter & 1)
+          PicoIn.mouseInt[0] -= dx * r/100 + (dx >= r ? 1 : dx <= -r ? -1 : 0);
+        if (PicoIn.stkCenter & 2)
+          PicoIn.mouseInt[1] -= dy * r/100 + (dy >= r ? 1 : dy <= -r ? -1 : 0);
+        mouseTime = SekCyclesDone();
       }
     } else {
       int t = PicoIn.stkTime; // t in 1/10s

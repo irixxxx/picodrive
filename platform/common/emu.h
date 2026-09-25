@@ -98,7 +98,8 @@ typedef struct _currentConfig_t {
 	int analog_deadzone;
 	int keyboard;
 	int gunx, guny;
-	int stick_timeout; // analog stick emulation
+	int stick_centering; // analog stick emulation
+	int stick_timeout;
 	int stick_rate;
 	int msh2_khz;
 	int ssh2_khz;
