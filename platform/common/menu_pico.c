@@ -371,6 +371,7 @@ me_bind_action me_xe1ap_actions[] =
 	{ "A turbo", 0x40000 },
 	{ "B turbo", 0x10000 },
 	{ "C turbo", 0x20000 },
+//	{ "D turbo", 0x80000 },
 	{ "START  ", 0x0080 },
 	{ "SELECT ", 0x0800 },
 	{ NULL,      0 },
@@ -694,8 +695,8 @@ static int mh_indev(int id, int keys)
 static menu_entry e_menu_gunconfig[] =
 {
 	mee_onoff     ("Crosshair",         MA_CTRL_CROSSHAIR, currentConfig.EmuOpt, EOPT_CROSSHAIR),
-	mee_range     ("Gun x offset",      MA_CTRL_GUN_XOFFS,currentConfig.gunx, -50, 50),
-	mee_range     ("Gun y offset",      MA_CTRL_GUN_YOFFS,currentConfig.guny, -50, 50),
+	mee_range     ("Gun x offset",      MA_CTRL_GUN_XOFFS, currentConfig.gunx, -50, 50),
+	mee_range     ("Gun y offset",      MA_CTRL_GUN_YOFFS, currentConfig.guny, -50, 50),
 	mee_end,
 };
 
@@ -711,10 +712,12 @@ static int gun_config_loop(int id, int keys)
 	return 0;
 }
 
+static const char *stick_centering[] = { "OFF", "x axis", "y axis", "both", NULL };
+
 static menu_entry e_menu_stickconfig[] =
 {
 	mee_onoff     ("Crosshair",         MA_CTRL_CROSSHAIR, currentConfig.EmuOpt, EOPT_CROSSHAIR),
-	mee_onoff     ("Stick centering",   MA_CTRL_STICK_CENTER, PicoIn.opt, POPT_XE_CENTERING),
+	mee_enum      ("Stick centering",   MA_CTRL_STICK_CENTER, currentConfig.stick_centering, stick_centering),
 	mee_range     ("Centering timeout", MA_CTRL_STICK_TIME, currentConfig.stick_timeout, 1, 10),
 	mee_range     ("Centering rate",    MA_CTRL_STICK_RATE, currentConfig.stick_rate, 1, 10),
 	mee_end,
@@ -728,6 +731,7 @@ static int stick_config_loop(int id, int keys)
 
 	PicoIn.stkTime = currentConfig.stick_timeout;
 	PicoIn.stkRate = currentConfig.stick_rate;
+	PicoIn.stkCenter = currentConfig.stick_centering;
 
 	return 0;
 }
