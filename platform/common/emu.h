@@ -96,6 +96,7 @@ typedef struct _currentConfig_t {
 	int filter;  // EOPT_FILTER_* video filter
 	int ghosting;
 	int analog_deadzone;
+	int mouse_speed;
 	int keyboard;
 	int gunx, guny;
 	int stick_centering; // analog stick emulation
