@@ -1945,7 +1945,7 @@ static void update_variables(bool first_run)
    if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)
       mouse_speed = 10 * atof(var.value);
    else
-      mouse_speed = 10 * atof(var.value);
+      mouse_speed = 10;
 
    var.value = NULL;
    var.key = "picodrive_ramcart";

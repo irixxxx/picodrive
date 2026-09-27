@@ -1419,10 +1419,12 @@ void emu_update_input(void)
 		pl_actions[1] |= map_pointer_buttons(i, currentConfig.input_dev1);
 
 		// for XE-1AP, right stick (throttle)
-		if (PicoIn.pad[0] & 1) PicoIn.mouse[3]-=4;
-		if (PicoIn.pad[0] & 2) PicoIn.mouse[3]+=4;
-		if (PicoIn.pad[0] & 4) PicoIn.mouse[3]-=4;
-		if (PicoIn.pad[0] & 8) PicoIn.mouse[3]+=4;
+		in_update_pointer(0, 9, &i);
+		PicoIn.mouse[3] += i;
+//		if (PicoIn.pad[0] & 1) PicoIn.mouse[3]-=4;
+//		if (PicoIn.pad[0] & 2) PicoIn.mouse[3]+=4;
+//		if (PicoIn.pad[0] & 4) PicoIn.mouse[3]-=4;
+//		if (PicoIn.pad[0] & 8) PicoIn.mouse[3]+=4;
 		PicoIn.mouse[3] = PicoIn.mouse[3] < -0x7f ? -0x7f :
 				PicoIn.mouse[3] > 0x7f ? 0x7f : PicoIn.mouse[3];
 		PicoIn.pad[0] &= ~0x0f; // release UDLR
