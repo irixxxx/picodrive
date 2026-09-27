@@ -351,6 +351,9 @@ me_bind_action me_ctrl_actions[] =
 	{ "X      ", 0x0400 },
 	{ "Y      ", 0x0200 },
 	{ "Z      ", 0x0100 },
+	// virtual keys for XE-1AP, shouldn't be visible for "normal" pads
+	{ "A'     ", 0x4000 },
+	{ "B'     ", 0x1000 },
 	{ NULL,      0 },
 };
 
@@ -594,7 +597,8 @@ static int key_config_players(int id, int keys)
 		int dev = (pid == 1 ? currentConfig.input_dev0 : currentConfig.input_dev1);
 		if (pid < 2 & dev == PICO_INPUT_XE_1AP)
 			key_config_loop(me_xe1ap_actions, array_size(me_xe1ap_actions) - 1, pid-1);
-		else	key_config_loop(me_ctrl_actions, array_size(me_ctrl_actions) - 1, pid-1);
+		else	// leave out the 2 "virtual" keys for save/loading XE-1AP
+			key_config_loop(me_ctrl_actions, array_size(me_ctrl_actions) - 3, pid-1);
 	}
 
 	return 0;

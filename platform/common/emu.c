@@ -1451,10 +1451,10 @@ void emu_update_input(void)
 		// since fast-forward activates even with parameter set_on = 0.
 		events &= PEV_SWITCH_KBD;
 	} else {
-		PicoIn.pad[0] = pl_actions[0] & 0xfff;
-		PicoIn.pad[1] = pl_actions[1] & 0xfff;
-		PicoIn.pad[2] = pl_actions[2] & 0xfff;
-		PicoIn.pad[3] = pl_actions[3] & 0xfff;
+		PicoIn.pad[0] = pl_actions[0] & 0xffff;
+		PicoIn.pad[1] = pl_actions[1] & 0xffff;
+		PicoIn.pad[2] = pl_actions[2] & 0xffff;
+		PicoIn.pad[3] = pl_actions[3] & 0xffff;
 
 		if (pl_actions[0] & 0x70000)
 			do_turbo(&PicoIn.pad[0], pl_actions[0]);
