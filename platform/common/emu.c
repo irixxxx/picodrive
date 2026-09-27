@@ -680,6 +680,7 @@ void emu_prep_defconfig(void)
 	defaultConfig.gamma = 100;
 	defaultConfig.scaling = 0;
 	defaultConfig.turbo_rate = 15;
+	defaultConfig.mouse_speed = 4;
 	defaultConfig.stick_timeout = 3;
 	defaultConfig.stick_rate = 3;
 	defaultConfig.msh2_khz = PICO_MSH2_HZ / 1000;
@@ -1408,11 +1409,12 @@ void emu_update_input(void)
 			int xrel, yrel;
 			in_update_pointer(0, 2, &xrel);
 			in_update_pointer(0, 3, &yrel);
-			mouse_x += xrel, mouse_y += yrel;
+			mouse_x += currentConfig.mouse_speed * xrel / 4;
+			mouse_y += currentConfig.mouse_speed * yrel / 4;
 		}
 		// scale mouse coordinates from -1024..1024 to 0..screen_w/h
-		PicoIn.mouse[0] = (mouse_x+1024) * 320/2048;
-		PicoIn.mouse[1] = (mouse_y+1024) * 240/2048;
+		PicoIn.mouse[0] = (mouse_x+1024) * 320/2048 * currentConfig.mouse_speed / 4;
+		PicoIn.mouse[1] = (mouse_y+1024) * 240/2048 * currentConfig.mouse_speed / 4;
 
 		in_update_pointer(0, -1, &i); // get mouse buttons, bit 2-0 = RML
 		pl_actions[0] |= map_pointer_buttons(i, currentConfig.input_dev0);
