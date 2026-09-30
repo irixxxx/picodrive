@@ -706,9 +706,16 @@ static const char *mgn_mouse_speed(int id, int *offs)
 	return static_buff;
 }
 
+static const char *mgn_mouse_wheel(int id, int *offs)
+{
+	sprintf(static_buff, "%d", 1 << currentConfig.mouse_wheel);
+	return static_buff;
+}
+
 static menu_entry e_menu_mouseconfig[] =
 {
 	mee_range_cust("Mouse sensitivity", MA_CTRL_MOUSE, currentConfig.mouse_speed, 1, 8, mgn_mouse_speed),
+	mee_range_cust("Mouse wheel step",  MA_CTRL_WHEEL, currentConfig.mouse_wheel, 0, 4, mgn_mouse_wheel),
 	mee_end,
 };
 

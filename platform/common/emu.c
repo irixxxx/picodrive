@@ -681,6 +681,7 @@ void emu_prep_defconfig(void)
 	defaultConfig.scaling = 0;
 	defaultConfig.turbo_rate = 15;
 	defaultConfig.mouse_speed = 4;
+	defaultConfig.mouse_wheel = 2;
 	defaultConfig.stick_timeout = 3;
 	defaultConfig.stick_rate = 3;
 	defaultConfig.msh2_khz = PICO_MSH2_HZ / 1000;
@@ -749,6 +750,9 @@ int emu_read_config(const char *rom_fname, int no_defaults)
 	PicoIn.overclockM68k = currentConfig.overclock_68k;
 	PicoIn.gunx = currentConfig.gunx;
 	PicoIn.guny = currentConfig.guny;
+	PicoIn.stkTime = currentConfig.stick_timeout;
+	PicoIn.stkRate = currentConfig.stick_rate;
+	PicoIn.stkCenter = currentConfig.stick_centering;
 
 	// some sanity checks
 	if (currentConfig.volume < 0 || currentConfig.volume > 99)
@@ -1409,8 +1413,8 @@ void emu_update_input(void)
 			int xrel, yrel;
 			in_update_pointer(0, 2, &xrel);
 			in_update_pointer(0, 3, &yrel);
-			mouse_x += currentConfig.mouse_speed * xrel / 4;
-			mouse_y += currentConfig.mouse_speed * yrel / 4;
+			mouse_x += xrel;
+			mouse_y += yrel;
 		}
 		// scale mouse coordinates from -1024..1024 to 0..screen_w/h
 		PicoIn.mouse[0] = (mouse_x+1024) * 320/2048 * currentConfig.mouse_speed / 4;
@@ -1422,7 +1426,7 @@ void emu_update_input(void)
 
 		// for XE-1AP, right stick (throttle)
 		in_update_pointer(0, 9, &i);
-		PicoIn.mouse[3] += i;
+		PicoIn.mouse[3] += (1<<currentConfig.mouse_wheel) * i;
 //		if (PicoIn.pad[0] & 1) PicoIn.mouse[3]-=4;
 //		if (PicoIn.pad[0] & 2) PicoIn.mouse[3]+=4;
 //		if (PicoIn.pad[0] & 4) PicoIn.mouse[3]-=4;
