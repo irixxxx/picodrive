@@ -357,14 +357,6 @@ static int custom_read(menu_entry *me, const char *var, const char *val)
 			Pico32xSetClocks(0, currentConfig.ssh2_khz * 1000);
 			return 1;
 
-		case MA_OPT2_GAMMA:
-			currentConfig.gamma = atoi(val);
-			return 1;
-
-		case MA_OPT2_MAX_FRAMESKIP:
-			currentConfig.max_skip = atoi(val);
-			return 1;
-
 		case MA_OPT_KEYBOARD:
 			currentConfig.keyboard = 0;
 			if (strcasecmp(val, "physical") == 0)
@@ -517,7 +509,7 @@ static void parse(const char *var, const char *val, int *keys_encountered)
 		if (me->name == NULL || strcasecmp(var, me->name) != 0)
 			continue;
 
-		if (me->beh == MB_OPT_ONOFF) {
+		if (me->beh == MB_OPT_ONOFF || me->beh == MB_OPT_CUSTONOFF) {
 			tmp = strtol(val, &p, 0);
 			if (*p != 0)
 				goto bad_val;
@@ -525,7 +517,7 @@ static void parse(const char *var, const char *val, int *keys_encountered)
 			else     *(int *)me->var &= ~me->mask;
 			return;
 		}
-		else if (me->beh == MB_OPT_RANGE) {
+		else if (me->beh == MB_OPT_RANGE || me->beh == MB_OPT_CUSTRANGE) {
 			tmp = strtol(val, &p, 0);
 			if (*p != 0)
 				goto bad_val;
