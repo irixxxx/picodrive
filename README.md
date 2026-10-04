@@ -49,6 +49,14 @@ Menacer for the Mega Drive or the Light Phaser for the Master System; it may
 be attached to either pad input port. The `justifier` is only available on
 input 2. Supplementary information is provided in `platform/base_readme.txt`.
 
+### XE-1AP Controller
+
+PicoDrive supports the XE-1AP, a Sega Mega Drive analogue controller produced by
+Micomsoft. The controller features an analogue stick for directional control, a
+rotatable throttle stick, and a total of twelve buttons. The physical mouse is
+used to control both sticks. To activate, select `XE-1AP` as input device for
+one of the pad ports. Further details are provided in `platform/base_readme.txt`.
+
 ### Sega Pico and SC-3000 Keyboards
 
 PicoDrive provides support for the Pico and SC-3000 keyboards. This can be

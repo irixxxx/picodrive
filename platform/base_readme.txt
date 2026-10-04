@@ -100,8 +100,8 @@ toggle for which is mapped to the START pad button. Pen positioning is done
 through the D-pad if the screen has been switched to either pages or pad, or by
 mouse if physical mouse support is activated.
 
-
 #ifdef GENERIC
+
 How to use the mouse
 --------------------
 
@@ -158,7 +158,32 @@ The physical mouse buttons are mapped as follows:
 The pad button mappings may also be used to access other buttons.
 
 
+How to use the XE-1AP controller
+--------------------------------
+
+The XE-1AP was originally released in 1989 by Micomsoft for the Sega Mega Drive.
+The controller features a left analogue stick for directional control, rotatable
+right throttle stick, shoulder buttons A, B, C, D, and face buttons A', B', E1,
+E2, Start and Select.
+
+To use the XE-1AP in PicoDrive, select `XE-1AP` as input device in the controls
+menu. Stick settings allow for enabling an automatic centre for returning the
+emulated stick to its central position after a period of inactivity.
+
+The analogue stick is mapped to the host mouse cursor, and the throttle stick is
+mapped to the mouse wheel. Physical mouse buttons are mapped as follows:
+
+| Physical Mouse | XE-1AP |
+|:--------------:|:------:|
+|  Left Button   |   A    |
+|  Middle Button |   B    |
+|  Right Button  | START  |
+
+Additional buttons (C, D, E1, E2, A', B') may be configured via the pad button
+mappings.
+
 #endif
+
 How to use keyboard input
 -------------------------
 
