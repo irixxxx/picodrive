@@ -661,10 +661,10 @@ static int mh_indev(int id, int keys)
 		if (!is0 && *indev > PICO_INPUT_JUSTIFIER)
 			(*indev) --;
 #else
-		while (*indev >= PICO_INPUT_MOUSE && *indev <= PICO_INPUT_JUSTIFIER)
+		while (*indev >= PICO_INPUT_XE_1AP && *indev <= PICO_INPUT_JUSTIFIER)
 			(*indev) ++;
 		// Team/4way only in pad port 1
-		while (!is0 && *indev >= PICO_INPUT_MOUSE)
+		while (!is0 && *indev >= PICO_INPUT_XE_1AP)
 			(*indev) --;
 #endif
 		if (*indev >= PICO_INPUT_COUNT)
@@ -676,7 +676,7 @@ static int mh_indev(int id, int keys)
 		if (is0 && *indev == PICO_INPUT_JUSTIFIER)
 			(*indev) --;
 #else
-		while (*indev >= PICO_INPUT_MOUSE && *indev <= PICO_INPUT_JUSTIFIER)
+		while (*indev >= PICO_INPUT_XE_1AP && *indev <= PICO_INPUT_JUSTIFIER)
 			(*indev) --;
 #endif
 		if (*indev < 0)
@@ -708,14 +708,18 @@ static const char *mgn_mouse_speed(int id, int *offs)
 
 static const char *mgn_mouse_wheel(int id, int *offs)
 {
-	sprintf(static_buff, "%d", 1 << currentConfig.mouse_wheel);
+	int i = currentConfig.mouse_wheel;
+	if (i)
+		i *= 4;
+	else	i = 1;
+	sprintf(static_buff, "%d", i);
 	return static_buff;
 }
 
 static menu_entry e_menu_mouseconfig[] =
 {
 	mee_range_cust("Mouse sensitivity", MA_CTRL_MOUSE, currentConfig.mouse_speed, 1, 12, mgn_mouse_speed),
-	mee_range_cust("Mouse wheel step",  MA_CTRL_WHEEL, currentConfig.mouse_wheel, 0, 5, mgn_mouse_wheel),
+	mee_range_cust("Mouse wheel step",  MA_CTRL_WHEEL, currentConfig.mouse_wheel, 0, 8, mgn_mouse_wheel),
 	mee_end,
 };
 

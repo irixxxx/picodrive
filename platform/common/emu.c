@@ -1426,7 +1426,9 @@ void emu_update_input(void)
 
 		// for XE-1AP, right stick (throttle)
 		in_update_pointer(0, 9, &i);
-		PicoIn.mouse[3] += (1<<currentConfig.mouse_wheel) * i;
+		if (currentConfig.mouse_wheel)
+			i *= currentConfig.mouse_wheel*4;
+		PicoIn.mouse[3] += i;
 //		if (PicoIn.pad[0] & 1) PicoIn.mouse[3]-=4;
 //		if (PicoIn.pad[0] & 2) PicoIn.mouse[3]+=4;
 //		if (PicoIn.pad[0] & 4) PicoIn.mouse[3]-=4;
