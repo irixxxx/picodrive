@@ -1305,6 +1305,8 @@ void PicoVideoLoad(void *buf, int len)
   if (pv->reg[12]&1)
     SATaddr &= ~0x200, SATmask &= ~0x200; // H40, zero lowest SAT bit
 
+  linedisabled = lineenabled = -1;
+
   if (len) {
     int i;
     if (len >= offsetof(struct VdpFIFO, fifo_slot))
