@@ -157,7 +157,7 @@ struct z80_state {
   u8 irq_pending;   // irq line level, 1 if active
   u8 irq_vector[3]; // up to 3 byte vector for irq mode0 handling
   u16 cyc;
-  u16 busdelay;
+  s16 busdelay;
   u8 reserved[4];
 };
 
