@@ -1311,6 +1311,7 @@ void PicoVideoLoad(void *buf, int len)
       memcpy(&VdpFIFO, buf, offsetof(struct VdpFIFO, fifo_slot));
     for (i = 0; i < 80; i++)
       memcpy(VdpSATCache+2*i, buf + offsetof(struct VdpFIFO, fifo_slot) + 4*i, sizeof(u32));
+    Pico.est.rendstatus |= PDRAW_DIRTY_SPRITES;
     return;
   }
 
