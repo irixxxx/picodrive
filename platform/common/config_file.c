@@ -105,12 +105,14 @@ static void keys_write(FILE *fn, int dev_id, const int *binds, const int *kbd_bi
 		}
 	}
 
-	for (k = 0; k < key_count; k++) {
-		const char *name = in_get_key_name(dev_id, k);
-		if (strcmp(name, "#") == 0) name = "\\x23"; // replace comment sign
-		if (strcmp(name, "=") == 0) name = "\\x3d"; // replace assignment sign
-		if (kbd_binds[k])
-			fprintf(fn, "bind %s = key%02x" NL, name, kbd_binds[k]);
+	if (kbd_binds) {
+		for (k = 0; k < key_count; k++) {
+			const char *name = in_get_key_name(dev_id, k);
+			if (strcmp(name, "#") == 0) name = "\\x23"; // replace comment sign
+			if (strcmp(name, "=") == 0) name = "\\x3d"; // replace assignment sign
+			if (kbd_binds[k])
+				fprintf(fn, "bind %s = key%02x" NL, name, kbd_binds[k]);
+		}
 	}
 }
 
@@ -118,7 +120,7 @@ int config_write(const char *fname)
 {
 	FILE *fn = NULL;
 	menu_entry *me;
-	int t;
+	int t, k;
 	char line[640];
 
 	fn = fopen(fname, "w");
@@ -168,10 +170,11 @@ write_line:
 	}
 
 	/* input: save binds */
-	for (t = 0; t < IN_MAX_DEVS; t++)
+	for (t = 0, k = 1; t < IN_MAX_DEVS; t++)
 	{
 		const int *binds = in_get_dev_binds(t);
 		const char *name = in_get_dev_name(t, 0, 0);
+		const int *kbd = NULL;
 		int count = 0;
 
 		if (binds == NULL || name == NULL)
@@ -180,7 +183,11 @@ write_line:
 		fprintf(fn, "binddev = %s" NL, name);
 
 		in_get_config(t, IN_CFG_BIND_COUNT, &count);
-		keys_write(fn, t, binds, in_get_dev_kbd_binds(t));
+		if (k) { // make sure keyboard data is only saved once
+			kbd = in_get_dev_kbd_binds(t);
+			k &= !kbd;
+		}
+		keys_write(fn, t, binds, kbd);
 	}
 
 	fprintf(fn, "Sound Volume = %i" NL, currentConfig.volume);

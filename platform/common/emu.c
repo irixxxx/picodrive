@@ -1364,6 +1364,7 @@ static void run_events_ui(unsigned int which)
 		engineState = PGS_Menu;
 }
 
+#if 0
 static int map_pointer_buttons(int msbtns, int device)
 {
 	int buttons = 0;
@@ -1385,6 +1386,7 @@ static int map_pointer_buttons(int msbtns, int device)
 
 	return buttons;
 }
+#endif
 
 void emu_update_input(void)
 {
@@ -1420,9 +1422,9 @@ void emu_update_input(void)
 		PicoIn.mouse[0] = (mouse_x+1024) * 320/2048 * currentConfig.mouse_speed / 4;
 		PicoIn.mouse[1] = (mouse_y+1024) * 240/2048 * currentConfig.mouse_speed / 4;
 
-		in_update_pointer(0, -1, &i); // get mouse buttons, bit 2-0 = RML
-		pl_actions[0] |= map_pointer_buttons(i, currentConfig.input_dev0);
-		pl_actions[1] |= map_pointer_buttons(i, currentConfig.input_dev1);
+//		in_update_pointer(0, -1, &i); // get mouse buttons, bit 2-0 = RML
+//		pl_actions[0] |= map_pointer_buttons(i, currentConfig.input_dev0);
+//		pl_actions[1] |= map_pointer_buttons(i, currentConfig.input_dev1);
 
 		// for XE-1AP, right stick (throttle)
 		in_update_pointer(0, 9, &i);
@@ -1433,9 +1435,9 @@ void emu_update_input(void)
 //		if (PicoIn.pad[0] & 2) PicoIn.mouse[3]+=4;
 //		if (PicoIn.pad[0] & 4) PicoIn.mouse[3]-=4;
 //		if (PicoIn.pad[0] & 8) PicoIn.mouse[3]+=4;
+//		PicoIn.pad[0] &= ~0x0f; // release UDLR
 		PicoIn.mouse[3] = PicoIn.mouse[3] < -0x7f ? -0x7f :
 				PicoIn.mouse[3] > 0x7f ? 0x7f : PicoIn.mouse[3];
-		PicoIn.pad[0] &= ~0x0f; // release UDLR
 	}
 
 	if (kbd_mode) {
@@ -1459,18 +1461,20 @@ void emu_update_input(void)
 		// since fast-forward activates even with parameter set_on = 0.
 		events &= PEV_SWITCH_KBD;
 	} else {
-		PicoIn.pad[0] = pl_actions[0] & 0xffff;
-		PicoIn.pad[1] = pl_actions[1] & 0xffff;
-		PicoIn.pad[2] = pl_actions[2] & 0xffff;
-		PicoIn.pad[3] = pl_actions[3] & 0xffff;
+		PicoIn.pad[0] = pl_actions[0] & 0x0fff;
+		PicoIn.pad[1] = pl_actions[1] & 0x0fff;
+		PicoIn.pad[2] = pl_actions[2] & 0x0fff;
+		PicoIn.pad[3] = pl_actions[3] & 0x0fff;
 
-		if (pl_actions[0] & 0x70000)
+		if ((pl_actions[0] & 0x7000) && currentConfig.input_dev0 != PICO_INPUT_XE_1AP)
 			do_turbo(&PicoIn.pad[0], pl_actions[0]);
-		if (pl_actions[1] & 0x70000)
+		else	PicoIn.pad[0] = pl_actions[0] & 0xffff;
+		if ((pl_actions[1] & 0x7000) && currentConfig.input_dev1 != PICO_INPUT_XE_1AP)
 			do_turbo(&PicoIn.pad[1], pl_actions[1]);
-		if (pl_actions[2] & 0x70000)
+		else	PicoIn.pad[1] = pl_actions[1] & 0xffff;
+		if (pl_actions[2] & 0x7000)
 			do_turbo(&PicoIn.pad[2], pl_actions[2]);
-		if (pl_actions[3] & 0x70000)
+		if (pl_actions[3] & 0x7000)
 			do_turbo(&PicoIn.pad[3], pl_actions[3]);
 
 		if ((events ^ prev_events) & PEV_FF) {

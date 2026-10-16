@@ -548,13 +548,14 @@ void plat_init(void)
 	g_screen_ptr = shadow_fb;
 
 	plat_target_setup_input();
-	in_sdl_platform_data.defbinds = in_sdl_defbinds,
-	in_sdl_platform_data.kmap_size = in_sdl_key_map_sz,
-	in_sdl_platform_data.key_map = in_sdl_key_map,
-	in_sdl_platform_data.jmap_size = in_sdl_joy_map_sz,
-	in_sdl_platform_data.joy_map = in_sdl_joy_map,
-	in_sdl_platform_data.key_names = in_sdl_key_names,
-	in_sdl_platform_data.kbd_map = in_sdl_kbd_map,
+	in_sdl_platform_data.defbinds = in_sdl_defbinds;
+	in_sdl_platform_data.kmap_size = in_sdl_key_map_sz;
+	in_sdl_platform_data.key_map = in_sdl_key_map;
+	in_sdl_platform_data.jmap_size = in_sdl_joy_map_sz;
+	in_sdl_platform_data.joy_map = in_sdl_joy_map;
+	in_sdl_platform_data.key_names = in_sdl_key_names;
+	in_sdl_platform_data.kbd_map = in_sdl_kbd_map;
+	in_sdl_platform_data.mouse_device = plat_sdl_is_windowed();
 	in_sdl_init(&in_sdl_platform_data, plat_sdl_handler);
 	in_probe();
 

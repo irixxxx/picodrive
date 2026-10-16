@@ -343,17 +343,14 @@ me_bind_action me_ctrl_actions[] =
 	{ "A      ", 0x0040 },
 	{ "B      ", 0x0010 },
 	{ "C      ", 0x0020 },
-	{ "A turbo", 0x40000 },
-	{ "B turbo", 0x10000 },
-	{ "C turbo", 0x20000 },
+	{ "A turbo", 0x4000 }, // also A' on XE-1AP
+	{ "B turbo", 0x1000 }, // also B' on XE-1AP
+	{ "C turbo", 0x2000 },
 	{ "START  ", 0x0080 },
 	{ "MODE   ", 0x0800 },
 	{ "X      ", 0x0400 },
 	{ "Y      ", 0x0200 },
 	{ "Z      ", 0x0100 },
-	// virtual keys for XE-1AP, shouldn't be visible for "normal" pads
-	{ "A'     ", 0x4000 },
-	{ "B'     ", 0x1000 },
 	{ NULL,      0 },
 };
 
@@ -371,10 +368,6 @@ me_bind_action me_xe1ap_actions[] =
 	{ "E2     ", 0x0200 },
 	{ "A'     ", 0x4000 },
 	{ "B'     ", 0x1000 },
-	{ "A turbo", 0x40000 },
-	{ "B turbo", 0x10000 },
-	{ "C turbo", 0x20000 },
-//	{ "D turbo", 0x80000 },
 	{ "START  ", 0x0080 },
 	{ "SELECT ", 0x0800 },
 	{ NULL,      0 },
@@ -598,7 +591,7 @@ static int key_config_players(int id, int keys)
 		if (pid < 2 & dev == PICO_INPUT_XE_1AP)
 			key_config_loop(me_xe1ap_actions, array_size(me_xe1ap_actions) - 1, pid-1);
 		else	// leave out the 2 "virtual" keys for save/loading XE-1AP
-			key_config_loop(me_ctrl_actions, array_size(me_ctrl_actions) - 3, pid-1);
+			key_config_loop(me_ctrl_actions, array_size(me_ctrl_actions) - 1, pid-1);
 	}
 
 	return 0;
@@ -617,11 +610,7 @@ static const char *mgn_keyboard(int id, int *offs)
 static int key_config_keyboard(int id, int keys)
 {
 	int kid = currentConfig.keyboard;
-#ifdef USE_SDL	// TODO this info should come from platform!
-	int k = 2;
-#else
-	int k = 1;
-#endif
+	int k = (plat_has_wm() ? 2 : 1);
 
 	if (keys & PBTN_LEFT)
 		if (--kid < 0) kid = k;
@@ -653,32 +642,32 @@ static int mh_indev(int id, int keys)
 
 	if (keys & PBTN_RIGHT) {
 		(*indev) ++;
-#ifdef USE_SDL	// TODO this info should come from platform!
-		// Justifier only in pad port 2
-		if (is0 && *indev == PICO_INPUT_JUSTIFIER)
-			(*indev) ++;
-		// Team/4way only in pad port 1
-		if (!is0 && *indev > PICO_INPUT_JUSTIFIER)
-			(*indev) --;
-#else
-		while (*indev >= PICO_INPUT_XE_1AP && *indev <= PICO_INPUT_JUSTIFIER)
-			(*indev) ++;
-		// Team/4way only in pad port 1
-		while (!is0 && *indev >= PICO_INPUT_XE_1AP)
-			(*indev) --;
-#endif
+		if (plat_has_wm()) {
+			// Justifier only in pad port 2
+			if (is0 && *indev == PICO_INPUT_JUSTIFIER)
+				(*indev) ++;
+			// Team/4way only in pad port 1
+			if (!is0 && *indev > PICO_INPUT_JUSTIFIER)
+				(*indev) --;
+		} else {
+			while (*indev >= PICO_INPUT_XE_1AP && *indev <= PICO_INPUT_JUSTIFIER)
+				(*indev) ++;
+			// Team/4way only in pad port 1
+			while (!is0 && *indev >= PICO_INPUT_XE_1AP)
+				(*indev) --;
+		}
 		if (*indev >= PICO_INPUT_COUNT)
 			(*indev) --;
 	}
 	if (keys & PBTN_LEFT) {
 		(*indev) --;
-#ifdef USE_SDL	// TODO this info should come from platform!
-		if (is0 && *indev == PICO_INPUT_JUSTIFIER)
-			(*indev) --;
-#else
-		while (*indev >= PICO_INPUT_XE_1AP && *indev <= PICO_INPUT_JUSTIFIER)
-			(*indev) --;
-#endif
+		if (plat_has_wm()) {
+			if (is0 && *indev == PICO_INPUT_JUSTIFIER)
+				(*indev) --;
+		} else {
+			while (*indev >= PICO_INPUT_XE_1AP && *indev <= PICO_INPUT_JUSTIFIER)
+				(*indev) --;
+		}
 		if (*indev < 0)
 			(*indev) ++;
 	}
