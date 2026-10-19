@@ -507,7 +507,7 @@ int emu_reload_rom(const char *rom_fname_in)
 
 	// make quirks visible in UI
 	if (PicoIn.quirks & PQUIRK_FORCE_6BTN)
-		currentConfig.input_dev0 = PICO_INPUT_PAD_6BTN;
+		currentConfig.input_dev[0] = PICO_INPUT_PAD_6BTN;
 
 	menu_romload_end();
 	menu_romload_started = 0;
@@ -540,8 +540,8 @@ int emu_reload_rom(const char *rom_fname_in)
 	}
 	else
 	{
-		PicoSetInputDevice(0, currentConfig.input_dev0);
-		PicoSetInputDevice(1, currentConfig.input_dev1);
+		PicoSetInputDevice(0, currentConfig.input_dev[0]);
+		PicoSetInputDevice(1, currentConfig.input_dev[1]);
 
 		system_announce();
 		PicoIn.opt &= ~POPT_DIS_VDP_FIFO;
@@ -674,8 +674,8 @@ void emu_prep_defconfig(void)
 	defaultConfig.s_PicoSndFilterAlpha = 0x10000 * 60 / 100;
 	defaultConfig.confirm_save = EOPT_CONFIRM_SAVE;
 	defaultConfig.Frameskip = -1; // auto
-	defaultConfig.input_dev0 = PICO_INPUT_PAD_3BTN;
-	defaultConfig.input_dev1 = PICO_INPUT_PAD_3BTN;
+	defaultConfig.input_dev[0] = PICO_INPUT_PAD_3BTN;
+	defaultConfig.input_dev[1] = PICO_INPUT_PAD_3BTN;
 	defaultConfig.volume = 50;
 	defaultConfig.gamma = 100;
 	defaultConfig.scaling = 0;
@@ -1364,30 +1364,6 @@ static void run_events_ui(unsigned int which)
 		engineState = PGS_Menu;
 }
 
-#if 0
-static int map_pointer_buttons(int msbtns, int device)
-{
-	int buttons = 0;
-
-	if ((PicoIn.AHW & PAHW_PICO) && device == PICO_INPUT_MOUSE) {
-		if (msbtns & 1) buttons |= 1<<GBTN_C;	// pen button
-		if (msbtns & 2) buttons |= 1<<GBTN_B;	// red button
-		if (msbtns & 4) buttons |= 1<<GBTN_START; // pen up/down
-	} else if ((PicoIn.AHW & PAHW_SMS) || device == PICO_INPUT_MOUSE) {
-		if (msbtns & 1) buttons |= 1<<GBTN_B;	// as Sega Mouse
-		if (msbtns & 2) buttons |= 1<<GBTN_START;
-		if (msbtns & 4) buttons |= 1<<GBTN_C;
-	} else if (device == PICO_INPUT_LIGHT_GUN || device == PICO_INPUT_JUSTIFIER ||
-		   device == PICO_INPUT_XE_1AP) {
-		if (msbtns & 1) buttons |= 1<<GBTN_A;	// as Sega Menacer
-		if (msbtns & 2) buttons |= 1<<GBTN_B;
-		if (msbtns & 4) buttons |= 1<<GBTN_START;
-	}
-
-	return buttons;
-}
-#endif
-
 void emu_update_input(void)
 {
 	static int prev_events = 0;
@@ -1422,20 +1398,11 @@ void emu_update_input(void)
 		PicoIn.mouse[0] = (mouse_x+1024) * 320/2048 * currentConfig.mouse_speed / 4;
 		PicoIn.mouse[1] = (mouse_y+1024) * 240/2048 * currentConfig.mouse_speed / 4;
 
-//		in_update_pointer(0, -1, &i); // get mouse buttons, bit 2-0 = RML
-//		pl_actions[0] |= map_pointer_buttons(i, currentConfig.input_dev0);
-//		pl_actions[1] |= map_pointer_buttons(i, currentConfig.input_dev1);
-
 		// for XE-1AP, right stick (throttle)
 		in_update_pointer(0, 9, &i);
 		if (currentConfig.mouse_wheel)
 			i *= currentConfig.mouse_wheel*4;
 		PicoIn.mouse[3] += i;
-//		if (PicoIn.pad[0] & 1) PicoIn.mouse[3]-=4;
-//		if (PicoIn.pad[0] & 2) PicoIn.mouse[3]+=4;
-//		if (PicoIn.pad[0] & 4) PicoIn.mouse[3]-=4;
-//		if (PicoIn.pad[0] & 8) PicoIn.mouse[3]+=4;
-//		PicoIn.pad[0] &= ~0x0f; // release UDLR
 		PicoIn.mouse[3] = PicoIn.mouse[3] < -0x7f ? -0x7f :
 				PicoIn.mouse[3] > 0x7f ? 0x7f : PicoIn.mouse[3];
 	}
@@ -1466,10 +1433,10 @@ void emu_update_input(void)
 		PicoIn.pad[2] = pl_actions[2] & 0x0fff;
 		PicoIn.pad[3] = pl_actions[3] & 0x0fff;
 
-		if ((pl_actions[0] & 0x7000) && currentConfig.input_dev0 != PICO_INPUT_XE_1AP)
+		if ((pl_actions[0] & 0x7000) && currentConfig.input_dev[0] != PICO_INPUT_XE_1AP)
 			do_turbo(&PicoIn.pad[0], pl_actions[0]);
 		else	PicoIn.pad[0] = pl_actions[0] & 0xffff;
-		if ((pl_actions[1] & 0x7000) && currentConfig.input_dev1 != PICO_INPUT_XE_1AP)
+		if ((pl_actions[1] & 0x7000) && currentConfig.input_dev[1] != PICO_INPUT_XE_1AP)
 			do_turbo(&PicoIn.pad[1], pl_actions[1]);
 		else	PicoIn.pad[1] = pl_actions[1] & 0xffff;
 		if (pl_actions[2] & 0x7000)
@@ -1682,8 +1649,8 @@ static void emu_loop_prep(void)
 
 	currentConfig.EmuOpt &= ~EOPT_MOUSE;
 	for (i = 0; i < ARRAY_SIZE(pointer); i++)
-		if ((currentConfig.input_dev0 == pointer[i] ||
-					currentConfig.input_dev1 == pointer[i])) {
+		if ((currentConfig.input_dev[0] == pointer[i] ||
+					currentConfig.input_dev[1] == pointer[i])) {
 			currentConfig.EmuOpt |= EOPT_MOUSE;
 			plat_grab_cursor(grab_mode);
 			break;

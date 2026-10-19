@@ -375,12 +375,12 @@ static int custom_read(menu_entry *me, const char *var, const char *val)
 		case MA_OPT_INPUT_DEV0:
 			for (i = 0; indev_names[i]; i++)
 				if (strcasecmp(val, indev_names[i]) == 0)
-					currentConfig.input_dev0 = i;
+					currentConfig.input_dev[0] = i;
 			return 1;
 		case MA_OPT_INPUT_DEV1:
 			for (i = 0; indev_names[i]; i++)
 				if (strcasecmp(val, indev_names[i]) == 0)
-					currentConfig.input_dev1 = i;
+					currentConfig.input_dev[1] = i;
 			return 1;
 		case MA_OPT2_FM_CHIP:
 			PicoIn.opt &= ~POPT_FM_YM2612;

@@ -229,9 +229,9 @@ void pemu_finalize_frame(const char *fps, const char *notice)
 	}
 
 	// TODO correct ptr position for hard/soft/no scaling?
-#define is_lightgun(d) (d == PICO_INPUT_LIGHT_GUN || d == PICO_INPUT_JUSTIFIER || d == PICO_INPUT_XE_1AP)
+#define has_cross(d) (d == PICO_INPUT_LIGHT_GUN || d == PICO_INPUT_JUSTIFIER || d == PICO_INPUT_XE_1AP)
 	if ((currentConfig.EmuOpt & EOPT_CROSSHAIR) &&
-	    (is_lightgun(currentConfig.input_dev0) || is_lightgun(currentConfig.input_dev1))) {
+	    (has_cross(currentConfig.input_dev[0]) || has_cross(currentConfig.input_dev[1]))) {
 		pico_inp_mode = 2;
 		pico_pen_x = PicoPicohw.pen_pos[0] = PicoIn.mouseInt[0];
 		pico_pen_y = PicoPicohw.pen_pos[1] = PicoIn.mouseInt[1];
