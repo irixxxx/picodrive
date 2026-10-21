@@ -8076,25 +8076,25 @@ opcode_ED_A1:
 ;@INI
 opcode_ED_A2:
 	opIN_C
-	add z80hl,z80hl,#1<<16
 	sub z80bc,z80bc,#1<<24
 	and z80f,r0,#0x80
 	mov z80f,z80f,lsr#(7-NFlag)					;@NFlag set by bit 7
 	mov r1,z80bc,lsl#8
-	sub r1,r1,#0x01000000
+	add r1,r1,#0x01000000
 	adds r1,r1,r0,lsl#24
-	orrcs z80f,z80f,#(1<<CFlag)|(1<<HFlag)	;@ CF & HF set if (HL) + ((C-1) & 0xFF) > 0xFF
-	writemem8HL
-	and r2,r1,#0x07<<24			;@ (HL)&7^B
+	orrcs z80f,z80f,#(1<<CFlag)|(1<<HFlag)	;@ CF & HF set if (HL) + (C+1) & 0xFF) > 0xFF
+	and r2,r1,#0x07<<24			;@ ((HL)+(C+1))&7^B
 	ldr r1,[cpucontext,#tables]
 	eor r2,r2,z80bc
-	ldrb r2,[r1,r2,lsr #24]			;@ PZS[(HL)&7^B] & VF
+	ldrb r2,[r1,r2,lsr #24]			;@ PZS[((HL)+(C+1))&7^B] & VF
 	copyFlag35 z80bc
 	and r2,r2,#1<<VFlag
 	orr z80f,z80f,r2
 	movs r1,z80bc,asr#24			;@ B
 	orrmi z80f,z80f,#1<<SFlag
 	orreq z80f,z80f,#1<<ZFlag
+	writemem8HL
+	add z80hl,z80hl,#1<<16
 	fetch 16
 
 ;@OUTI
@@ -8107,10 +8107,10 @@ opcode_ED_A3:
 	mov r1,z80hl,lsl#8			;@ (HL)+L
 	adds r1,r1,r0,lsl#24
 	orrcs z80f,z80f,#(1<<CFlag)|(1<<HFlag)	;@ CF & HF set if (HL)+L > 0xFF
-	and r2,r1,#0x07<<24			;@ (HL)&7^B
+	and r2,r1,#0x07<<24			;@ ((HL)+L)&7^B
 	ldr r1,[cpucontext,#tables]
 	eor r2,r2,z80bc
-	ldrb r2,[r1,r2,lsr #24]			;@ PZS[(HL)&7^B] & VF
+	ldrb r2,[r1,r2,lsr #24]			;@ PZS[((HL)+L)&7^B] & VF
 	copyFlag35 z80bc
 	and r2,r2,#1<<VFlag
 	orr z80f,z80f,r2
@@ -8160,25 +8160,25 @@ opcode_ED_A9:
 ;@IND
 opcode_ED_AA:
 	opIN_C
-	sub z80hl,z80hl,#1<<16
 	sub z80bc,z80bc,#1<<24
 	and z80f,r0,#0x80
 	mov z80f,z80f,lsr#(7-NFlag)					;@NFlag set by bit 7
 	mov r1,z80bc,lsl#8
 	sub r1,r1,#0x01000000
 	adds r1,r1,r0,lsl#24
-	orrcs z80f,z80f,#(1<<CFlag)|(1<<HFlag)	;@ CF & HF set if (HL) + ((C+1) & 0xFF) > 0xFF
-	writemem8HL
-	and r2,r1,#0x07<<24			;@ (HL)&7^B
+	orrcs z80f,z80f,#(1<<CFlag)|(1<<HFlag)	;@ CF & HF set if (HL) + ((C-1) & 0xFF) > 0xFF
+	and r2,r1,#0x07<<24			;@ ((HL)+(C-1)&7^B
 	ldr r1,[cpucontext,#tables]
 	eor r2,r2,z80bc
-	ldrb r2,[r1,r2,lsr #24]			;@ PZS[(HL)&7^B] & VF
+	ldrb r2,[r1,r2,lsr #24]			;@ PZS[((HL)+(C-1))&7^B] & VF
 	copyFlag35 z80bc
 	and r2,r2,#1<<VFlag
 	orr z80f,z80f,r2
 	movs r1,z80bc,asr#24			;@ B
 	orrmi z80f,z80f,#1<<SFlag
 	orreq z80f,z80f,#1<<ZFlag
+	writemem8HL
+	sub z80hl,z80hl,#1<<16
 	fetch 16
 
 ;@OUTD
@@ -8191,10 +8191,10 @@ opcode_ED_AB:
 	mov r1,z80hl,lsl#8			;@ (HL)+L
 	adds r1,r1,r0,lsl#24
 	orrcs z80f,z80f,#(1<<CFlag)|(1<<HFlag)	;@ CF & HF set if (HL)+L > 0xFF
-	and r2,r1,#0x07<<24			;@ (HL)&7^B
+	and r2,r1,#0x07<<24			;@ ((HL)+L)&7^B
 	eor r2,r2,z80bc
 	ldr r1,[cpucontext,#tables]
-	ldrb r2,[r1,r2,lsr #24]			;@ PZS[(HL)&7^B] & VF
+	ldrb r2,[r1,r2,lsr #24]			;@ PZS[((HL)+L)&7^B] & VF
 	and r2,r2,#1<<VFlag
 	orr z80f,z80f,r2
 	movs r1,z80bc,asr#24			;@ B
@@ -8249,19 +8249,17 @@ opcode_ED_B1_done:
 ;@INIR
 opcode_ED_B2:
 	opIN_C
-	add z80hl,z80hl,#1<<16
 	sub z80bc,z80bc,#1<<24
 	and z80f,r0,#0x80
 	mov z80f,z80f,lsr#(7-NFlag)					;@NFlag set by bit 7
 	mov r1,z80bc,lsl#8
-	sub r1,r1,#0x01000000
+	add r1,r1,#0x01000000
 	adds r1,r1,r0,lsl#24
-	orrcs z80f,z80f,#(1<<CFlag)|(1<<HFlag)	;@ CF & HF set if (HL) + ((C-1) & 0xFF) > 0xFF
-	writemem8HL
-	and r2,r1,#0x07<<24			;@ (HL)&7^B
+	orrcs z80f,z80f,#(1<<CFlag)|(1<<HFlag)	;@ CF & HF set if (HL) + ((C+1) & 0xFF) > 0xFF
+	and r2,r1,#0x07<<24			;@ ((HL)+(C+1))&7^B
 	ldr r1,[cpucontext,#tables]
 	eor r2,r2,z80bc
-	ldrb r2,[r1,r2,lsr #24]			;@ PZS[(HL)&7^B] & VF
+	ldrb r2,[r1,r2,lsr #24]			;@ PZS[((HL)+(C+1))&7^B] & VF
 	copyFlag35 z80bc
 	and r2,r2,#1<<VFlag
 	orr z80f,z80f,r2
@@ -8270,6 +8268,8 @@ opcode_ED_B2:
 	orreq z80f,z80f,#1<<ZFlag
 	subne z80pc,z80pc,#2
 	subne z80_icount,z80_icount,#5
+	writemem8HL
+	add z80hl,z80hl,#1<<16
 	fetch 16
 ;@OTIR
 opcode_ED_B3:
@@ -8281,10 +8281,10 @@ opcode_ED_B3:
 	mov r1,z80hl,lsl#8
 	adds r1,r1,r0,lsl#24
 	orrcs z80f,z80f,#(1<<CFlag)|(1<<HFlag)	;@ CF & HF set if (HL)+L > 0xFF
-	and r2,r1,#0x07<<24			;@ (HL)&7^B
+	and r2,r1,#0x07<<24			;@ ((HL)+L)&7^B
 	ldr r1,[cpucontext,#tables]
 	eor r2,r2,z80bc
-	ldrb r2,[r1,r2,lsr #24]			;@ PZS[(HL)&7^B] & VF
+	ldrb r2,[r1,r2,lsr #24]			;@ PZS[((HL)+L)&7^B] & VF
 	copyFlag35 z80bc
 	and r2,r2,#1<<VFlag
 	orr z80f,z80f,r2
@@ -8341,19 +8341,17 @@ opcode_ED_B9_done:
 ;@INDR
 opcode_ED_BA:
 	opIN_C
-	sub z80hl,z80hl,#1<<16
 	sub z80bc,z80bc,#1<<24
 	and z80f,r0,#0x80
 	mov z80f,z80f,lsr#(7-NFlag)					;@NFlag set by bit 7
 	mov r1,z80bc,lsl#8
 	sub r1,r1,#0x01000000
 	adds r1,r1,r0,lsl#24
-	orrcs z80f,z80f,#(1<<CFlag)|(1<<HFlag)	;@ CF & HF set if (HL) + ((C+1) & 0xFF) > 0xFF
-	writemem8HL
-	and r2,r1,#0x07<<24			;@ (HL)&7^B
+	orrcs z80f,z80f,#(1<<CFlag)|(1<<HFlag)	;@ CF & HF set if (HL) + ((C-1) & 0xFF) > 0xFF
+	and r2,r1,#0x07<<24			;@ ((HL)+(C-1))&7^B
 	ldr r1,[cpucontext,#tables]
 	eor r2,r2,z80bc
-	ldrb r2,[r1,r2,lsr #24]			;@ PZS[(HL)&7^B] & VF
+	ldrb r2,[r1,r2,lsr #24]			;@ PZS[((HL)+(C-1))&7^B] & VF
 	copyFlag35 z80bc
 	and r2,r2,#1<<VFlag
 	orr z80f,z80f,r2
@@ -8362,6 +8360,8 @@ opcode_ED_BA:
 	orreq z80f,z80f,#1<<ZFlag
 	subne z80pc,z80pc,#2
 	subne z80_icount,z80_icount,#5
+	writemem8HL
+	sub z80hl,z80hl,#1<<16
 	fetch 16
 ;@OTDR
 opcode_ED_BB:
@@ -8373,10 +8373,10 @@ opcode_ED_BB:
 	mov r1,z80hl,lsl#8
 	adds r1,r1,r0,lsl#24
 	orrcs z80f,z80f,#(1<<CFlag)|(1<<HFlag)	;@ CF & HF set if (HL)+L > 0xFF
-	and r2,r1,#0x07<<24			;@ (HL)&7^B
+	and r2,r1,#0x07<<24			;@ ((HL)+L)&7^B
 	ldr r1,[cpucontext,#tables]
 	eor r2,r2,z80bc
-	ldrb r2,[r1,r2,lsr #24]			;@ PZS[(HL)&7^B] & VF
+	ldrb r2,[r1,r2,lsr #24]			;@ PZS[((HL)+L)&7^B] & VF
 	copyFlag35 z80bc
 	and r2,r2,#1<<VFlag
 	orr z80f,z80f,r2
