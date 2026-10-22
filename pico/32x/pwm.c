@@ -128,7 +128,7 @@ static void consume_fifo_do(SH2 *sh2, unsigned int m68k_cycles,
 static int p32x_pwm_schedule_(SH2 *sh2, unsigned int m68k_now)
 {
   unsigned int pwm_now = m68k_now * 3;
-  int cycles_diff_sh2;
+  int cycles_diff_sh2, cycles;
 
   if (pwm.cycles == 0)
     return 0;
@@ -141,8 +141,8 @@ static int p32x_pwm_schedule_(SH2 *sh2, unsigned int m68k_now)
     return 0; // masked by everyone
 
   cycles_diff_sh2 = pwm_now - Pico32x.pwm_cycle_p;
-  return (Pico32x.pwm_irq_cnt * pwm.cycles
-           - cycles_diff_sh2) / 3 + 1;
+  cycles = (Pico32x.pwm_irq_cnt * pwm.cycles - cycles_diff_sh2) / 3 + 1;
+  return (cycles > 0 ? cycles : 0);
 }
 
 void p32x_pwm_schedule(unsigned int m68k_now)
@@ -275,8 +275,8 @@ void p32x_pwm_update(s32 *buf32, int length, int stereo)
   consume_fifo(NULL, SekCyclesDone());
 
   xmd = Pico32x.regs[0x30 / 2] & 0x0f;
-  if (xmd == 0 || xmd == 0x06 || xmd == 0x09 || xmd == 0x0f)
-    goto out; // invalid?
+  if (xmd == 0x00 || xmd == 0x0f)
+    goto out; // silence, or invalid
   if (pwm.silent)
     return;
 
@@ -307,8 +307,21 @@ void p32x_pwm_update(s32 *buf32, int length, int stereo)
         p &= 0xffff;
       }
     }
+    else if (xmd == 0x09 || xmd == 0x06) {
+      // single channel, stereo out
+      if (xmd & 0x06) // src is R
+        pwmb++;
+      while (length-- > 0) {
+        *buf32++ += *pwmb;
+        *buf32++ += *pwmb;
+
+        p += step;
+        pwmb += (p >> 16) * 2;
+        p &= 0xffff;
+      }
+    }
     else {
-      // mono - LMD, RMD specify dst
+      // single channel
       if (xmd & 0x06) // src is R
         pwmb++;
       if (xmd & 0x0c) // dst is R
@@ -325,13 +338,28 @@ void p32x_pwm_update(s32 *buf32, int length, int stereo)
   }
   else
   {
-    // mostly unused
-    while (length-- > 0) {
-      *buf32++ += pwmb[0];
+    // mono, mostly unused
+    if (xmd == 0x05 || xmd == 0x0a) {
+      // normal or swapped
+      while (length-- > 0) {
+        *buf32++ += (pwmb[0]+pwmb[1]) >> 1;
 
-      p += step;
-      pwmb += (p >> 16) * 2;
-      p &= 0xffff;
+        p += step;
+        pwmb += (p >> 16) * 2;
+        p &= 0xffff;
+      }
+    }
+    else {
+      // single channel
+      if (xmd & 0x06) // src is R
+        pwmb++;
+      while (length-- > 0) {
+        *buf32++ += *pwmb;
+
+        p += step;
+        pwmb += (p >> 16) * 2;
+        p &= 0xffff;
+      }
     }
   }
 
