@@ -553,6 +553,8 @@ void plat_init(void)
 	in_sdl_platform_data.key_map = in_sdl_key_map;
 	in_sdl_platform_data.jmap_size = in_sdl_joy_map_sz;
 	in_sdl_platform_data.joy_map = in_sdl_joy_map;
+	in_sdl_platform_data.mmap_size = in_sdl_mouse_map_sz;
+	in_sdl_platform_data.mouse_map = in_sdl_mouse_map;
 	in_sdl_platform_data.key_names = in_sdl_key_names;
 	in_sdl_platform_data.kbd_map = in_sdl_kbd_map;
 	in_sdl_platform_data.mouse_device = plat_sdl_is_windowed();
