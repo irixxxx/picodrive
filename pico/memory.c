@@ -1045,7 +1045,8 @@ static u32 PicoRead16_z80(u32 a)
 
 static void PicoWrite8_z80(u32 a, u32 d)
 {
-  if ((Pico.m.z80Run | Pico.m.z80_reset) && !(PicoIn.quirks & PQUIRK_NO_Z80_BUS_LOCK)) {
+  if ((Pico.m.z80Run | Pico.m.z80_reset | (z80_cycles_from_68k() < Pico.t.z80c_cnt)) &&
+      !(PicoIn.quirks & PQUIRK_NO_Z80_BUS_LOCK)) {
     // verified on real hw
     elprintf(EL_ANOMALY, "68k z80 write with no bus or reset! [%06x] %02x @ %06x", a, d&0xff, SekPc);
     return;
