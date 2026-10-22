@@ -1120,14 +1120,14 @@ static void PicoWrite8_32x_on(u32 a, u32 d)
 static void PicoWrite8_32x_on_io(u32 a, u32 d)
 {
   PicoWrite8_io(a, d);
-  if (a == 0xa130f1)
+  if ((a & ~0x0e) == 0xa130f1)
     bank_switch_rom_68k(Pico32x.regs[4 / 2]);
 }
 
 static void PicoWrite8_32x_on_io_cd(u32 a, u32 d)
 {
   PicoWrite8_mcd_io(a, d);
-  if (a == 0xa130f1)
+  if ((a & ~0x0e) == 0xa130f1)
     bank_switch_rom_68k(Pico32x.regs[4 / 2]);
 }
 
@@ -1174,21 +1174,21 @@ static void PicoWrite16_32x_on(u32 a, u32 d)
 static void PicoWrite16_32x_on_io(u32 a, u32 d)
 {
   PicoWrite16_io(a, d);
-  if (a == 0xa130f0)
+  if ((a & ~0x0e) == 0xa130f0)
     bank_switch_rom_68k(Pico32x.regs[4 / 2]);
 }
 
 static void PicoWrite16_32x_on_io_cd(u32 a, u32 d)
 {
   PicoWrite16_mcd_io(a, d);
-  if (a == 0xa130f0)
+  if ((a & ~0x0e) == 0xa130f0)
     bank_switch_rom_68k(Pico32x.regs[4 / 2]);
 }
 
 static void PicoWrite16_32x_on_io_ssf2(u32 a, u32 d)
 {
   carthw_ssf2_write16(a, d);
-  if (a == 0x130f0)
+  if ((a & ~0x0e) == 0xa130f0)
     bank_switch_rom_68k(Pico32x.regs[4 / 2]);
 }
 
