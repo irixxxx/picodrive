@@ -18,7 +18,7 @@ all: rel
 readme.txt: ../../tools/textfilter ../base_readme.txt ../../ChangeLog
 	../../tools/textfilter ../base_readme.txt $@ GP2X
 
-CODE940 = code940/pico940_v3.bin
+CODE940 = code940/pico940_v4.bin
 
 PicoDrive: ../../picodrive
 	$(STRIP) $^ -o $@

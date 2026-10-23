@@ -36,7 +36,7 @@ _940_ctl_t *shared_ctl = 0;
 unsigned char *mp3_mem = 0;
 
 #define MP3_SIZE_MAX (0x400000 + 0x800000) // 12M
-#define CODE940_FILE "pico940_v3.bin"
+#define CODE940_FILE "pico940_v4.bin"
 
 int crashed_940 = 0;
 
@@ -50,7 +50,7 @@ static int ext_fm_released;
 static int ext_fm_broken;
 
 /* Verify that the loaded image was built from the same headers as this
- * binary. Without this a stale pico940_v3.bin makes the 920 read the wrong
+ * binary. Without this a stale pico940_v4.bin makes the 920 read the wrong
  * part of the shared data (YM2612 state instead of samples), which is heard
  * as a constant buzz. */
 static int check_shared_layout_940(void)
@@ -81,7 +81,7 @@ static int check_shared_layout_940(void)
 /* the image can't be used, fall back to the 920's own sound core */
 static void disable_ext_fm_940(void)
 {
-	printf("940: pico940_v3.bin does not match this build, using local sound\n");
+	printf("940: pico940_v4.bin does not match this build, using local sound\n");
 	printf("940: rebuild it from the same source tree (make -C code940)\n");
 	menu_update_msg("old 940 image, using local sound");
 	PicoIn.opt &= ~POPT_EXT_FM;

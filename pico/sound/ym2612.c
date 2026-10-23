@@ -1590,7 +1590,13 @@ static void OPNSetPres(int pres)
 
 	ym2612.OPN.eg_timer_add  = (1<<EG_SH) * freqbase;
 	ym2612.OPN.ST.freqbase = freqbase;
+#ifdef EXTERNAL_YM2612
+	/* the 940 image has no libm; freqbase is positive here, so this is
+	 * the same as round() on the 920 */
+	ym2612.OPN.ST.freqbase_ui = (UINT32)((1 << FREQBASE_SH) * freqbase + 0.5);
+#else
 	ym2612.OPN.ST.freqbase_ui = round((1 << FREQBASE_SH) * freqbase);
+#endif
 	//printf("freqbase %f %x\n", freqbase, ym2612.OPN.ST.freqbase_ui);
 
 	/* LFO freq. table */

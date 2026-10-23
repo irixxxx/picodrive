@@ -6,7 +6,7 @@ CROSS_COMPILE ?= arm-none-eabi-
 #up = 1
 
 CFLAGS += -O3 -Wall -mno-thumb-interwork -fstrict-aliasing -fno-stack-protector -fno-common -ffast-math
-CFLAGS += -I../../common/helix/pub -I../../.. -I. -D__GP2X__ -DARM -DNDEBUG
+CFLAGS += -I../../common/helix/pub -I../../.. -I. -D__GP2X__ -DARM -DNDEBUG -DEL_LOGMASK=0
 CFLAGS += -mcpu=arm940t -mtune=arm940t -mabi=apcs-gnu -mfloat-abi=soft -mfpu=fpa
 LDFLAGS = -static -e code940 -Ttext 0x0 -L$(lgcc_path) -lgcc
 
@@ -18,7 +18,7 @@ OBJCOPY = $(CROSS_COMPILE)objcopy
 
 vpath %.c = ../../common
 
-BIN = pico940_v3.bin
+BIN = pico940_v4.bin
 
 all: $(BIN)
 

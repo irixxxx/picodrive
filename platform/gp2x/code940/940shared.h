@@ -76,7 +76,7 @@ typedef struct
 
 	/* Published by the 940 when its main loop starts: the layout that
 	 * image was built with. The 920 compares these to its own before
-	 * using the image, so a stale pico940_v3.bin is detected instead of
+	 * using the image, so a stale pico940_v4.bin is detected instead of
 	 * being fed garbage (the 920 would read YM2612 state as samples).
 	 * The YM2612 state itself is not listed: only the 940 uses it. */
 	int		sh_magic;			/* SHARED_LAYOUT_MAGIC */
