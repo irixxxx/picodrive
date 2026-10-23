@@ -1,0 +1,63 @@
+# Host-side C-layer build for code940.
+#
+# This is invoked by the "host-core" target in test940/Makefile.  It
+# compiles the real 940 job loop and sound cores with small host stubs; see
+# host_core_test.c for the scope.  It does not need Docker or the GP2X
+# toolchain.
+#
+# It can also be run directly:
+#   make -f test940/Makefile.host-core
+
+TEST_DIR := $(patsubst %/,%,$(dir $(abspath $(lastword $(MAKEFILE_LIST)))))
+ROOT := $(abspath $(TEST_DIR)/..)
+BUILD_DIR := $(TEST_DIR)/build-host
+
+CC ?= gcc
+CFLAGS ?= -O2 -g
+WARN := -Wall -Wextra -Wno-unused-parameter
+CPPFLAGS += -I$(TEST_DIR)/host_include -I$(ROOT)
+LDLIBS += -lm
+
+OBJS := \
+	$(BUILD_DIR)/host_core_940.o \
+	$(BUILD_DIR)/ym2612.o \
+	$(BUILD_DIR)/ym2413.o \
+	$(BUILD_DIR)/mp3_sync.o
+
+TEST_OBJ := $(BUILD_DIR)/host_core_test.o
+TEST_BIN := $(BUILD_DIR)/host_core_test
+
+.PHONY: all run clean
+
+all: run
+
+run: $(TEST_BIN)
+	$(TEST_BIN)
+
+$(BUILD_DIR):
+	mkdir -p $@
+
+$(BUILD_DIR)/host_core_940.o: $(TEST_DIR)/host_core_940.c \
+		$(ROOT)/platform/gp2x/code940/940.c | $(BUILD_DIR)
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(WARN) \
+		-Wno-implicit-function-declaration -c -o $@ $<
+
+$(BUILD_DIR)/ym2612.o: $(ROOT)/pico/sound/ym2612.c | $(BUILD_DIR)
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(WARN) -Wno-sign-compare \
+		-DEXTERNAL_YM2612 -c -o $@ $<
+
+$(BUILD_DIR)/ym2413.o: $(ROOT)/pico/sound/ym2413.c | $(BUILD_DIR)
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(WARN) -DCODE940 \
+		-Dcalloc=code940_calloc -c -o $@ $<
+
+$(BUILD_DIR)/mp3_sync.o: $(ROOT)/platform/common/mp3_sync.c | $(BUILD_DIR)
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(WARN) -c -o $@ $<
+
+$(TEST_OBJ): $(TEST_DIR)/host_core_test.c | $(BUILD_DIR)
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(WARN) -c -o $@ $<
+
+$(TEST_BIN): $(TEST_OBJ) $(OBJS)
+	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $^ $(LDLIBS)
+
+clean:
+	rm -rf $(BUILD_DIR)
