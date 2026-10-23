@@ -1617,7 +1617,7 @@ static u32 ym2612_read_local_68k(u32 a)
 }
 
 // legacy code, only used for GP2X
-void ym2612_pack_state_old(void)
+void ym2612_pack_state_old(int from_940)
 {
   // timers are saved as tick counts, in 16.16 int format
   int tat = 0, tbt = 0, busy = 0;
@@ -1631,7 +1631,7 @@ void ym2612_pack_state_old(void)
   busy = load_u32(buf, &b);
 
 #ifdef __GP2X__
-  if (PicoIn.opt & POPT_EXT_FM)
+  if (from_940)
     YM2612PicoStateSave2_940(tat, tbt);
   else
 #endif
@@ -1669,11 +1669,12 @@ int ym2612_pack_timers(void *buf, size_t size)
 }
 
 // legacy code, only used for GP2X
-void ym2612_unpack_state_old(void)
+void ym2612_unpack_state_old(int is_savestate)
 {
   int i, ret, tat, tbt, busy = 0;
   YM2612PicoStateLoad();
-  Pico.t.m68c_frame_start = SekCyclesDone();
+  if (is_savestate)
+    Pico.t.m68c_frame_start = SekCyclesDone();
 
   // feed all the registers and update internal state
   for (i = 0x20; i < 0xA0; i++) {

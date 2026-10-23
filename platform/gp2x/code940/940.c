@@ -3,6 +3,7 @@
 
 #include "940shared.h"
 #include <platform/common/helix/pub/mp3dec.h>
+#include <pico/sound/ym2413.h>
 
 static _940_data_t *shared_data = (_940_data_t *)   0x00100000;
 static _940_ctl_t  *shared_ctl  = (_940_ctl_t *)    0x00200000;
@@ -147,14 +148,46 @@ static void ym_update(int *ym_buffer)
 }
 
 
+static void ym2413_update(void)
+{
+	UINT16 *wbuff = shared_ctl->ym2413_wbuff;
+	int i, len = shared_ctl->ym2413_len;
+
+	if (len < 0) len = 0;
+	if (len > YM2413_BUF_MAX) len = YM2413_BUF_MAX;
+
+	/* replay the writes queued by the 920 since the last update */
+	for (i = 0; i < YM2413_WBUFF_SIZE; i++) {
+		UINT16 d = *wbuff++;
+		if (d == 0xffff) break;
+		OPLL_writeIO(opll, d >> 8, (uint8_t)d);
+	}
+
+	/* same gain as the 920-side YM2413Update() */
+	for (i = 0; i < len; i++)
+		shared_data->ym2413_buffer[i] = OPLL_calc(opll) * 3;
+}
+
+
 void Main940(void)
 {
 	int *ym_buffer = shared_data->ym_buffer;
 	int job = 0;
 	ym2612_940 = &shared_data->ym2612;
 
-//	extern unsigned __bss_start__, __bss_end__;
-//	memset(&__bss_start__, 0, &__bss_end__ - &__bss_start__);
+	/* Tell the 920 which layout this image was built with, so it can
+	 * refuse an image made from different headers instead of reading
+	 * the wrong part of the shared data. Has to happen before the first
+	 * job is accepted; the 920 waits for that job before checking. */
+	shared_ctl->sh_magic = SHARED_LAYOUT_MAGIC;
+	shared_ctl->sh_off_mp3dec        = (char *)&shared_data->mp3dec        - (char *)shared_data;
+	shared_ctl->sh_off_ym_buffer     = (char *)&shared_data->ym_buffer     - (char *)shared_data;
+	shared_ctl->sh_off_mp3_buffer    = (char *)&shared_data->mp3_buffer    - (char *)shared_data;
+	shared_ctl->sh_off_ym2413_buffer = (char *)&shared_data->ym2413_buffer - (char *)shared_data;
+
+	/* .bss is not zeroed here: this image has no C runtime, and the 920
+	 * loader does it from start_940() right after copying the image, so that
+	 * it also happens when the 940 is reloaded after a crash. */
 
 	for (;;)
 	{
@@ -212,6 +245,23 @@ void Main940(void)
 				if (shared_data->mp3dec) MP3FreeDecoder(shared_data->mp3dec);
 				__malloc_init();
 				shared_data->mp3dec = MP3InitDecoder();
+				break;
+
+			case JOB940_YM2413RESET:
+				opll = OPLL_new(shared_ctl->ym2413_clk, shared_ctl->ym2413_rate);
+				break;
+
+			case JOB940_YM2413UPDATEONE:
+				ym2413_update();
+				break;
+
+			case JOB940_YM2413PACKSTATE:
+				shared_ctl->ym2413_state_len =
+					ym2413_pack_state(shared_ctl->ym2413_state, sizeof(shared_ctl->ym2413_state));
+				break;
+
+			case JOB940_YM2413UNPACKSTATE:
+				ym2413_unpack_state(shared_ctl->ym2413_state, shared_ctl->ym2413_state_len);
 				break;
 		}
 

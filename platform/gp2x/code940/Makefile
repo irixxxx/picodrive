@@ -6,7 +6,7 @@ CROSS_COMPILE ?= arm-none-eabi-
 #up = 1
 
 CFLAGS += -O3 -Wall -mno-thumb-interwork -fstrict-aliasing -fno-stack-protector -fno-common -ffast-math
-CFLAGS += -I../../common/helix/pub -I../../.. -I. -D__GP2X__ -DARM
+CFLAGS += -I../../common/helix/pub -I../../.. -I. -D__GP2X__ -DARM -DNDEBUG
 CFLAGS += -mcpu=arm940t -mtune=arm940t -mabi=apcs-gnu -mfloat-abi=soft -mfpu=fpa
 LDFLAGS = -static -e code940 -Ttext 0x0 -L$(lgcc_path) -lgcc
 
@@ -33,7 +33,7 @@ all: $(BIN)
 # stuff for 940 core
 
 # init, emu_control, emu
-OBJS940 += 940init.o 940.o 940ym2612.o misc_arm.o mp3_sync.o
+OBJS940 += 940init.o 940.o 940ym2612.o 940ym2413.o misc_arm.o mp3_sync.o
 # the asm memcpy code crashes job LOAD2 on 940. Possibly a globbered reg?
 # OBJS940 += memcpy.o
 # the asm code seems to be faster when run on 920, but not on 940 for some reason
@@ -42,7 +42,7 @@ OBJS940 += 940init.o 940.o 940ym2612.o misc_arm.o mp3_sync.o
 # uClibc library code
 OBJS940 += uClibc/memset.o uClibc/s_floor.o uClibc/e_pow.o uClibc/e_sqrt.o uClibc/s_fabs.o
 OBJS940 += uClibc/s_scalbn.o uClibc/s_copysign.o uClibc/k_sin.o uClibc/k_cos.o uClibc/s_sin.o
-OBJS940 += uClibc/e_rem_pio2.o uClibc/k_rem_pio2.o uClibc/e_log.o uClibc/wrappers.o
+OBJS940 += uClibc/s_cos.o uClibc/e_rem_pio2.o uClibc/k_rem_pio2.o uClibc/e_log.o uClibc/wrappers.o
 LIBHELIX ?= ../../common/helix/$(notdir $(CROSS_COMPILE))helix_mp3.a
 
 $(BIN) : code940.elf
@@ -56,6 +56,10 @@ code940.elf : $(OBJS940) $(LIBHELIX)
 940ym2612.o : ../../../pico/sound/ym2612.c
 	@echo ">>>" $@
 	$(GCC) $(CFLAGS) -Os -DEXTERNAL_YM2612 -c $< -o $@
+
+940ym2413.o : ../../../pico/sound/ym2413.c
+	@echo ">>>" $@
+	$(GCC) $(CFLAGS) -Os -DCODE940 -c $< -o $@
 
 misc_arm.o : ../../../pico/misc_arm.s
 	@echo ">>>" $@
