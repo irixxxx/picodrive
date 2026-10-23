@@ -8,7 +8,8 @@ CROSS_COMPILE ?= arm-none-eabi-
 CFLAGS += -O3 -Wall -mno-thumb-interwork -fstrict-aliasing -fno-stack-protector -fno-common -ffast-math
 CFLAGS += -I../../common/helix/pub -I../../.. -I. -D__GP2X__ -DARM -DNDEBUG -DEL_LOGMASK=0
 CFLAGS += -mcpu=arm940t -mtune=arm940t -mabi=apcs-gnu -mfloat-abi=soft -mfpu=fpa
-LDFLAGS = -static -e code940 -Ttext 0x0 -L$(lgcc_path) -lgcc
+# the image is loaded as a flat blob, so don't let ld pad .data to a 32K page
+LDFLAGS = -static -e code940 -Ttext 0x0 -z max-page-size=0x1000 -L$(lgcc_path) -lgcc
 
 GCC = $(CROSS_COMPILE)gcc
 STRIP = $(CROSS_COMPILE)strip
