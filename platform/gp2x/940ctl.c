@@ -79,7 +79,7 @@ static int check_shared_layout_940(void)
 }
 
 /* the image can't be used, fall back to the 920's own sound core */
-static void disable_ext_fm_940(void)
+void ExtFmDisable_940(void)
 {
 	printf("940: pico940_v4.bin does not match this build, using local sound\n");
 	printf("940: rebuild it from the same source tree (make -C code940)\n");
@@ -413,22 +413,22 @@ static void start_940(void)
 }
 
 
-void YM2612Init_940(int baseclock, int rate, int ssg)
+int YM2612Init_940(int baseclock, int rate, int ssg)
 {
 	static int oldrate;
 	u8 state[sizeof(ym2612.REGS) + sizeof(ym2612.addr_A1)];
 	int take_over, from_940;
 
-	if (ext_fm_broken) {
-		PicoIn.opt &= ~POPT_EXT_FM;
-		currentConfig.s_PicoOpt &= ~POPT_EXT_FM;
-		return;
-	}
+	if (ext_fm_broken)
+		return -1;
+
+	if (shared_data == NULL)
+		return -1;
 
 	// HACK
-	if (shared_data == NULL || (core940_owner == CORE940_YM2612 && Pico.m.frame_count > 0
-	    && !crashed_940 && rate == oldrate))
-		return;
+	if (core940_owner == CORE940_YM2612 && Pico.m.frame_count > 0
+	    && !crashed_940 && rate == oldrate)
+		return 0;
 
 	/* the game is already running and some core has a live chip: keep
 	 * its state for the 940 instance that is about to be initialized.
@@ -448,13 +448,6 @@ void YM2612Init_940(int baseclock, int rate, int ssg)
 	start_940();
 	core940_owner = CORE940_YM2612;
 
-	/* cause local ym2612 to init REGS */
-	YM2612Init_(baseclock, rate, ssg);
-
-	internal_reset();
-
-	loaded_mp3 = NULL;
-
 	// YM2612ResetChip_940(); // will be done on JOB940_YM2612INIT
 
 	/* now cause 940 to init it's ym2612 stuff */
@@ -465,14 +458,15 @@ void YM2612Init_940(int baseclock, int rate, int ssg)
 	if (CHECK_BUSY(JOB940_INITALL)) wait_busy_940(JOB940_INITALL);
 
 	if (check_shared_layout_940() < 0) {
-		disable_ext_fm_940();
-		/* the image was unusable, but we do have the chip state */
-		if (take_over) {
-			memcpy(ym2612.REGS, state, sizeof(state));
-			ym2612_unpack_state_old(0);
-		}
-		return;
+		core940_owner = CORE940_NONE;
+		return -1;
 	}
+
+	/* the 940 is usable: set up the local chip as the 920's write
+	 * shadow and restore the state that was handed over */
+	YM2612Init_(baseclock, rate, ssg);
+	internal_reset();
+	loaded_mp3 = NULL;
 
 	if (take_over) {
 		memcpy(ym2612.REGS, state, sizeof(state));
@@ -481,31 +475,29 @@ void YM2612Init_940(int baseclock, int rate, int ssg)
 
 	ext_fm_released = 0;
 	oldrate = rate;
+	return 0;
 }
 
 
 /* YM2413 (SMS/GG FM sound unit). Rendered at the chip's native rate on the
  * 940 and resampled by the 920; the write queue is applied just before the
  * frame is rendered, which is the same granularity the 920-side code has. */
-void YM2413Init_940(int clock, int rate, int preserve_state)
+int YM2413Init_940(int clock, int rate, int preserve_state)
 {
 	u8 state[1024];
 	size_t state_len = 0;
 
 	if (shared_data == NULL)
-		return;
+		return -1;
 
-	if (ext_fm_broken) {
-		PicoIn.opt &= ~POPT_EXT_FM;
-		currentConfig.s_PicoOpt &= ~POPT_EXT_FM;
-		return;
-	}
+	if (ext_fm_broken)
+		return -1;
 
 	if (core940_owner == CORE940_YM2413 && !crashed_940 &&
 	    clock == ym2413_clock && rate == ym2413_rate)
 	{
 		if (preserve_state)
-			return;
+			return 0;
 
 		/* just reset the chip, no need to restart the 940 */
 		ym2413_writecnt = 0;
@@ -515,7 +507,7 @@ void YM2413Init_940(int clock, int rate, int preserve_state)
 		add_job_940(JOB940_YM2413RESET);
 		if (CHECK_BUSY(JOB940_YM2413RESET))
 			wait_busy_940(JOB940_YM2413RESET);
-		return;
+		return 0;
 	}
 
 	printf("YM2413Init_940(%i, %i)\n", clock, rate);
@@ -542,14 +534,25 @@ void YM2413Init_940(int clock, int rate, int preserve_state)
 		wait_busy_940(JOB940_YM2413RESET);
 
 	if (check_shared_layout_940() < 0) {
-		disable_ext_fm_940();
-		return;
+		/* the image is unusable: stop treating it as the chip owner
+		 * and put the local chip back into the state we had before
+		 * starting it.  With no packed state, start from a clean
+		 * chip rather than play whatever was left over. */
+		core940_owner = CORE940_NONE;
+		if (state_len > 0)
+			ym2413_unpack_state(state, state_len);
+		else if (opll) {
+			OPLL_setRate(opll, rate);
+			OPLL_reset(opll);
+		}
+		return -1;
 	}
 
 	if (state_len > 0)
 		YM2413PicoStateLoad_940(state, state_len);
 
 	ext_fm_released = 0;
+	return 0;
 }
 
 

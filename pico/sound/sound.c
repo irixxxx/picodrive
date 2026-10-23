@@ -159,6 +159,23 @@ void PsndRerate(int preserve_state)
   int state_size = 4096;
 
 #ifdef __GP2X__
+  int retried = 0;
+  int force_init = 0;
+  int use_940 = 0;
+  int keep_state = 0;
+
+retry:
+  ym2612_init = !preserve_state;
+  use_940 = 0;
+  if (force_init) {
+    /* a failed 940 init: make sure the retry takes the local init path
+     * even if preserve_state would have skipped it */
+    ym2612_init = 1;
+    force_init = 0;
+  }
+#endif
+
+#ifdef __GP2X__
   /* the 940 may still own a chip from the last frame; if the option was
    * turned off, take the chip back before anything reinitializes it */
   if (!(PicoIn.opt & POPT_EXT_FM))
@@ -187,7 +204,11 @@ void PsndRerate(int preserve_state)
     ym2612_init = 1;
 #endif
 
-  if (preserve_state && ym2612_init) {
+  if (preserve_state && ym2612_init
+#ifdef __GP2X__
+      && !keep_state
+#endif
+      ) {
     state = malloc(state_size);
     if (state)
       state_size = YM2612PicoStateSave3(state, state_size);
@@ -204,37 +225,69 @@ void PsndRerate(int preserve_state)
   if (PicoIn.AHW & PAHW_SMS) {
 #ifdef __GP2X__
     if (PicoIn.opt & POPT_EXT_FM) {
-      // chip runs on the 940; output is still resampled here
-      YM2413Init_940(sms_clock, ym2413_rate, preserve_state);
-      if (!ym2413_resampler || ym2413_out_rate != PicoIn.sndRate) {
-        resampler_free(ym2413_resampler);
-        ym2413_resampler = YMFM_setup_FIR(ym2413_rate, PicoIn.sndRate, 0);
-        ym2413_out_rate = PicoIn.sndRate;
+      if (YM2413Init_940(sms_clock, ym2413_rate, preserve_state) == 0)
+        use_940 = 1;
+      else {
+        ExtFmDisable_940();
+        if (!retried) {
+          retried = 1;
+          force_init = 1;
+          keep_state = (state != NULL);
+          /* the next pass uses the local chip; drop the resampler
+           * history of the 940 path */
+          resampler_free(ym2413_resampler);
+          ym2413_resampler = NULL;
+          goto retry;
+        }
       }
-      /* YM2413Init_940() falls back to the local chip if the 940 image
-       * on the card is out of date */
-      PsndFMUpdate = (PicoIn.opt & POPT_EXT_FM) ?
-        YM2413UpdateFIR_940 : YM2413UpdateFIR;
     }
-    else
 #endif
+    /* both cores render at the chip's native rate and are resampled here */
+    if (!ym2413_resampler || ym2413_out_rate != PicoIn.sndRate) {
+      resampler_free(ym2413_resampler);
+      ym2413_resampler = YMFM_setup_FIR(ym2413_rate, PicoIn.sndRate, 0);
+      ym2413_out_rate = PicoIn.sndRate;
+    }
+#ifdef __GP2X__
+    PsndFMUpdate = use_940 ? YM2413UpdateFIR_940 : YM2413UpdateFIR;
+#else
     PsndFMUpdate = YM2413UpdateFIR;
-  } else if ((PicoIn.opt & POPT_EN_FM_FILTER) && ym2612_rate != PicoIn.sndRate) {
-    // polyphase FIR resampler, resampling directly from native to output rate
-    if (ym2612_init)
-      YM2612Init(ym2612_clock, ym2612_rate,
-        ((PicoIn.opt&POPT_DIS_FM_SSGEG) ? 0 : ST_SSG) |
-        ((PicoIn.opt&POPT_FM_YM2612)    ? ST_DAC : 0));
-    resampler_free(ym2612_resampler);
-    ym2612_resampler = YMFM_setup_FIR(ym2612_rate, PicoIn.sndRate,
-        PicoIn.opt & POPT_EN_STEREO);
-    PsndFMUpdate = YM2612UpdateFIR;
+#endif
   } else {
-    if (ym2612_init)
-      YM2612Init(ym2612_clock, PicoIn.sndRate,
-        ((PicoIn.opt&POPT_DIS_FM_SSGEG) ? 0 : ST_SSG) |
-        ((PicoIn.opt&POPT_FM_YM2612)    ? ST_DAC : 0));
-    PsndFMUpdate = YM2612UpdateONE;
+    int use_fir = (PicoIn.opt & POPT_EN_FM_FILTER) && ym2612_rate != PicoIn.sndRate;
+    int fm_rate = use_fir ? ym2612_rate : PicoIn.sndRate;
+    int fm_flags = ((PicoIn.opt&POPT_DIS_FM_SSGEG) ? 0 : ST_SSG) |
+                   ((PicoIn.opt&POPT_FM_YM2612)    ? ST_DAC : 0);
+
+    if (ym2612_init) {
+#ifdef __GP2X__
+      if (PicoIn.opt & POPT_EXT_FM) {
+        if (YM2612Init_940(ym2612_clock, fm_rate, fm_flags) < 0) {
+          ExtFmDisable_940();
+          if (!retried) {
+            retried = 1;
+            force_init = 1;
+            keep_state = (state != NULL);
+            goto retry;
+          }
+          /* fall through to the local init below */
+        } else
+          use_940 = 1;
+      }
+      if (!use_940)
+#endif
+        YM2612Init_(ym2612_clock, fm_rate, fm_flags);
+    }
+
+    if (use_fir) {
+      // polyphase FIR resampler, resampling directly from native to output rate
+      resampler_free(ym2612_resampler);
+      ym2612_resampler = YMFM_setup_FIR(ym2612_rate, PicoIn.sndRate,
+          PicoIn.opt & POPT_EN_STEREO);
+      PsndFMUpdate = YM2612UpdateFIR;
+    } else {
+      PsndFMUpdate = YM2612UpdateONE;
+    }
   }
 
   if (state) {
