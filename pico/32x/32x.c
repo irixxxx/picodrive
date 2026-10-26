@@ -250,26 +250,24 @@ void PicoReset32x(void)
 
 static void Pico32xRenderSync(int lines)
 {
-  if (Pico32xDrawMode != PDM32X_OFF && !PicoIn.skipFrame) {
-    int offs;
+  int offs;
 
-    pprof_start(draw);
+  pprof_start(draw);
 
-    offs = (240 - rendlines) >> 1;
+  offs = (240 - rendlines) >> 1;
 
-    if ((Pico32x.vdp_regs[0] & P32XV_Mx) != 0 && // 32x not blanking
-        (!(Pico.video.debug_p & PVD_KILL_32X)))
-    {
-      int md_bg = Pico.video.reg[7] & 0x3f;
+  if ((Pico32x.vdp_regs[0] & P32XV_Mx) != 0 && // 32x not blanking
+      (!(Pico.video.debug_p & PVD_KILL_32X)))
+  {
+    int md_bg = Pico.video.reg[7] & 0x3f;
 
-      // we draw lines up to the sync point (not line-by-line)
-      PicoDraw32xLayer(offs, lines-Pico32x.sync_line + 1, md_bg);
-    }
-    else if (Pico32xDrawMode == PDM32X_BOTH)
-      PicoDraw32xLayerMdOnly(offs, lines-Pico32x.sync_line + 1);
-
-    pprof_end(draw);
+    // we draw lines up to the sync point (not line-by-line)
+    PicoDraw32xLayer(offs, lines-Pico32x.sync_line + 1, md_bg);
   }
+  else
+    PicoDraw32xLayerMdOnly(offs, lines-Pico32x.sync_line + 1);
+
+  pprof_end(draw);
 }
 
 void Pico32xDrawSync(SH2 *sh2)
@@ -287,12 +285,14 @@ void Pico32xDrawSync(SH2 *sh2)
       // make sure the MD image is also sync'ed to this line for merging
       PicoDrawSync(line, 0, 0);
 
-      // pfff... need to save and restore some persistent data for MD renderer
-      void *dest = Pico.est.DrawLineDest;
-      int incr = Pico.est.DrawLineDestIncr;
-      Pico32xRenderSync(line);
-      Pico.est.DrawLineDest = dest;
-      Pico.est.DrawLineDestIncr = incr;
+      if (Pico32xDrawMode != PDM32X_OFF) {
+        // pfff... need to save and restore some persistent data for MD renderer
+        void *dest = Pico.est.DrawLineDest;
+        int incr = Pico.est.DrawLineDestIncr;
+        Pico32xRenderSync(line);
+        Pico.est.DrawLineDest = dest;
+        Pico.est.DrawLineDestIncr = incr;
+      }
     }
 
     // remember next line to draw
