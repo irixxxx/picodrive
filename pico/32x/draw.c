@@ -386,33 +386,39 @@ do_it:
 void PicoDraw32xLayerMdOnly(int offs, int lines)
 {
   int have_scan = PicoScan32xBegin != NULL && PicoScan32xEnd != NULL;
-  unsigned short *dst = (void *)((char *)DrawLineDestBase32x + offs * DrawLineDestIncrement32x);
+  unsigned short *dst = DrawLineDest32x;
   unsigned char  *pmd = Pico.est.Draw2FB + 328 * offs + 8;
   unsigned short *pal = Pico.est.HighPal;
   int plen = 320;
   int l, p;
 
-  PicoDrawUpdateHighPal();
-
   offs += Pico32x.sync_line;
-  dst += Pico32x.sync_line * DrawLineDestIncrement32x;
+
+  Pico.est.DrawLineDest = DrawLineDest32x;
+  Pico.est.DrawLineDestIncr = DrawLineDestIncrement32x;
+
+  PicoDrawUpdateHighPal();
 
   for (l = 0; l < lines; l++) {
     if (have_scan) {
       PicoScan32xBegin(l + offs);
       dst = (unsigned short *)Pico.est.DrawLineDest;
     }
-    for (p = 0; p < plen; p += 4) {
-      dst[p + 0] = pal[*pmd++];
-      dst[p + 1] = pal[*pmd++];
-      dst[p + 2] = pal[*pmd++];
-      dst[p + 3] = pal[*pmd++];
-    }
+   // in accurate mode (PDM32X_32X_ONLY) data is already in place
+   if (Pico32xDrawMode == PDM32X_BOTH)
+     for (p = 0; p < plen; p += 4) {
+        dst[p + 0] = pal[*pmd++];
+        dst[p + 1] = pal[*pmd++];
+        dst[p + 2] = pal[*pmd++];
+        dst[p + 3] = pal[*pmd++];
+      }
     dst = Pico.est.DrawLineDest = (char *)dst + DrawLineDestIncrement32x;
     pmd += 328 - plen;
     if (have_scan)
       PicoScan32xEnd(l + offs);
   }
+
+  DrawLineDest32x = Pico.est.DrawLineDest;
 }
 
 void PicoDrawSetOutFormat32x(pdso_t which, int use_32x_line_mode)
