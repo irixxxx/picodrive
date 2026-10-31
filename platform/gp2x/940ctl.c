@@ -35,9 +35,86 @@ _940_ctl_t *shared_ctl = 0;
 unsigned char *mp3_mem = 0;
 
 #define MP3_SIZE_MAX (0x400000 + 0x800000) // 12M
-#define CODE940_FILE "pico940_v3.bin"
+#define CODE940_FILE "pico940_v4.bin"
+#define CODE940_MAX_SIZE 0x100000
 
 int crashed_940 = 0;
+
+static int core940_owner;
+
+/* last YM2612 setup handed to the 940 (-1 = none) */
+static int ym2612_940_clock = -1;
+static int ym2612_940_rate = -1;
+static int ym2612_940_flags = -1;
+
+static void reset_ym2612_940_cache(void)
+{
+	ym2612_940_clock = -1;
+	ym2612_940_rate = -1;
+	ym2612_940_flags = -1;
+}
+
+
+/* Reject a missing, short or out-of-range buffer descriptor */
+static int check_buf_desc(const _940_buf_desc_t *d, int min_len)
+{
+	int size = (int)sizeof(*shared_data);
+
+	if (d->offset <= 0 || d->length < min_len)
+		return -1;
+	if (d->offset > size || d->length > size - d->offset)
+		return -1;
+	return 0;
+}
+
+/* The 940 publishes its buffer locations, so a header mismatch cannot
+ * make the 920 misread state as samples; zero means an old image. */
+static int check_shared_layout_940(void)
+{
+	/* a crash already invalidates the image; reload on next init */
+	if (crashed_940 || shared_data == NULL)
+		return -1;
+
+	if (shared_ctl->protocol != PICODRIVE_940_PROTOCOL) {
+		printf("940: bad protocol %i (want %i)\n",
+		       shared_ctl->protocol, PICODRIVE_940_PROTOCOL);
+		return -1;
+	}
+
+	if (check_buf_desc(&shared_ctl->sh_ym_buffer,
+			   (int)sizeof(shared_data->ym_buffer)) < 0
+	    || check_buf_desc(&shared_ctl->sh_mp3_buffer,
+			      (int)sizeof(shared_data->mp3_buffer)) < 0
+	    || check_buf_desc(&shared_ctl->sh_ym2413_buffer,
+			      (int)sizeof(shared_data->ym2413_buffer)) < 0)
+	{
+		printf("940: bad buffer layout (ym %i+%i, mp3 %i+%i, ym2413 %i+%i)\n",
+			shared_ctl->sh_ym_buffer.offset, shared_ctl->sh_ym_buffer.length,
+			shared_ctl->sh_mp3_buffer.offset, shared_ctl->sh_mp3_buffer.length,
+			shared_ctl->sh_ym2413_buffer.offset, shared_ctl->sh_ym2413_buffer.length);
+		return -1;
+	}
+	return 0;
+}
+
+/* Keep the 940 selected after failure; only option-off returns to local sound */
+static void report_940_failure(void)
+{
+	if (crashed_940)
+		return;
+
+	printf("940: pico940_v4.bin does not match this build\n");
+	printf("940: rebuild it from the same source tree (make -C code940)\n");
+	menu_update_msg("bad 940 image, check pico940_v4.bin");
+	engineState = PGS_Menu;
+	crashed_940 = 1;
+}
+
+/* buffer offsets are published by the 940, not compiled into the 920 */
+static void *shared_data_ptr(int off)
+{
+	return (unsigned char *)shared_data + off;
+}
 
 static FILE *loaded_mp3 = 0;
 
@@ -233,9 +310,9 @@ int YM2612PicoStateLoad2_940(int *tat, int *tbt)
 
 	/* flush writes */
 	if (shared_ctl->writebuffsel == 1) {
-		shared_ctl->writebuff0[writebuff_ptr & 0xffff] = 0xffff;
+		shared_ctl->writebuff0[writebuff_ptr & 0xffff] = YM_WBUFF_END;
 	} else {
-		shared_ctl->writebuff1[writebuff_ptr & 0xffff] = 0xffff;
+		shared_ctl->writebuff1[writebuff_ptr & 0xffff] = YM_WBUFF_END;
 	}
 	shared_ctl->writebuffsel ^= 1;
 	writebuff_ptr = 0;
@@ -292,17 +369,9 @@ void sharedmem940_finish(void)
 }
 
 
-void YM2612Init_940(int baseclock, int rate, int ssg)
+/* Load/start the 940 and clear the shared structs; shared by both init paths. */
+static void start_940(void)
 {
-	static int oldrate;
-
-	// HACK
-	if (Pico.m.frame_count > 0 && !crashed_940 && rate == oldrate)
-		return;
-
-	printf("YM2612Init_940()\n");
-	printf("Mem usage: shared_data: %i, shared_ctl: %i\n", sizeof(*shared_data), sizeof(*shared_ctl));
-
 	reset940(1, 2);
 	pause940(1);
 
@@ -333,27 +402,38 @@ void YM2612Init_940(int baseclock, int rate, int ssg)
 			exit(1);
 		}
 
-		while(1)
+		while (nLen < CODE940_MAX_SIZE)
 		{
-			nRead = fread(ucData, 1, 1024, fp);
-			if(nRead <= 0)
+			int want = CODE940_MAX_SIZE - nLen;
+
+			if (want > (int)sizeof(ucData))
+				want = sizeof(ucData);
+			nRead = fread(ucData, 1, want, fp);
+			if (nRead <= 0)
 				break;
 			memcpy(shared_mem + nLen, ucData, nRead);
 			nLen += nRead;
 		}
+		if (nLen == CODE940_MAX_SIZE && fgetc(fp) != EOF) {
+			fclose(fp);
+			memset(g_screen_ptr, 0, 320*240*2);
+			text_out16(10, 100, CODE940_FILE " is too large");
+			gp2x_video_flip2();
+			in_menu_wait(PBTN_MOK|PBTN_MBACK, NULL, 100);
+			printf("%s is too large\n", binpath);
+			exit(1);
+		}
 		fclose(fp);
 		crashed_940 = 0;
+
+		/* The 940 has no C runtime to clear .bss; zero only after a reload
+	 * (clearing while running would wipe live state). */
+		if (nLen < CODE940_MAX_SIZE)
+			memset(shared_mem + nLen, 0, CODE940_MAX_SIZE - nLen);
 	}
 
 	memset(shared_data, 0, sizeof(*shared_data));
 	memset(shared_ctl,  0, sizeof(*shared_ctl));
-
-	/* cause local ym2612 to init REGS */
-	YM2612Init_(baseclock, rate, ssg);
-
-	internal_reset();
-
-	loaded_mp3 = NULL;
 
 	memregs[0x3B46>>1] = 0xffff; // clear pending DUALCPU interrupts for 940
 	memregl[0x4500>>2] = 0xffffffff; // clear pending IRQs in SRCPND
@@ -362,16 +442,98 @@ void YM2612Init_940(int baseclock, int rate, int ssg)
 	/* start the 940 */
 	reset940(0, 2);
 	pause940(0);
+}
+
+
+/* Pack state from the authoritative chip; nonzero means restore it. */
+static int ym2612_pack_handover_state(u8 *state)
+{
+	int from_940;
+
+	if (Pico.m.frame_count == 0 || core940_owner == CORE940_YM2413)
+		return 0;
+
+	from_940 = core940_owner == CORE940_YM2612;
+	if (from_940) {
+		/* a dead 940 has no trustworthy state to hand over */
+		if (crashed_940)
+			return 0;
+		ym2612_pack_state_940();
+		if (crashed_940)
+			return 0;
+	}
+	else {
+		/* boot or after a release: the local chip is authoritative */
+		ym2612_pack_state_old();
+	}
+
+	memcpy(state, ym2612.REGS, sizeof(ym2612.REGS));
+	memcpy(state + sizeof(ym2612.REGS),
+	       &ym2612.addr_A1, sizeof(ym2612.addr_A1));
+	return 1;
+}
+
+
+int YM2612Init_940(int baseclock, int rate, int flags)
+{
+	u8 state[sizeof(ym2612.REGS) + sizeof(ym2612.addr_A1)];
+	int take_over;
+
+	if (shared_data == NULL)
+		return -1;
+
+	// HACK
+	if (core940_owner == CORE940_YM2612 && Pico.m.frame_count > 0
+	    && !crashed_940 && baseclock == ym2612_940_clock
+	    && rate == ym2612_940_rate && flags == ym2612_940_flags)
+		return 0;
+
+	take_over = ym2612_pack_handover_state(state);
+
+	printf("YM2612Init_940()\n");
+	printf("Mem usage: shared_data: %u, shared_ctl: %u\n",
+		(unsigned)sizeof(*shared_data), (unsigned)sizeof(*shared_ctl));
+
+	start_940();
+	core940_owner = CORE940_YM2612;
 
 	// YM2612ResetChip_940(); // will be done on JOB940_YM2612INIT
 
 	/* now cause 940 to init it's ym2612 stuff */
 	shared_ctl->baseclock = baseclock;
 	shared_ctl->rate = rate;
+	shared_ctl->ym2612_flags = flags;
 	add_job_940(JOB940_INITALL);
+	/* wait for init and layout publication */
+	if (CHECK_BUSY(JOB940_INITALL)) wait_busy_940(JOB940_INITALL);
 
-	oldrate = rate;
+	/* Seed the local write shadow even if the image is rejected, so that
+	 * turning the option off leaves a usable local chip. */
+	YM2612Init_(baseclock, rate, flags);
+	internal_reset();
+	loaded_mp3 = NULL;
+
+	if (check_shared_layout_940() < 0) {
+		reset_ym2612_940_cache();
+		report_940_failure();
+		return -1;
+	}
+
+	if (take_over) {
+		memcpy(ym2612.REGS, state, sizeof(ym2612.REGS));
+		memcpy(&ym2612.addr_A1, state + sizeof(ym2612.REGS),
+		       sizeof(ym2612.addr_A1));
+		ym2612_unpack_state_old();
+	}
+
+	ym2612_940_clock = baseclock;
+	ym2612_940_rate = rate;
+	ym2612_940_flags = flags;
+	return 0;
 }
+
+
+
 
 
 void YM2612ResetChip_940(void)
@@ -391,7 +553,7 @@ void YM2612ResetChip_940(void)
 
 int YM2612UpdateOne_940(int *buffer, int length, int stereo, int is_buf_empty)
 {
-	int *ym_buf = shared_data->ym_buffer;
+	int *ym_buf = shared_data_ptr(shared_ctl->sh_ym_buffer.offset);
 	int ym_active_chs;
 
 	//printf("YM2612UpdateOne_940()\n");
@@ -405,9 +567,9 @@ int YM2612UpdateOne_940(int *buffer, int length, int stereo, int is_buf_empty)
 	else memset32(buffer, 0, length<<stereo);
 
 	if (shared_ctl->writebuffsel == 1) {
-		shared_ctl->writebuff0[writebuff_ptr & 0xffff] = 0xffff;
+		shared_ctl->writebuff0[writebuff_ptr & 0xffff] = YM_WBUFF_END;
 	} else {
-		shared_ctl->writebuff1[writebuff_ptr & 0xffff] = 0xffff;
+		shared_ctl->writebuff1[writebuff_ptr & 0xffff] = YM_WBUFF_END;
 	}
 	writebuff_ptr = 0;
 
@@ -449,7 +611,8 @@ int mp3dec_decode(FILE *f, int *file_pos, int file_len)
 		wait_busy_940(JOB940_MP3DECODE);
 
 	memcpy(cdda_out_buffer,
-		shared_data->mp3_buffer[shared_ctl->mp3_buffsel],
+		(short *)shared_data_ptr(shared_ctl->sh_mp3_buffer.offset)
+			+ shared_ctl->mp3_buffsel * (1152*2),
 		sizeof(cdda_out_buffer));
 
 	*file_pos = shared_ctl->mp3_offs;

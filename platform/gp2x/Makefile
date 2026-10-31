@@ -18,7 +18,7 @@ all: rel
 readme.txt: ../../tools/textfilter ../base_readme.txt ../../ChangeLog
 	../../tools/textfilter ../base_readme.txt $@ GP2X
 
-CODE940 = code940/pico940_v3.bin
+CODE940 = code940/pico940_v4.bin
 # rebuild the image when any embedded source changes
 CODE940_SRC := $(wildcard code940/*.c code940/*.h code940/*.s \
 	code940/uClibc/*.c code940/uClibc/*.h code940/uClibc/*.s) \

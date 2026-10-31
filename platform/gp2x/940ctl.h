@@ -2,10 +2,13 @@
 #define _940CTL_H_
 #include <stddef.h>
 
+/* which sound chip currently owns the 940 */
+enum { CORE940_NONE = 0, CORE940_YM2612, CORE940_YM2413 };
+
 void sharedmem940_init(void);
 void sharedmem940_finish(void);
 
-void YM2612Init_940(int baseclock, int rate, int ssg);
+int  YM2612Init_940(int baseclock, int rate, int flags);
 void YM2612ResetChip_940(void);
 int  YM2612UpdateOne_940(int *buffer, int length, int stereo, int is_buf_empty);
 

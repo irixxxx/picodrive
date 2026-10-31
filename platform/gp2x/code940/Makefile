@@ -33,7 +33,7 @@ LDFLAGS = -static -e code940 -Ttext 0x0 -z max-page-size=0x1000 -L$(dir $(LIBGCC
 
 vpath %.c = ../../common
 
-BIN = pico940_v3.bin
+BIN = pico940_v4.bin
 
 all: $(BIN)
 
@@ -72,6 +72,11 @@ code940.elf : $(OBJS940) $(LIBHELIX)
 940ym2612.o : ../../../pico/sound/ym2612.c ../../../pico/sound/ym2612.h
 	@echo ">>>" $@
 	$(GCC) $(CFLAGS) -Os -DEXTERNAL_YM2612 -c $< -o $@
+
+# 940.o embeds the shared data layout and job ids
+940.o : 940.c 940shared.h ../../../pico/sound/ym2612.h
+	@echo ">>>" $@
+	$(GCC) $(CFLAGS) -c $< -o $@
 
 misc_arm.o : ../../../pico/misc_arm.s
 	@echo ">>>" $@
