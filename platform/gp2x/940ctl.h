@@ -28,4 +28,8 @@ void YM2413Render_940(int *buffer, int length);
 size_t YM2413PicoStateSave_940(void *buf, size_t size);
 void YM2413PicoStateLoad_940(const void *buf, size_t size);
 
+/* Hand a chip back to the 920 using the packed savestate format; a failed
+ * 940 stays selected and silent until restarted. */
+void ExtFmRelease_940(void);
+
 #endif /* _940CTL_H_ */
