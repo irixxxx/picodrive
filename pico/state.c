@@ -496,8 +496,10 @@ static int state_load(void *file)
       case CHUNK_PSG:     CHECKED_READ2(28*4, sn76496_regs); break;
       case CHUNK_YM2413:
         CHECKED_READ(len, buf);
-        ym2413_unpack_state(buf, len);
-        Pico.m.hardware |= PMS_HW_FMUSED;
+        if (len >= YM2413_STATE_MIN) {
+          ym2413_unpack_state(buf, len);
+          Pico.m.hardware |= PMS_HW_FMUSED;
+        }
         break;
       case CHUNK_FM:
         ym_regs = YM2612GetRegs();
