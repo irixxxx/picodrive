@@ -923,6 +923,7 @@ void cdda_stop_play(void);
 #define YM2612_NATIVE_RATE() (((Pico.m.pal?OSC_PAL:OSC_NTSC)/7 + 3*24) / (6*24))
 
 void ym2612_sync_timers(int z80_cycles, int mode_old, int mode_new);
+void ym2612_pack_timer_vals(int *tat, int *tbt, int *busy);
 int  ym2612_pack_timers(void *buf_, size_t size);
 void ym2612_unpack_timers(const void *buf_, size_t size);
 void ym2612_pack_state_old(void);

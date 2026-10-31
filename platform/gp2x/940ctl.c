@@ -207,6 +207,16 @@ void YM2612PicoStateSave2_940(int tat, int tbt)
 	*(INT32 *)(ym_local_regs + 0x10c) = tbt;
 }
 
+/* Pack the authoritative 940 chip into the shared register file; the 920
+ * supplies the timer ticks. */
+void ym2612_pack_state_940(void)
+{
+	int tat, tbt, busy;
+
+	ym2612_pack_timer_vals(&tat, &tbt, &busy);
+	YM2612PicoStateSave2_940(tat, tbt);
+}
+
 int YM2612PicoStateLoad2_940(int *tat, int *tbt)
 {
 	UINT8 *ym_remote_regs, *ym_local_regs;

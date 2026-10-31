@@ -260,7 +260,10 @@ static int state_save(void *file)
     } else {
 #ifdef __GP2X__
       void *ym_regs = YM2612GetRegs();
-      ym2612_pack_state_old();
+      if (PicoIn.opt & POPT_EXT_FM)
+        ym2612_pack_state_940();
+      else
+        ym2612_pack_state_old();
       CHECKED_WRITE(CHUNK_FM, 0x200+4, ym_regs);
 #else
       // write fm state first since timer load needs OPN.ST.mode

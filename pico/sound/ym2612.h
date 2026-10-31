@@ -203,7 +203,7 @@ void   YM2612PicoStateLoad3(const void *buf_, size_t size);
 	(PicoIn.opt & POPT_EXT_FM ? YM2612ResetChip_940 : YM2612ResetChip_)()
 #define YM2612PicoStateLoad() \
 	(PicoIn.opt & POPT_EXT_FM ? YM2612PicoStateLoad_940 : YM2612PicoStateLoad_)()
-#define YM2612UpdateOne(buffer, length, sterao, isempty) \
+#define YM2612UpdateOne(buffer, length, stereo, isempty) \
 	(PicoIn.opt & POPT_EXT_FM ? YM2612UpdateOne_940 : YM2612UpdateOne_)(buffer, length, stereo, isempty)
 #endif /* __GP2X__ */
 
