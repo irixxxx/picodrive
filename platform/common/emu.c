@@ -1031,6 +1031,10 @@ int emu_save_load_game(int load, int sram)
 	}
 	else
 	{
+#ifdef __GP2X__
+		if (PicoGameLoaded)
+			PsndRerate(1);
+#endif
 		ret = PicoState(saveFname, !load);
 		if (!ret) {
 #ifdef __GP2X__

@@ -154,6 +154,14 @@ void PsndRerate(int preserve_state)
   int ym2612_rate = YM2612_NATIVE_RATE();
   int ym2612_init = !preserve_state;
   int state_size = 4096;
+  int ym2612_on_940 = 0;
+
+#ifdef __GP2X__
+  /* if the option was turned off, take the chip back before reinit */
+  if (!(PicoIn.opt & POPT_EXT_FM))
+    ExtFmRelease_940();
+  ym2612_on_940 = (PicoIn.opt & POPT_EXT_FM) && !(PicoIn.AHW & PAHW_SMS);
+#endif
 
   // don't init YM2612 if preserve_state and no parameter changes
   ym2612_init |= ymclock != ym2612_clock || ymopts != (PicoIn.opt & (POPT_DIS_FM_SSGEG|POPT_FM_YM2612));
@@ -162,7 +170,7 @@ void PsndRerate(int preserve_state)
   ymrate = (PicoIn.opt & POPT_EN_FM_FILTER ? ym2612_rate : PicoIn.sndRate);
   ymopts = PicoIn.opt & (POPT_DIS_FM_SSGEG|POPT_FM_YM2612);
 
-  if (preserve_state && ym2612_init) {
+  if (preserve_state && ym2612_init && !ym2612_on_940) {
     state = malloc(state_size);
     if (state)
       state_size = YM2612PicoStateSave3(state, state_size);
@@ -194,22 +202,30 @@ void PsndRerate(int preserve_state)
 #else
     PsndFMUpdate = YM2413UpdateFIR;
 #endif
-  } else if ((PicoIn.opt & POPT_EN_FM_FILTER) && ym2612_rate != PicoIn.sndRate) {
-    // polyphase FIR resampler, resampling directly from native to output rate
-    if (ym2612_init)
-      YM2612Init(ym2612_clock, ym2612_rate,
-        ((PicoIn.opt&POPT_DIS_FM_SSGEG) ? 0 : ST_SSG) |
-        ((PicoIn.opt&POPT_FM_YM2612)    ? ST_DAC : 0));
-    resampler_free(ym2612_resampler);
-    ym2612_resampler = YMFM_setup_FIR(ym2612_rate, PicoIn.sndRate,
-        PicoIn.opt & POPT_EN_STEREO);
-    PsndFMUpdate = YM2612UpdateFIR;
   } else {
+    int use_fir = (PicoIn.opt & POPT_EN_FM_FILTER) && ym2612_rate != PicoIn.sndRate;
+    int fm_rate = use_fir ? ym2612_rate : PicoIn.sndRate;
+    int fm_flags = ((PicoIn.opt&POPT_DIS_FM_SSGEG) ? 0 : ST_SSG) |
+                   ((PicoIn.opt&POPT_FM_YM2612)    ? ST_DAC : 0);
+
+#ifdef __GP2X__
+    /* cache unchanged setup, reload after a crash, take over local state */
+    if ((PicoIn.opt & POPT_EXT_FM))
+      YM2612Init_940(ym2612_clock, fm_rate, fm_flags);
+    else
+#endif
     if (ym2612_init)
-      YM2612Init(ym2612_clock, PicoIn.sndRate,
-        ((PicoIn.opt&POPT_DIS_FM_SSGEG) ? 0 : ST_SSG) |
-        ((PicoIn.opt&POPT_FM_YM2612)    ? ST_DAC : 0));
-    PsndFMUpdate = YM2612UpdateONE;
+      YM2612Init_(ym2612_clock, fm_rate, fm_flags);
+
+    if (use_fir) {
+      // polyphase FIR resampler, resampling directly from native to output rate
+      resampler_free(ym2612_resampler);
+      ym2612_resampler = YMFM_setup_FIR(ym2612_rate, PicoIn.sndRate,
+          PicoIn.opt & POPT_EN_STEREO);
+      PsndFMUpdate = YM2612UpdateFIR;
+    } else {
+      PsndFMUpdate = YM2612UpdateONE;
+    }
   }
 
   if (state) {

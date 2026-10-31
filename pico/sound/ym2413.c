@@ -141,6 +141,8 @@ void ym2413_unpack_state(const void *buf_, size_t size)
 	const u8 *buf = buf_;
 	size_t i, b = 0;
 
+	if (size < YM2413_STATE_MIN)
+		return;
 
 #if defined(__GP2X__) && !defined(CODE940)
 	if (YM2413_940_is_active()) {
