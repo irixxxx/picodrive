@@ -19,6 +19,13 @@ readme.txt: ../../tools/textfilter ../base_readme.txt ../../ChangeLog
 	../../tools/textfilter ../base_readme.txt $@ GP2X
 
 CODE940 = code940/pico940_v3.bin
+# rebuild the image when any embedded source changes
+CODE940_SRC := $(wildcard code940/*.c code940/*.h code940/*.s \
+	code940/uClibc/*.c code940/uClibc/*.h code940/uClibc/*.s) \
+	../../pico/sound/ym2612.c ../../pico/sound/ym2612.h \
+	../../pico/sound/ym2413.c ../../pico/sound/ym2413.h \
+	../../pico/sound/emu2413/emu2413.c ../../pico/sound/emu2413/emu2413.h \
+	../../pico/misc_arm.s ../common/mp3_sync.c
 
 PicoDrive: ../../picodrive
 	$(STRIP) $^ -o $@
@@ -37,5 +44,12 @@ rel: PicoDrive PicoDrive.gpe $(CODE940) readme.txt ../game_def.cfg \
 	cd out && zip -9 -r ../../../PicoDrive_$(VER).zip *
 	rm -rf out
 
+# Without Helix, source-only checkouts use the checked-in image.
+ifneq ($(wildcard ../common/helix/pub/mp3dec.h),)
+$(CODE940): $(CODE940_SRC)
+	$(MAKE) -C code940/
+else
 $(CODE940):
-	make -C code940/
+	@echo "error: $@ is missing; unpack the Helix decoder in ../common/helix/" >&2
+	@exit 1
+endif
