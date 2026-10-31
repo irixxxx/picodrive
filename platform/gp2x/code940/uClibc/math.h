@@ -13,3 +13,4 @@ double fabs(double x);
 double scalbn(double x, int n);
 double copysign(double x, double y);
 double floor(double x);
+double round(double x);

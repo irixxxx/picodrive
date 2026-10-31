@@ -10,7 +10,7 @@ endif
 #up = 1
 
 CFLAGS += -O3 -Wall -mno-thumb-interwork -fstrict-aliasing -fno-stack-protector -fno-common -ffast-math
-CFLAGS += -I../../common/helix/pub -I../../.. -I. -D__GP2X__ -DARM -DNDEBUG -DEL_LOGMASK=0
+CFLAGS += -I../../common/helix/pub -I../../.. -I. -D__GP2X__ -DARM -DNDEBUG -DEL_LOGMASK=0 -D_GNU_SOURCE
 CFLAGS += -mcpu=arm940t -mtune=arm940t -mabi=apcs-gnu -mfloat-abi=soft -mfpu=fpa
 
 GCC = $(CROSS_COMPILE)gcc
@@ -57,7 +57,7 @@ OBJS940 += 940init.o 940.o 940ym2612.o misc_arm.o mp3_sync.o
 # uClibc library code
 UCLIBC_OBJS = uClibc/memset.o uClibc/s_floor.o uClibc/e_pow.o uClibc/e_sqrt.o uClibc/s_fabs.o
 UCLIBC_OBJS += uClibc/s_scalbn.o uClibc/s_copysign.o uClibc/k_sin.o uClibc/k_cos.o uClibc/s_sin.o
-UCLIBC_OBJS += uClibc/e_rem_pio2.o uClibc/k_rem_pio2.o uClibc/e_log.o uClibc/wrappers.o
+UCLIBC_OBJS += uClibc/e_rem_pio2.o uClibc/k_rem_pio2.o uClibc/e_log.o uClibc/wrappers.o uClibc/s_round.o
 OBJS940 += $(UCLIBC_OBJS)
 LIBHELIX ?= ../../common/helix/$(notdir $(CROSS_COMPILE))helix_mp3.a
 
@@ -80,6 +80,9 @@ misc_arm.o : ../../../pico/misc_arm.s
 mp3_sync.o: ../../common/mp3_sync.c
 	@echo ">>>" $@
 	$(GCC) $(CFLAGS) -Os -DCODE940 -c $< -o $@
+
+# the math files share these headers
+$(UCLIBC_OBJS): uClibc/math.h uClibc/math_private.h
 
 $(LIBHELIX):
 	@$(MAKE) -C ../../common/helix/ CROSS_COMPILE=$(CROSS_COMPILE)
