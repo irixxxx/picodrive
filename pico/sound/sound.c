@@ -31,6 +31,7 @@ s16 cdda_out_buffer[2*1152];
 // FM resampling polyphase FIR
 static resampler_t *ym2612_resampler;
 static resampler_t *ym2413_resampler;
+static int ym2413_out_rate;
 static int (*PsndFMUpdate)(s32 *buffer, int length, int stereo, int is_buf_empty);
 
 PICO_INTERNAL void PsndInit(void)
@@ -89,6 +90,22 @@ static int YM2413UpdateFIR(s32 *buffer, int length, int stereo, int is_buf_empty
   resampler_update(ym2413_resampler, buffer, length, YM2413Update);
   return 0;
 }
+
+#ifdef __GP2X__
+/* 940-backed YM2413 render */
+static void YM2413Update_940(s32 *buffer, int length, int stereo)
+{
+  (void)stereo; /* resampler asks for mono */
+  YM2413Render_940(buffer, length);
+}
+
+static int YM2413UpdateFIR_940(s32 *buffer, int length, int stereo, int is_buf_empty)
+{
+  if (!is_buf_empty) memset(buffer, 0, (length << stereo) * sizeof(*buffer));
+  resampler_update(ym2413_resampler, buffer, length, YM2413Update_940);
+  return 0;
+}
+#endif
 
 // FIR setup, looks for a close enough rational number matching the ratio
 static resampler_t *YMFM_setup_FIR(int inrate, int outrate, int stereo)
@@ -157,9 +174,26 @@ void PsndRerate(int preserve_state)
       OPLL_reset(opll);
     resampler_free(ym2413_resampler);
     ym2413_resampler = YMFM_setup_FIR(ym2413_rate, PicoIn.sndRate, 0);
+    ym2413_out_rate = PicoIn.sndRate;
   }
   if (PicoIn.AHW & PAHW_SMS) {
+#ifdef __GP2X__
+    if ((PicoIn.opt & POPT_EXT_FM)) {
+      /* failed init stays silent until restart or option-off */
+      YM2413Init_940(sms_clock, ym2413_rate, preserve_state);
+    }
+#endif
+    /* both cores render at the chip's native rate and are resampled here */
+    if (!ym2413_resampler || ym2413_out_rate != PicoIn.sndRate) {
+      resampler_free(ym2413_resampler);
+      ym2413_resampler = YMFM_setup_FIR(ym2413_rate, PicoIn.sndRate, 0);
+      ym2413_out_rate = PicoIn.sndRate;
+    }
+#ifdef __GP2X__
+    PsndFMUpdate = (PicoIn.opt & POPT_EXT_FM) ? YM2413UpdateFIR_940 : YM2413UpdateFIR;
+#else
     PsndFMUpdate = YM2413UpdateFIR;
+#endif
   } else if ((PicoIn.opt & POPT_EN_FM_FILTER) && ym2612_rate != PicoIn.sndRate) {
     // polyphase FIR resampler, resampling directly from native to output rate
     if (ym2612_init)
@@ -327,6 +361,7 @@ PICO_INTERNAL void PsndDoSMSFM(int cyc_to)
 
   if (Pico.m.hardware & PMS_HW_FMUSED) {
     buf += pos;
+    /* VGM uses the local YM2413 even when the 940 wrapper is selected */
     YM2413UpdateFIR(buf32, len, 0, 0);
     if (stereo) 
       while (len--) {
