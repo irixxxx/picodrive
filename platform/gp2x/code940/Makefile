@@ -48,7 +48,7 @@ all: $(BIN)
 # stuff for 940 core
 
 # init, emu_control, emu
-OBJS940 += 940init.o 940.o 940ym2612.o misc_arm.o mp3_sync.o
+OBJS940 += 940init.o 940.o 940ym2612.o 940ym2413.o misc_arm.o mp3_sync.o
 # the asm memcpy code crashes job LOAD2 on 940. Possibly a globbered reg?
 # OBJS940 += memcpy.o
 # the asm code seems to be faster when run on 920, but not on 940 for some reason
@@ -57,7 +57,7 @@ OBJS940 += 940init.o 940.o 940ym2612.o misc_arm.o mp3_sync.o
 # uClibc library code
 UCLIBC_OBJS = uClibc/memset.o uClibc/s_floor.o uClibc/e_pow.o uClibc/e_sqrt.o uClibc/s_fabs.o
 UCLIBC_OBJS += uClibc/s_scalbn.o uClibc/s_copysign.o uClibc/k_sin.o uClibc/k_cos.o uClibc/s_sin.o
-UCLIBC_OBJS += uClibc/e_rem_pio2.o uClibc/k_rem_pio2.o uClibc/e_log.o uClibc/wrappers.o uClibc/s_round.o
+UCLIBC_OBJS += uClibc/s_cos.o uClibc/e_rem_pio2.o uClibc/k_rem_pio2.o uClibc/e_log.o uClibc/wrappers.o uClibc/s_round.o
 OBJS940 += $(UCLIBC_OBJS)
 LIBHELIX ?= ../../common/helix/$(notdir $(CROSS_COMPILE))helix_mp3.a
 
@@ -77,6 +77,10 @@ code940.elf : $(OBJS940) $(LIBHELIX)
 940.o : 940.c 940shared.h ../../../pico/sound/ym2612.h
 	@echo ">>>" $@
 	$(GCC) $(CFLAGS) -c $< -o $@
+
+940ym2413.o : ../../../pico/sound/ym2413.c ../../../pico/sound/ym2413.h
+	@echo ">>>" $@
+	$(GCC) $(CFLAGS) -Os -DCODE940 -c $< -o $@
 
 misc_arm.o : ../../../pico/misc_arm.s
 	@echo ">>>" $@

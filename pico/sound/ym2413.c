@@ -1,17 +1,62 @@
 /* PicoDrive's wrapper for emu2413
  */
 
+#include <stddef.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include "emu2413/emu2413.h"
+#include "ym2413.h"
+
+#ifdef CODE940
+/* The 940 has no usable allocator: serve OPLL_new()'s single calloc()
+ * from .bss and reject the rest. Keep the redirect local to emu2413. */
+#define calloc emu2413_calloc
+
+static OPLL opll_inst;
+
+void *emu2413_calloc(size_t nmemb, size_t size)
+{
+  if (nmemb * size != sizeof(opll_inst))
+    return NULL;
+
+  memset(&opll_inst, 0, sizeof(opll_inst));
+  return &opll_inst;
+}
+#endif
+
 #include "emu2413/emu2413.c"
 
+#if defined(__GP2X__) && !defined(CODE940)
+#include <platform/gp2x/940ctl.h>
+#endif
+
 // the one instance that can be in a Mark III
+#ifdef CODE940
+/* OPLL_new() fills this in; silent before that */
+OPLL *opll = &opll_inst;
+#else
 OPLL *opll = NULL;
+#endif
 
 
 void YM2413_regWrite(unsigned data){
+#if defined(__GP2X__) && !defined(CODE940)
+  if (YM2413_940_is_active()) {
+    YM2413_regWrite_940(data);
+    return;
+  }
+#endif
   OPLL_writeIO(opll,0,data);
 }
 
 void YM2413_dataWrite(unsigned data){
+#if defined(__GP2X__) && !defined(CODE940)
+  if (YM2413_940_is_active()) {
+    YM2413_dataWrite_940(data);
+    return;
+  }
+#endif
   OPLL_writeIO(opll,1,data);
 }
 
@@ -63,6 +108,11 @@ size_t ym2413_pack_state(void *buf_, size_t size)
 	size_t i, b = 0;
 	u8 *buf = buf_;
 
+#if defined(__GP2X__) && !defined(CODE940)
+	if (YM2413_940_is_active())
+		return YM2413PicoStateSave_940(buf_, size);
+#endif
+
 	// regs and adr first, for backwards compatibility
 	save_u32(buf, &b, opll->adr);
 	for (i = 0; i < 0x40; i++)
@@ -82,7 +132,6 @@ size_t ym2413_pack_state(void *buf_, size_t size)
 	save_u32(buf, &b, opll->noise);
 	save_u16(buf, &b, opll->short_noise);
 
-	printf("ym2413 state size: %zu\n", b);
 	assert(b <= size);
 	return b;
 }
@@ -91,6 +140,14 @@ void ym2413_unpack_state(const void *buf_, size_t size)
 {
 	const u8 *buf = buf_;
 	size_t i, b = 0;
+
+
+#if defined(__GP2X__) && !defined(CODE940)
+	if (YM2413_940_is_active()) {
+		YM2413PicoStateLoad_940(buf_, size);
+		return;
+	}
+#endif
 
 	// registers, write to opll too to take over to internal data structures
 	opll->adr = load_u32(buf, &b);
