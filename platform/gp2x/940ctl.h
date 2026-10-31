@@ -20,4 +20,12 @@ void YM2612PicoStateSave2_940(int tat, int tbt);
 int  YM2612PicoStateLoad2_940(int *tat, int *tbt);
 void ym2612_pack_state_940(void);
 
+int  YM2413Init_940(int clock, int rate, int preserve_state);
+int  YM2413_940_is_active(void);
+void YM2413_regWrite_940(unsigned data);
+void YM2413_dataWrite_940(unsigned data);
+void YM2413Render_940(int *buffer, int length);
+size_t YM2413PicoStateSave_940(void *buf, size_t size);
+void YM2413PicoStateLoad_940(const void *buf, size_t size);
+
 #endif /* _940CTL_H_ */

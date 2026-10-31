@@ -24,6 +24,7 @@
 #include "../common/emu.h"
 #include <pico/pico_int.h>
 #include <pico/sound/ym2612.h>
+#include <pico/sound/ym2413.h>
 #include <pico/sound/mix.h>
 #include "code940/940shared.h"
 #include "plat.h"
@@ -54,6 +55,20 @@ static void reset_ym2612_940_cache(void)
 	ym2612_940_flags = -1;
 }
 
+/* YM2413 write queue, double-buffered like the YM2612 */
+static unsigned ym2413_writebuff_ptr;
+static int ym2413_last_reg = -1;
+static int ym2413_clock, ym2413_rate;
+
+/* A single 940 job renders the next block while the 920 consumes the
+ * previous result. */
+#define YM2413_OUTQ_SIZE (YM2413_BUF_MAX * 3)
+static int ym2413_job_pending;
+static int ym2413_job_len;
+static int ym2413_outbuf[YM2413_OUTQ_SIZE];
+static int ym2413_outcount;
+static void ym2413_flush_writes(void);
+static void ym2413_async_forget(void);
 
 /* Reject a missing, short or out-of-range buffer descriptor */
 static int check_buf_desc(const _940_buf_desc_t *d, int min_len)
@@ -107,6 +122,7 @@ static void report_940_failure(void)
 	printf("940: rebuild it from the same source tree (make -C code940)\n");
 	menu_update_msg("bad 940 image, check pico940_v4.bin");
 	engineState = PGS_Menu;
+	ym2413_async_forget();
 	crashed_940 = 1;
 }
 
@@ -247,6 +263,119 @@ static void add_job_940(int job)
 	memregs[(0x3B20+job*2)>>1] = 1;
 
 //	printf("added %i, pending %04x\n", job+1, memregs[0x3b46>>1]);
+}
+
+/* Flip to the buffer the 920 has been filling when the job is submitted */
+static UINT16 *ym2413_write_buffer(void)
+{
+	return shared_ctl->writebuffsel ? shared_ctl->writebuff0
+					: shared_ctl->writebuff1;
+}
+
+/* Drop the YM2413 pipeline without touching the 940 (shutdown/failure) */
+static void ym2413_async_forget(void)
+{
+	ym2413_job_pending = 0;
+	ym2413_job_len = 0;
+	ym2413_outcount = 0;
+	ym2413_writebuff_ptr = 0;
+	ym2413_last_reg = -1;
+	if (shared_ctl && core940_owner == CORE940_YM2413) {
+		shared_ctl->writebuff0[0] = YM_WBUFF_END;
+		shared_ctl->writebuff1[0] = YM_WBUFF_END;
+		shared_ctl->writebuffsel = 0;
+	}
+}
+
+/* Wait for an in-flight job, then discard its output and any pending writes. */
+static void ym2413_async_clear(void)
+{
+	if (ym2413_job_pending && !crashed_940) {
+		if (CHECK_BUSY(JOB940_YM2413UPDATEONE))
+			wait_busy_940(JOB940_YM2413UPDATEONE);
+	}
+	ym2413_async_forget();
+}
+
+/* Start a job and return immediately; the 920 switches write buffers */
+static int ym2413_start_job(int len)
+{
+	UINT16 *wbuff;
+
+	if (crashed_940 || ym2413_job_pending)
+		return -1;
+
+	if (len < 0)
+		len = 0;
+	if (len > YM2413_BUF_MAX)
+		len = YM2413_BUF_MAX;
+
+	wbuff = ym2413_write_buffer();
+	wbuff[ym2413_writebuff_ptr] = YM_WBUFF_END;
+	shared_ctl->ym2413_len = len;
+
+	/* make the completed buffer visible before the 940 can see the job */
+	shared_ctl->writebuffsel ^= 1;
+	ym2413_writebuff_ptr = 0;
+
+	ym2413_job_pending = 1;
+	ym2413_job_len = len;
+	add_job_940(JOB940_YM2413UPDATEONE);
+	return len;
+}
+
+/* Wait for the current job and copy its samples; dst may be NULL */
+static int ym2413_finish_job(int *dst)
+{
+	int len = ym2413_job_len;
+
+	if (!ym2413_job_pending)
+		return 0;
+
+	if (CHECK_BUSY(JOB940_YM2413UPDATEONE))
+		wait_busy_940(JOB940_YM2413UPDATEONE);
+
+	ym2413_job_pending = 0;
+	ym2413_job_len = 0;
+	if (crashed_940)
+		return -1;
+
+	if (dst && len > 0)
+		memcpy(dst, shared_data_ptr(shared_ctl->sh_ym2413_buffer.offset),
+		       len * sizeof(*dst));
+	return len;
+}
+
+/* Retire a finished job into the 920-side output queue. */
+static int ym2413_collect_job(void)
+{
+	int len;
+
+	if (!ym2413_job_pending)
+		return 0;
+
+	if (ym2413_job_len > YM2413_OUTQ_SIZE - ym2413_outcount) {
+		/* keep a malformed request from overrunning the private queue */
+		ym2413_async_clear();
+		return -1;
+	}
+
+	len = ym2413_finish_job(ym2413_outbuf + ym2413_outcount);
+	if (len < 0) {
+		ym2413_async_forget();
+		return -1;
+	}
+
+	ym2413_outcount += len;
+	return len;
+}
+
+/* Render one block synchronously to prime the pipeline or cover a shortfall */
+static int ym2413_sync_block(int *dst, int len)
+{
+	if (ym2413_start_job(len) < 0)
+		return -1;
+	return ym2413_finish_job(dst);
 }
 
 
@@ -532,6 +661,262 @@ int YM2612Init_940(int baseclock, int rate, int flags)
 	return 0;
 }
 
+
+/* SMS/GG FM runs on the 940 at native rate; writes are queued until the
+ * next job. */
+int YM2413Init_940(int clock, int rate, int preserve_state)
+{
+	u8 state[1024];
+	size_t state_len = 0;
+
+	if (shared_data == NULL)
+		return -1;
+
+	if (core940_owner == CORE940_YM2413 && !crashed_940 &&
+	    clock == ym2413_clock && rate == ym2413_rate)
+	{
+		if (preserve_state)
+			return 0;
+
+		/* just reset the chip, no need to restart the 940 */
+		ym2413_async_clear();
+		shared_ctl->ym2413_clk = clock;
+		shared_ctl->ym2413_rate = rate;
+		add_job_940(JOB940_YM2413RESET);
+		if (CHECK_BUSY(JOB940_YM2413RESET))
+			wait_busy_940(JOB940_YM2413RESET);
+		if (crashed_940)
+			return -1;
+		return 0;
+	}
+
+	printf("YM2413Init_940(%i, %i)\n", clock, rate);
+
+	/* Keep live state when the game is running; a crashed 940 restarts fresh */
+	if (Pico.m.frame_count > 0) {
+		if (core940_owner == CORE940_YM2413) {
+			if (!crashed_940)
+				state_len = YM2413PicoStateSave_940(state, sizeof(state));
+		}
+		else if (core940_owner != CORE940_YM2612)
+			state_len = ym2413_pack_state(state, sizeof(state));
+	}
+
+	start_940();
+	core940_owner = CORE940_YM2413;
+	reset_ym2612_940_cache();
+	ym2413_clock = clock;
+	ym2413_rate = rate;
+
+	/* the restart discarded any output the old instance had queued */
+	ym2413_async_forget();
+
+	shared_ctl->ym2413_clk = clock;
+	shared_ctl->ym2413_rate = rate;
+	add_job_940(JOB940_YM2413RESET);
+	if (CHECK_BUSY(JOB940_YM2413RESET))
+		wait_busy_940(JOB940_YM2413RESET);
+
+	if (check_shared_layout_940() < 0) {
+		/* keep 940 owner so menu exit retries; no local fallback */
+		ym2413_clock = ym2413_rate = -1;
+		report_940_failure();
+		return -1;
+	}
+
+	if (state_len > 0)
+		YM2413PicoStateLoad_940(state, state_len);
+
+	return 0;
+}
+
+
+/* Flush queued writes without generating samples; rendered output is kept */
+static void ym2413_flush_writes(void)
+{
+	if (crashed_940) {
+		ym2413_async_forget();
+		return;
+	}
+
+	/* retire the render job before touching the shared write queue */
+	if (ym2413_collect_job() < 0)
+		return;
+
+	if (ym2413_writebuff_ptr > 0) {
+		if (ym2413_start_job(0) < 0)
+			return;
+		if (ym2413_finish_job(NULL) < 0)
+			return;
+	}
+}
+
+static void ym2413_queue_write(unsigned data)
+{
+	UINT16 *wbuff;
+
+	if (crashed_940)
+		return;
+
+	if (ym2413_writebuff_ptr >= YM2413_WBUFF_MAX - 1) {
+		ym2413_flush_writes();
+		if (crashed_940 ||
+		    ym2413_writebuff_ptr >= YM2413_WBUFF_MAX - 1)
+			return;
+	}
+
+	wbuff = ym2413_write_buffer();
+	wbuff[ym2413_writebuff_ptr++] = data;
+}
+
+void YM2413_regWrite_940(unsigned data)
+{
+	data &= 0xff;
+	/* the address latch keeps its value; a repeated write has no effect */
+	if ((int)data == ym2413_last_reg)
+		return;
+	ym2413_last_reg = (int)data;
+	ym2413_queue_write(data);
+}
+
+void YM2413_dataWrite_940(unsigned data)
+{
+	ym2413_queue_write(0x100 | (data & 0xff));
+}
+
+
+/* YM2413 is on the 940 only for SMS games; VGM and option-off stay local. */
+int YM2413_940_is_active(void)
+{
+	return core940_owner == CORE940_YM2413 &&
+		(PicoIn.opt & POPT_EXT_FM) && (PicoIn.AHW & PAHW_SMS);
+}
+
+
+/* Render 'length' samples at the native rate and copy them out. The common
+ * path retires the previous frame's job and submits the next one. */
+void YM2413Render_940(int *buffer, int length)
+{
+	int done, len;
+
+	if (length <= 0)
+		return;
+
+	if (crashed_940) {
+		memset(buffer, 0, length * sizeof(*buffer));
+		ym2413_async_forget();
+		return;
+	}
+
+	if (ym2413_collect_job() < 0) {
+		memset(buffer, 0, length * sizeof(*buffer));
+		return;
+	}
+
+	if (length > YM2413_OUTQ_SIZE) {
+		/* unusually large request: drain the private queue directly */
+		done = ym2413_outcount;
+		if (done > length)
+			done = length;
+		if (done > 0) {
+			memcpy(buffer, ym2413_outbuf, done * sizeof(*buffer));
+			ym2413_outcount = 0;
+		}
+		while (done < length) {
+			len = length - done;
+			if (len > YM2413_BUF_MAX)
+				len = YM2413_BUF_MAX;
+			if (ym2413_sync_block(buffer + done, len) < 0) {
+				memset(buffer + done, 0,
+				       (length - done) * sizeof(*buffer));
+				ym2413_async_forget();
+				return;
+			}
+			done += len;
+		}
+	}
+	else {
+		/* cover a shortfall if the resampler changed its request size */
+		while (ym2413_outcount < length) {
+			int need = length - ym2413_outcount;
+
+			len = need > YM2413_BUF_MAX ? YM2413_BUF_MAX : need;
+			if (ym2413_sync_block(ym2413_outbuf + ym2413_outcount,
+					      len) < 0) {
+				memset(buffer, 0, length * sizeof(*buffer));
+				ym2413_async_forget();
+				return;
+			}
+			ym2413_outcount += len;
+		}
+
+		memcpy(buffer, ym2413_outbuf, length * sizeof(*buffer));
+		if (ym2413_outcount > length) {
+			memmove(ym2413_outbuf, ym2413_outbuf + length,
+				(ym2413_outcount - length) *
+					sizeof(*ym2413_outbuf));
+		}
+		ym2413_outcount -= length;
+	}
+
+	/* submit the next block and return; it renders during the next frame */
+	len = length > YM2413_BUF_MAX ? YM2413_BUF_MAX : length;
+	if (ym2413_outcount <= YM2413_OUTQ_SIZE - len)
+		ym2413_start_job(len);
+}
+
+
+size_t YM2413PicoStateSave_940(void *buf, size_t size)
+{
+	size_t len;
+
+	if (crashed_940) {
+		ym2413_async_forget();
+		return 0;
+	}
+
+	/* make the chip state current without discarding rendered samples */
+	ym2413_flush_writes();
+	if (crashed_940)
+		return 0;
+
+	add_job_940(JOB940_YM2413PACKSTATE);
+	if (CHECK_BUSY(JOB940_YM2413PACKSTATE))
+		wait_busy_940(JOB940_YM2413PACKSTATE);
+
+	len = shared_ctl->ym2413_state_len;
+	if (crashed_940 || len > size || len > sizeof(shared_ctl->ym2413_state))
+		return 0;
+
+	memcpy(buf, shared_ctl->ym2413_state, len);
+	return len;
+}
+
+
+void YM2413PicoStateLoad_940(const void *buf, size_t size)
+{
+	if (size == 0)
+		return;
+
+	if (crashed_940) {
+		ym2413_async_forget();
+		return;
+	}
+
+	/* the loaded state replaces all queued output and writes */
+	ym2413_async_clear();
+	if (crashed_940)
+		return;
+
+	if (size > sizeof(shared_ctl->ym2413_state))
+		size = sizeof(shared_ctl->ym2413_state);
+
+	memcpy(shared_ctl->ym2413_state, buf, size);
+	shared_ctl->ym2413_state_len = size;
+	add_job_940(JOB940_YM2413UNPACKSTATE);
+	if (CHECK_BUSY(JOB940_YM2413UNPACKSTATE))
+		wait_busy_940(JOB940_YM2413UNPACKSTATE);
+}
 
 
 
