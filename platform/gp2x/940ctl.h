@@ -1,3 +1,7 @@
+#ifndef _940CTL_H_
+#define _940CTL_H_
+#include <stddef.h>
+
 void sharedmem940_init(void);
 void sharedmem940_finish(void);
 
@@ -11,3 +15,6 @@ int  YM2612PicoTick_940(int n);
 void YM2612PicoStateLoad_940(void);
 void YM2612PicoStateSave2_940(int tat, int tbt);
 int  YM2612PicoStateLoad2_940(int *tat, int *tbt);
+void ym2612_pack_state_940(void);
+
+#endif /* _940CTL_H_ */
