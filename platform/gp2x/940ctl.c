@@ -56,20 +56,11 @@ static void reset_ym2612_940_cache(void)
 }
 
 /* YM2413 write queue, double-buffered like the YM2612 */
-static unsigned ym2413_writebuff_ptr;
-static int ym2413_last_reg = -1;
 static int ym2413_clock, ym2413_rate;
 
-/* A single 940 job renders the next block while the 920 consumes the
- * previous result. */
-#define YM2413_OUTQ_SIZE (YM2413_BUF_MAX * 3)
-static int ym2413_job_pending;
-static int ym2413_job_len;
-static int ym2413_outbuf[YM2413_OUTQ_SIZE];
-static int ym2413_outcount;
-static void ym2413_flush_writes(void);
+static FILE *loaded_mp3 = 0;
+
 static void ym2413_async_forget(void);
-static void ym2612_flush_writes(void);
 
 /* Reject a missing, short or out-of-range buffer descriptor */
 static int check_buf_desc(const _940_buf_desc_t *d, int min_len)
@@ -133,7 +124,168 @@ static void *shared_data_ptr(int off)
 	return (unsigned char *)shared_data + off;
 }
 
-static FILE *loaded_mp3 = 0;
+/* this must be called after mmu hack, the allocated regions must not get cached */
+void sharedmem940_init(void)
+{
+	if (shared_mem != NULL) return;
+
+	shared_mem = (unsigned char *) mmap(0, 0x210000, PROT_READ|PROT_WRITE, MAP_SHARED, memdev, 0x2000000);
+	if (shared_mem == MAP_FAILED)
+	{
+		printf("mmap(shared_data) failed with %i\n", errno);
+		exit(1);
+	}
+	shared_data = (_940_data_t *) (shared_mem+0x100000);
+	/* this area must not get buffered on either side */
+	shared_ctl =  (_940_ctl_t *)  (shared_mem+0x200000);
+	mp3_mem = (unsigned char *) mmap(0, MP3_SIZE_MAX, PROT_READ|PROT_WRITE, MAP_SHARED, memdev, 0x2400000);
+	if (mp3_mem == MAP_FAILED)
+	{
+		printf("mmap(mp3_mem) failed with %i\n", errno);
+		exit(1);
+	}
+	crashed_940 = 1;
+}
+
+void sharedmem940_finish(void)
+{
+	ym2413_async_forget();
+	if (shared_mem)
+		munmap(shared_mem, 0x210000);
+	if (mp3_mem)
+		munmap(mp3_mem, MP3_SIZE_MAX);
+	shared_mem = mp3_mem = NULL;
+	shared_data = NULL;
+	shared_ctl = NULL;
+	/* next session must re-detect a stale image; a rebuild may fix it */
+	core940_owner = CORE940_NONE;
+	reset_ym2612_940_cache();
+	ym2413_clock = ym2413_rate = -1;
+}
+
+#define CHECK_BUSY(job) \
+	(memregs[0x3b46>>1] & (1<<(job-1)))
+
+
+/* Load/start the 940 and clear the shared structs; shared by both init paths. */
+static void start_940(void)
+{
+	reset940(1, 2);
+	pause940(1);
+
+	memregs[0x3B40>>1] = 0;      // disable DUALCPU interrupts for 920
+	memregs[0x3B42>>1] = 1;      // enable  DUALCPU interrupts for 940
+
+	memregl[0x4504>>2] = 0;        // make sure no FIQs will be generated
+	memregl[0x4508>>2] = ~(1<<26); // unmask DUALCPU ints in the undocumented 940's interrupt controller
+
+
+	if (crashed_940)
+	{
+		unsigned char ucData[1024];
+		int nRead, nLen = 0;
+		char binpath[512];
+		FILE *fp;
+
+		emu_make_path(binpath, CODE940_FILE, sizeof(binpath));
+		fp = fopen(binpath, "rb");
+		if(!fp)
+		{
+			memset(g_screen_ptr, 0, 320*240*2);
+			text_out16(10, 100, "failed to open required file:");
+			text_out16(10, 110, CODE940_FILE);
+			gp2x_video_flip2();
+			in_menu_wait(PBTN_MOK|PBTN_MBACK, NULL, 100);
+			printf("failed to open %s\n", binpath);
+			exit(1);
+		}
+
+		while (nLen < CODE940_MAX_SIZE)
+		{
+			int want = CODE940_MAX_SIZE - nLen;
+
+			if (want > (int)sizeof(ucData))
+				want = sizeof(ucData);
+			nRead = fread(ucData, 1, want, fp);
+			if (nRead <= 0)
+				break;
+			memcpy(shared_mem + nLen, ucData, nRead);
+			nLen += nRead;
+		}
+		if (nLen == CODE940_MAX_SIZE && fgetc(fp) != EOF) {
+			fclose(fp);
+			memset(g_screen_ptr, 0, 320*240*2);
+			text_out16(10, 100, CODE940_FILE " is too large");
+			gp2x_video_flip2();
+			in_menu_wait(PBTN_MOK|PBTN_MBACK, NULL, 100);
+			printf("%s is too large\n", binpath);
+			exit(1);
+		}
+		fclose(fp);
+		crashed_940 = 0;
+
+		/* The 940 has no C runtime to clear .bss; zero only after a reload
+	 * (clearing while running would wipe live state). */
+		if (nLen < CODE940_MAX_SIZE)
+			memset(shared_mem + nLen, 0, CODE940_MAX_SIZE - nLen);
+	}
+
+	memset(shared_data, 0, sizeof(*shared_data));
+	memset(shared_ctl,  0, sizeof(*shared_ctl));
+
+	memregs[0x3B46>>1] = 0xffff; // clear pending DUALCPU interrupts for 940
+	memregl[0x4500>>2] = 0xffffffff; // clear pending IRQs in SRCPND
+	memregl[0x4510>>2] = 0xffffffff; // clear pending IRQs in INTPND
+
+	/* start the 940 */
+	reset940(0, 2);
+	pause940(0);
+}
+
+static void wait_busy_940(int job)
+{
+	int i;
+
+	/* a dead 940 will never complete the job; callers return silence */
+	if (crashed_940) {
+		printf("940 crashed, not waiting for job %i\n", job);
+		return;
+	}
+
+	job--;
+	for (i = 0; (memregs[0x3b46>>1] & (1<<job)) && i < 0x10000; i++)
+		spend_cycles(8*1024); // tested to be best for mp3 dec
+	if (i < 0x10000) return;
+
+	/* 940 crashed */
+	printf("940 crashed (cnt: %i, ve: ", shared_ctl->loopc);
+	for (i = 0; i < 8; i++)
+		printf("%i ", shared_ctl->vstarts[i]);
+	printf(")\n");
+	printf("irq pending flags: DUALCPU %04x, SRCPND %08x (see 26), INTPND %08x\n",
+		memregs[0x3b46>>1], memregl[0x4500>>2], memregl[0x4510>>2]);
+	printf("last lr: %08x, lastjob: %i\n", shared_ctl->last_lr, shared_ctl->lastjob);
+
+	menu_update_msg("940 crashed, too much overclock?");
+	engineState = PGS_Menu;
+	crashed_940 = 1;
+}
+
+
+static void add_job_940(int job)
+{
+	if (job <= 0 || job > 16) {
+		printf("add_job_940: bad job: %i\n", job);
+		return;
+	}
+
+	// generate interrupt for this job
+	job--;
+	memregs[(0x3B20+job*2)>>1] = 1;
+
+//	printf("added %i, pending %04x\n", job+1, memregs[0x3b46>>1]);
+}
+
 
 /***********************************************************/
 
@@ -151,6 +303,38 @@ static UINT8 ST_address;	/* address register     */
 static INT32 addr_A1;		/* address line A1      */
 
 static int   writebuff_ptr = 0;
+
+static void internal_reset(void)
+{
+	writebuff_ptr = 0;
+	ST_address = addr_A1 = -1;
+}
+
+/* Apply queued YM2612 writes without generating samples (muted or fast-forwarded) */
+static void ym2612_flush_writes(void)
+{
+	if (crashed_940)
+		return;
+
+	/* retire any in-flight render before touching its write buffer */
+	if (CHECK_BUSY(JOB940_YM2612UPDATEONE))
+		wait_busy_940(JOB940_YM2612UPDATEONE);
+	if (crashed_940)
+		return;
+
+	/* terminate and hand over the buffer the 920 has been filling */
+	if (shared_ctl->writebuffsel == 1) {
+		shared_ctl->writebuff0[writebuff_ptr & 0xffff] = YM_WBUFF_END;
+	} else {
+		shared_ctl->writebuff1[writebuff_ptr & 0xffff] = YM_WBUFF_END;
+	}
+	writebuff_ptr = 0;
+
+	shared_ctl->writebuffsel ^= 1;
+	shared_ctl->length = 0;
+	shared_ctl->stereo = (PicoIn.opt & POPT_EN_STEREO) ? 1 : 0;
+	add_job_940(JOB940_YM2612UPDATEONE);
+}
 
 
 /* YM2612 write */
@@ -223,66 +407,242 @@ int YM2612Write_940(unsigned int a, unsigned int v, int scanline)
 	return 0; // cause the engine to do updates once per frame only
 }
 
-#define CHECK_BUSY(job) \
-	(memregs[0x3b46>>1] & (1<<(job-1)))
 
-static void wait_busy_940(int job)
+void YM2612PicoStateLoad_940(void)
 {
-	int i;
+	UINT8 *REGS = YM2612GetRegs();
 
-	/* a dead 940 will never complete the job; callers return silence */
-	if (crashed_940) {
-		printf("940 crashed, not waiting for job %i\n", job);
-		return;
-	}
-
-	job--;
-	for (i = 0; (memregs[0x3b46>>1] & (1<<job)) && i < 0x10000; i++)
-		spend_cycles(8*1024); // tested to be best for mp3 dec
-	if (i < 0x10000) return;
-
-	/* 940 crashed */
-	printf("940 crashed (cnt: %i, ve: ", shared_ctl->loopc);
-	for (i = 0; i < 8; i++)
-		printf("%i ", shared_ctl->vstarts[i]);
-	printf(")\n");
-	printf("irq pending flags: DUALCPU %04x, SRCPND %08x (see 26), INTPND %08x\n",
-		memregs[0x3b46>>1], memregl[0x4500>>2], memregl[0x4510>>2]);
-	printf("last lr: %08x, lastjob: %i\n", shared_ctl->last_lr, shared_ctl->lastjob);
-
-	menu_update_msg("940 crashed, too much overclock?");
-	engineState = PGS_Menu;
-	crashed_940 = 1;
-}
-
-
-static void add_job_940(int job)
-{
-	if (job <= 0 || job > 16) {
-		printf("add_job_940: bad job: %i\n", job);
-		return;
-	}
-
-	// generate interrupt for this job
-	job--;
-	memregs[(0x3B20+job*2)>>1] = 1;
-
-//	printf("added %i, pending %04x\n", job+1, memregs[0x3b46>>1]);
-}
-
-/* Apply queued YM2612 writes without generating samples (muted or fast-forwarded) */
-static void ym2612_flush_writes(void)
-{
 	if (crashed_940)
 		return;
 
-	/* retire any in-flight render before touching its write buffer */
-	if (CHECK_BUSY(JOB940_YM2612UPDATEONE))
+	/* make sure JOB940_PICOSTATELOAD gets done before next JOB940_YM2612UPDATEONE */
+	add_job_940(JOB940_PICOSTATELOAD);
+	if (CHECK_BUSY(JOB940_PICOSTATELOAD)) wait_busy_940(JOB940_PICOSTATELOAD);
+
+	writebuff_ptr = 0;
+	addr_A1 = *(INT32 *) (REGS + 0x200);
+}
+
+void YM2612PicoStateSave2_940(int tat, int tbt)
+{
+	UINT8 *ym_remote_regs, *ym_local_regs;
+
+	if (crashed_940)
+		return;
+
+	add_job_940(JOB940_PICOSTATESAVE2);
+	if (CHECK_BUSY(JOB940_PICOSTATESAVE2)) wait_busy_940(JOB940_PICOSTATESAVE2);
+
+	/* the wait may have detected a crash; don't copy the stale buffer */
+	if (crashed_940)
+		return;
+
+	ym_remote_regs = (UINT8 *) shared_ctl->writebuff0;
+	ym_local_regs  = YM2612GetRegs();
+	if (*(UINT32 *)(ym_remote_regs + 0x100) != 0x41534d59) {
+		printf("code940 didn't return valid save data\n");
+		return;
+	}
+
+	/* copy addin data only */
+	memcpy(ym_local_regs,         ym_remote_regs,         0x20);
+	memcpy(ym_local_regs + 0x100, ym_remote_regs + 0x100, 0x30);
+	memcpy(ym_local_regs + 0x0b8, ym_remote_regs + 0x0b8, 0x48);
+	memcpy(ym_local_regs + 0x1b8, ym_remote_regs + 0x1b8, 0x48);
+	*(INT32 *)(ym_local_regs + 0x108) = tat;
+	*(INT32 *)(ym_local_regs + 0x10c) = tbt;
+}
+
+/* Pack the authoritative 940 chip into the shared register file; the 920
+ * supplies the timer ticks. */
+void ym2612_pack_state_940(void)
+{
+	int tat, tbt, busy;
+
+	ym2612_pack_timer_vals(&tat, &tbt, &busy);
+	YM2612PicoStateSave2_940(tat, tbt);
+}
+
+int YM2612PicoStateLoad2_940(int *tat, int *tbt)
+{
+	UINT8 *ym_remote_regs, *ym_local_regs;
+
+	if (crashed_940)
+		return -1;
+
+	ym_local_regs  = YM2612GetRegs();
+	ym_remote_regs = (UINT8 *) shared_ctl->writebuff0;
+
+	if (*(UINT32 *)(ym_local_regs + 0x100) != 0x41534d59)
+		return -1;
+
+	*tat = *(INT32 *)(ym_local_regs + 0x108);
+	*tbt = *(INT32 *)(ym_local_regs + 0x10c);
+
+	if (CHECK_BUSY(JOB940_YM2612UPDATEONE)) wait_busy_940(JOB940_YM2612UPDATEONE);
+	if (crashed_940)
+		return -1;
+
+	/* flush writes */
+	if (shared_ctl->writebuffsel == 1) {
+		shared_ctl->writebuff0[writebuff_ptr & 0xffff] = YM_WBUFF_END;
+	} else {
+		shared_ctl->writebuff1[writebuff_ptr & 0xffff] = YM_WBUFF_END;
+	}
+	shared_ctl->writebuffsel ^= 1;
+	writebuff_ptr = 0;
+	add_job_940(JOB940_PICOSTATELOAD2_PREP);
+	if (CHECK_BUSY(JOB940_PICOSTATELOAD2_PREP)) wait_busy_940(JOB940_PICOSTATELOAD2_PREP);
+
+	memcpy(ym_remote_regs, ym_local_regs, 0x200);
+
+	add_job_940(JOB940_PICOSTATELOAD2);
+	if (CHECK_BUSY(JOB940_PICOSTATELOAD2)) wait_busy_940(JOB940_PICOSTATELOAD2);
+
+	return 0;
+}
+
+
+/* Pack state from the authoritative chip; nonzero means restore it. */
+static int ym2612_pack_handover_state(u8 *state)
+{
+	int from_940;
+
+	if (Pico.m.frame_count == 0 || core940_owner == CORE940_YM2413)
+		return 0;
+
+	from_940 = core940_owner == CORE940_YM2612;
+	if (from_940) {
+		/* a dead 940 has no trustworthy state to hand over */
+		if (crashed_940)
+			return 0;
+		ym2612_pack_state_940();
+		if (crashed_940)
+			return 0;
+	}
+	else {
+		/* boot or after a release: the local chip is authoritative */
+		ym2612_pack_state_old();
+	}
+
+	memcpy(state, ym2612.REGS, sizeof(ym2612.REGS));
+	memcpy(state + sizeof(ym2612.REGS),
+	       &ym2612.addr_A1, sizeof(ym2612.addr_A1));
+	return 1;
+}
+
+
+int YM2612Init_940(int baseclock, int rate, int flags)
+{
+	u8 state[sizeof(ym2612.REGS) + sizeof(ym2612.addr_A1)];
+	int take_over;
+
+	if (shared_data == NULL)
+		return -1;
+
+	// HACK
+	if (core940_owner == CORE940_YM2612 && Pico.m.frame_count > 0
+	    && !crashed_940 && baseclock == ym2612_940_clock
+	    && rate == ym2612_940_rate && flags == ym2612_940_flags)
+		return 0;
+
+	take_over = ym2612_pack_handover_state(state);
+
+	printf("YM2612Init_940()\n");
+	printf("Mem usage: shared_data: %u, shared_ctl: %u\n",
+		(unsigned)sizeof(*shared_data), (unsigned)sizeof(*shared_ctl));
+
+	start_940();
+	core940_owner = CORE940_YM2612;
+
+	// YM2612ResetChip_940(); // will be done on JOB940_YM2612INIT
+
+	/* now cause 940 to init it's ym2612 stuff */
+	shared_ctl->baseclock = baseclock;
+	shared_ctl->rate = rate;
+	shared_ctl->ym2612_flags = flags;
+	add_job_940(JOB940_INITALL);
+	/* wait for init and layout publication */
+	if (CHECK_BUSY(JOB940_INITALL)) wait_busy_940(JOB940_INITALL);
+
+	/* Seed the local write shadow even if the image is rejected, so that
+	 * turning the option off leaves a usable local chip. */
+	YM2612Init_(baseclock, rate, flags);
+	internal_reset();
+	loaded_mp3 = NULL;
+
+	if (check_shared_layout_940() < 0) {
+		reset_ym2612_940_cache();
+		report_940_failure();
+		return -1;
+	}
+
+	if (take_over) {
+		memcpy(ym2612.REGS, state, sizeof(ym2612.REGS));
+		memcpy(&ym2612.addr_A1, state + sizeof(ym2612.REGS),
+		       sizeof(ym2612.addr_A1));
+		ym2612_unpack_state_old();
+	}
+
+	ym2612_940_clock = baseclock;
+	ym2612_940_rate = rate;
+	ym2612_940_flags = flags;
+	return 0;
+}
+
+
+void YM2612ResetChip_940(void)
+{
+	//printf("YM2612ResetChip_940()\n");
+	if (shared_data == NULL) {
+		printf("YM2612ResetChip_940: reset before init?\n");
+		return;
+	}
+
+	/* Retire the in-flight frame before discarding writes, so an update job
+	 * cannot replay old registers. */
+	if (!crashed_940 && CHECK_BUSY(JOB940_YM2612UPDATEONE))
 		wait_busy_940(JOB940_YM2612UPDATEONE);
-	if (crashed_940)
-		return;
 
-	/* terminate and hand over the buffer the 920 has been filling */
+	shared_ctl->writebuff0[0] = YM_WBUFF_END;
+	shared_ctl->writebuff1[0] = YM_WBUFF_END;
+	shared_ctl->writebuffsel = 0;
+
+	YM2612ResetChip_();
+	internal_reset();
+
+	if (!crashed_940)
+		add_job_940(JOB940_YM2612RESETCHIP);
+}
+
+
+int YM2612UpdateOne_940(int *buffer, int length, int stereo, int is_buf_empty)
+{
+	int *ym_buf = shared_data_ptr(shared_ctl->sh_ym_buffer.offset);
+	int ym_active_chs;
+
+	//printf("YM2612UpdateOne_940()\n");
+
+	/* dead 940: silence instead of waiting for a job */
+	if (crashed_940) {
+		memset32(buffer, 0, length << stereo);
+		return 0;
+	}
+
+	if (CHECK_BUSY(JOB940_YM2612UPDATEONE)) wait_busy_940(JOB940_YM2612UPDATEONE);
+
+	/* the 940 may have died while we waited; don't mix its stale buffer */
+	if (crashed_940) {
+		memset32(buffer, 0, length << stereo);
+		return 0;
+	}
+
+	ym_active_chs = shared_ctl->ym_active_chs;
+
+	// mix in ym buffer. is_buf_empty means nobody mixed there anything yet and it may contain trash
+	if (is_buf_empty && ym_active_chs) memcpy(buffer, ym_buf, length << (stereo + 2));
+	else memset32(buffer, 0, length<<stereo);
+
 	if (shared_ctl->writebuffsel == 1) {
 		shared_ctl->writebuff0[writebuff_ptr & 0xffff] = YM_WBUFF_END;
 	} else {
@@ -290,12 +650,33 @@ static void ym2612_flush_writes(void)
 	}
 	writebuff_ptr = 0;
 
+	/* predict sample counter for next frame */
+	if (Pico.snd.len_e_add) {
+		length = Pico.snd.len;
+		if (Pico.snd.len_e_cnt + Pico.snd.len_e_add >= 0x10000) length++;
+	}
+
+	/* give 940 ym job */
 	shared_ctl->writebuffsel ^= 1;
-	shared_ctl->length = 0;
-	shared_ctl->stereo = (PicoIn.opt & POPT_EN_STEREO) ? 1 : 0;
+	shared_ctl->length = length;
+	shared_ctl->stereo = stereo;
+
 	add_job_940(JOB940_YM2612UPDATEONE);
+
+	return ym_active_chs;
 }
 
+/***********************************************************/
+
+/* A single 940 job renders the next block while the 920 consumes the
+ * previous result. */
+#define YM2413_OUTQ_SIZE (YM2413_BUF_MAX * 3)
+static unsigned ym2413_writebuff_ptr;
+static int ym2413_last_reg = -1;
+static int ym2413_job_pending;
+static int ym2413_job_len;
+static int ym2413_outbuf[YM2413_OUTQ_SIZE];
+static int ym2413_outcount;
 
 /* Flip to the buffer the 920 has been filling when the job is submitted */
 static UINT16 *ym2413_write_buffer(void)
@@ -411,312 +792,43 @@ static int ym2413_sync_block(int *dst, int len)
 }
 
 
-void YM2612PicoStateLoad_940(void)
+/* Flush queued writes without generating samples; rendered output is kept */
+static void ym2413_flush_writes(void)
 {
-	UINT8 *REGS = YM2612GetRegs();
+	if (crashed_940) {
+		ym2413_async_forget();
+		return;
+	}
+
+	/* retire the render job before touching the shared write queue */
+	if (ym2413_collect_job() < 0)
+		return;
+
+	if (ym2413_writebuff_ptr > 0) {
+		if (ym2413_start_job(0) < 0)
+			return;
+		if (ym2413_finish_job(NULL) < 0)
+			return;
+	}
+}
+
+static void ym2413_queue_write(unsigned data)
+{
+	UINT16 *wbuff;
 
 	if (crashed_940)
 		return;
 
-	/* make sure JOB940_PICOSTATELOAD gets done before next JOB940_YM2612UPDATEONE */
-	add_job_940(JOB940_PICOSTATELOAD);
-	if (CHECK_BUSY(JOB940_PICOSTATELOAD)) wait_busy_940(JOB940_PICOSTATELOAD);
-
-	writebuff_ptr = 0;
-	addr_A1 = *(INT32 *) (REGS + 0x200);
-}
-
-void YM2612PicoStateSave2_940(int tat, int tbt)
-{
-	UINT8 *ym_remote_regs, *ym_local_regs;
-
-	if (crashed_940)
-		return;
-
-	add_job_940(JOB940_PICOSTATESAVE2);
-	if (CHECK_BUSY(JOB940_PICOSTATESAVE2)) wait_busy_940(JOB940_PICOSTATESAVE2);
-
-	/* the wait may have detected a crash; don't copy the stale buffer */
-	if (crashed_940)
-		return;
-
-	ym_remote_regs = (UINT8 *) shared_ctl->writebuff0;
-	ym_local_regs  = YM2612GetRegs();
-	if (*(UINT32 *)(ym_remote_regs + 0x100) != 0x41534d59) {
-		printf("code940 didn't return valid save data\n");
-		return;
+	if (ym2413_writebuff_ptr >= YM2413_WBUFF_MAX - 1) {
+		ym2413_flush_writes();
+		if (crashed_940 ||
+		    ym2413_writebuff_ptr >= YM2413_WBUFF_MAX - 1)
+			return;
 	}
 
-	/* copy addin data only */
-	memcpy(ym_local_regs,         ym_remote_regs,         0x20);
-	memcpy(ym_local_regs + 0x100, ym_remote_regs + 0x100, 0x30);
-	memcpy(ym_local_regs + 0x0b8, ym_remote_regs + 0x0b8, 0x48);
-	memcpy(ym_local_regs + 0x1b8, ym_remote_regs + 0x1b8, 0x48);
-	*(INT32 *)(ym_local_regs + 0x108) = tat;
-	*(INT32 *)(ym_local_regs + 0x10c) = tbt;
+	wbuff = ym2413_write_buffer();
+	wbuff[ym2413_writebuff_ptr++] = data;
 }
-
-/* Pack the authoritative 940 chip into the shared register file; the 920
- * supplies the timer ticks. */
-void ym2612_pack_state_940(void)
-{
-	int tat, tbt, busy;
-
-	ym2612_pack_timer_vals(&tat, &tbt, &busy);
-	YM2612PicoStateSave2_940(tat, tbt);
-}
-
-int YM2612PicoStateLoad2_940(int *tat, int *tbt)
-{
-	UINT8 *ym_remote_regs, *ym_local_regs;
-
-	if (crashed_940)
-		return -1;
-
-	ym_local_regs  = YM2612GetRegs();
-	ym_remote_regs = (UINT8 *) shared_ctl->writebuff0;
-
-	if (*(UINT32 *)(ym_local_regs + 0x100) != 0x41534d59)
-		return -1;
-
-	*tat = *(INT32 *)(ym_local_regs + 0x108);
-	*tbt = *(INT32 *)(ym_local_regs + 0x10c);
-
-	if (CHECK_BUSY(JOB940_YM2612UPDATEONE)) wait_busy_940(JOB940_YM2612UPDATEONE);
-	if (crashed_940)
-		return -1;
-
-	/* flush writes */
-	if (shared_ctl->writebuffsel == 1) {
-		shared_ctl->writebuff0[writebuff_ptr & 0xffff] = YM_WBUFF_END;
-	} else {
-		shared_ctl->writebuff1[writebuff_ptr & 0xffff] = YM_WBUFF_END;
-	}
-	shared_ctl->writebuffsel ^= 1;
-	writebuff_ptr = 0;
-	add_job_940(JOB940_PICOSTATELOAD2_PREP);
-	if (CHECK_BUSY(JOB940_PICOSTATELOAD2_PREP)) wait_busy_940(JOB940_PICOSTATELOAD2_PREP);
-
-	memcpy(ym_remote_regs, ym_local_regs, 0x200);
-
-	add_job_940(JOB940_PICOSTATELOAD2);
-	if (CHECK_BUSY(JOB940_PICOSTATELOAD2)) wait_busy_940(JOB940_PICOSTATELOAD2);
-
-	return 0;
-}
-
-
-static void internal_reset(void)
-{
-	writebuff_ptr = 0;
-	ST_address = addr_A1 = -1;
-}
-
-
-/* this must be called after mmu hack, the allocated regions must not get cached */
-void sharedmem940_init(void)
-{
-	if (shared_mem != NULL) return;
-
-	shared_mem = (unsigned char *) mmap(0, 0x210000, PROT_READ|PROT_WRITE, MAP_SHARED, memdev, 0x2000000);
-	if (shared_mem == MAP_FAILED)
-	{
-		printf("mmap(shared_data) failed with %i\n", errno);
-		exit(1);
-	}
-	shared_data = (_940_data_t *) (shared_mem+0x100000);
-	/* this area must not get buffered on either side */
-	shared_ctl =  (_940_ctl_t *)  (shared_mem+0x200000);
-	mp3_mem = (unsigned char *) mmap(0, MP3_SIZE_MAX, PROT_READ|PROT_WRITE, MAP_SHARED, memdev, 0x2400000);
-	if (mp3_mem == MAP_FAILED)
-	{
-		printf("mmap(mp3_mem) failed with %i\n", errno);
-		exit(1);
-	}
-	crashed_940 = 1;
-}
-
-
-void sharedmem940_finish(void)
-{
-	ym2413_async_forget();
-	if (shared_mem)
-		munmap(shared_mem, 0x210000);
-	if (mp3_mem)
-		munmap(mp3_mem, MP3_SIZE_MAX);
-	shared_mem = mp3_mem = NULL;
-	shared_data = NULL;
-	shared_ctl = NULL;
-	/* next session must re-detect a stale image; a rebuild may fix it */
-	core940_owner = CORE940_NONE;
-	reset_ym2612_940_cache();
-	ym2413_clock = ym2413_rate = -1;
-}
-
-
-/* Load/start the 940 and clear the shared structs; shared by both init paths. */
-static void start_940(void)
-{
-	reset940(1, 2);
-	pause940(1);
-
-	memregs[0x3B40>>1] = 0;      // disable DUALCPU interrupts for 920
-	memregs[0x3B42>>1] = 1;      // enable  DUALCPU interrupts for 940
-
-	memregl[0x4504>>2] = 0;        // make sure no FIQs will be generated
-	memregl[0x4508>>2] = ~(1<<26); // unmask DUALCPU ints in the undocumented 940's interrupt controller
-
-
-	if (crashed_940)
-	{
-		unsigned char ucData[1024];
-		int nRead, nLen = 0;
-		char binpath[512];
-		FILE *fp;
-
-		emu_make_path(binpath, CODE940_FILE, sizeof(binpath));
-		fp = fopen(binpath, "rb");
-		if(!fp)
-		{
-			memset(g_screen_ptr, 0, 320*240*2);
-			text_out16(10, 100, "failed to open required file:");
-			text_out16(10, 110, CODE940_FILE);
-			gp2x_video_flip2();
-			in_menu_wait(PBTN_MOK|PBTN_MBACK, NULL, 100);
-			printf("failed to open %s\n", binpath);
-			exit(1);
-		}
-
-		while (nLen < CODE940_MAX_SIZE)
-		{
-			int want = CODE940_MAX_SIZE - nLen;
-
-			if (want > (int)sizeof(ucData))
-				want = sizeof(ucData);
-			nRead = fread(ucData, 1, want, fp);
-			if (nRead <= 0)
-				break;
-			memcpy(shared_mem + nLen, ucData, nRead);
-			nLen += nRead;
-		}
-		if (nLen == CODE940_MAX_SIZE && fgetc(fp) != EOF) {
-			fclose(fp);
-			memset(g_screen_ptr, 0, 320*240*2);
-			text_out16(10, 100, CODE940_FILE " is too large");
-			gp2x_video_flip2();
-			in_menu_wait(PBTN_MOK|PBTN_MBACK, NULL, 100);
-			printf("%s is too large\n", binpath);
-			exit(1);
-		}
-		fclose(fp);
-		crashed_940 = 0;
-
-		/* The 940 has no C runtime to clear .bss; zero only after a reload
-	 * (clearing while running would wipe live state). */
-		if (nLen < CODE940_MAX_SIZE)
-			memset(shared_mem + nLen, 0, CODE940_MAX_SIZE - nLen);
-	}
-
-	memset(shared_data, 0, sizeof(*shared_data));
-	memset(shared_ctl,  0, sizeof(*shared_ctl));
-
-	memregs[0x3B46>>1] = 0xffff; // clear pending DUALCPU interrupts for 940
-	memregl[0x4500>>2] = 0xffffffff; // clear pending IRQs in SRCPND
-	memregl[0x4510>>2] = 0xffffffff; // clear pending IRQs in INTPND
-
-	/* start the 940 */
-	reset940(0, 2);
-	pause940(0);
-}
-
-
-/* Pack state from the authoritative chip; nonzero means restore it. */
-static int ym2612_pack_handover_state(u8 *state)
-{
-	int from_940;
-
-	if (Pico.m.frame_count == 0 || core940_owner == CORE940_YM2413)
-		return 0;
-
-	from_940 = core940_owner == CORE940_YM2612;
-	if (from_940) {
-		/* a dead 940 has no trustworthy state to hand over */
-		if (crashed_940)
-			return 0;
-		ym2612_pack_state_940();
-		if (crashed_940)
-			return 0;
-	}
-	else {
-		/* boot or after a release: the local chip is authoritative */
-		ym2612_pack_state_old();
-	}
-
-	memcpy(state, ym2612.REGS, sizeof(ym2612.REGS));
-	memcpy(state + sizeof(ym2612.REGS),
-	       &ym2612.addr_A1, sizeof(ym2612.addr_A1));
-	return 1;
-}
-
-
-int YM2612Init_940(int baseclock, int rate, int flags)
-{
-	u8 state[sizeof(ym2612.REGS) + sizeof(ym2612.addr_A1)];
-	int take_over;
-
-	if (shared_data == NULL)
-		return -1;
-
-	// HACK
-	if (core940_owner == CORE940_YM2612 && Pico.m.frame_count > 0
-	    && !crashed_940 && baseclock == ym2612_940_clock
-	    && rate == ym2612_940_rate && flags == ym2612_940_flags)
-		return 0;
-
-	take_over = ym2612_pack_handover_state(state);
-
-	printf("YM2612Init_940()\n");
-	printf("Mem usage: shared_data: %u, shared_ctl: %u\n",
-		(unsigned)sizeof(*shared_data), (unsigned)sizeof(*shared_ctl));
-
-	start_940();
-	core940_owner = CORE940_YM2612;
-
-	// YM2612ResetChip_940(); // will be done on JOB940_YM2612INIT
-
-	/* now cause 940 to init it's ym2612 stuff */
-	shared_ctl->baseclock = baseclock;
-	shared_ctl->rate = rate;
-	shared_ctl->ym2612_flags = flags;
-	add_job_940(JOB940_INITALL);
-	/* wait for init and layout publication */
-	if (CHECK_BUSY(JOB940_INITALL)) wait_busy_940(JOB940_INITALL);
-
-	/* Seed the local write shadow even if the image is rejected, so that
-	 * turning the option off leaves a usable local chip. */
-	YM2612Init_(baseclock, rate, flags);
-	internal_reset();
-	loaded_mp3 = NULL;
-
-	if (check_shared_layout_940() < 0) {
-		reset_ym2612_940_cache();
-		report_940_failure();
-		return -1;
-	}
-
-	if (take_over) {
-		memcpy(ym2612.REGS, state, sizeof(ym2612.REGS));
-		memcpy(&ym2612.addr_A1, state + sizeof(ym2612.REGS),
-		       sizeof(ym2612.addr_A1));
-		ym2612_unpack_state_old();
-	}
-
-	ym2612_940_clock = baseclock;
-	ym2612_940_rate = rate;
-	ym2612_940_flags = flags;
-	return 0;
-}
-
 
 /* SMS/GG FM runs on the 940 at native rate; writes are queued until the
  * next job. */
@@ -786,44 +898,6 @@ int YM2413Init_940(int clock, int rate, int preserve_state)
 	return 0;
 }
 
-
-/* Flush queued writes without generating samples; rendered output is kept */
-static void ym2413_flush_writes(void)
-{
-	if (crashed_940) {
-		ym2413_async_forget();
-		return;
-	}
-
-	/* retire the render job before touching the shared write queue */
-	if (ym2413_collect_job() < 0)
-		return;
-
-	if (ym2413_writebuff_ptr > 0) {
-		if (ym2413_start_job(0) < 0)
-			return;
-		if (ym2413_finish_job(NULL) < 0)
-			return;
-	}
-}
-
-static void ym2413_queue_write(unsigned data)
-{
-	UINT16 *wbuff;
-
-	if (crashed_940)
-		return;
-
-	if (ym2413_writebuff_ptr >= YM2413_WBUFF_MAX - 1) {
-		ym2413_flush_writes();
-		if (crashed_940 ||
-		    ym2413_writebuff_ptr >= YM2413_WBUFF_MAX - 1)
-			return;
-	}
-
-	wbuff = ym2413_write_buffer();
-	wbuff[ym2413_writebuff_ptr++] = data;
-}
 
 void YM2413_regWrite_940(unsigned data)
 {
@@ -1012,82 +1086,6 @@ void ExtFmRelease_940(void)
 		else if (len > 0)
 			ym2413_unpack_state(state, len);
 	}
-}
-
-
-void YM2612ResetChip_940(void)
-{
-	//printf("YM2612ResetChip_940()\n");
-	if (shared_data == NULL) {
-		printf("YM2612ResetChip_940: reset before init?\n");
-		return;
-	}
-
-	/* Retire the in-flight frame before discarding writes, so an update job
-	 * cannot replay old registers. */
-	if (!crashed_940 && CHECK_BUSY(JOB940_YM2612UPDATEONE))
-		wait_busy_940(JOB940_YM2612UPDATEONE);
-
-	shared_ctl->writebuff0[0] = YM_WBUFF_END;
-	shared_ctl->writebuff1[0] = YM_WBUFF_END;
-	shared_ctl->writebuffsel = 0;
-
-	YM2612ResetChip_();
-	internal_reset();
-
-	if (!crashed_940)
-		add_job_940(JOB940_YM2612RESETCHIP);
-}
-
-
-int YM2612UpdateOne_940(int *buffer, int length, int stereo, int is_buf_empty)
-{
-	int *ym_buf = shared_data_ptr(shared_ctl->sh_ym_buffer.offset);
-	int ym_active_chs;
-
-	//printf("YM2612UpdateOne_940()\n");
-
-	/* dead 940: silence instead of waiting for a job */
-	if (crashed_940) {
-		memset32(buffer, 0, length << stereo);
-		return 0;
-	}
-
-	if (CHECK_BUSY(JOB940_YM2612UPDATEONE)) wait_busy_940(JOB940_YM2612UPDATEONE);
-
-	/* the 940 may have died while we waited; don't mix its stale buffer */
-	if (crashed_940) {
-		memset32(buffer, 0, length << stereo);
-		return 0;
-	}
-
-	ym_active_chs = shared_ctl->ym_active_chs;
-
-	// mix in ym buffer. is_buf_empty means nobody mixed there anything yet and it may contain trash
-	if (is_buf_empty && ym_active_chs) memcpy(buffer, ym_buf, length << (stereo + 2));
-	else memset32(buffer, 0, length<<stereo);
-
-	if (shared_ctl->writebuffsel == 1) {
-		shared_ctl->writebuff0[writebuff_ptr & 0xffff] = YM_WBUFF_END;
-	} else {
-		shared_ctl->writebuff1[writebuff_ptr & 0xffff] = YM_WBUFF_END;
-	}
-	writebuff_ptr = 0;
-
-	/* predict sample counter for next frame */
-	if (Pico.snd.len_e_add) {
-		length = Pico.snd.len;
-		if (Pico.snd.len_e_cnt + Pico.snd.len_e_add >= 0x10000) length++;
-	}
-
-	/* give 940 ym job */
-	shared_ctl->writebuffsel ^= 1;
-	shared_ctl->length = length;
-	shared_ctl->stereo = stereo;
-
-	add_job_940(JOB940_YM2612UPDATEONE);
-
-	return ym_active_chs;
 }
 
 
