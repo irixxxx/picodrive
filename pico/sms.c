@@ -387,7 +387,7 @@ static void tape_write(int cycle, int data)
       if (pt->poll_cycles >= pt->cycles_sample*17/16) pt->bitsample = ' ';
 
       if (pt->poll_cycles < OSC_NTSC/15*2) {
-        samples = ((u64)pt->poll_cycles * pt->cycles_mult + 0x80000000LL) >> 32;
+        samples = SHR_ROUND((u64)pt->poll_cycles * pt->cycles_mult, 32);
         while (samples-- > 0 && !ferror(pt->ftape))
           fwrite(&pt->bitsample, 1, sizeof(u8), pt->ftape);
       }

@@ -116,13 +116,13 @@ static resampler_t *YMFM_setup_FIR(int inrate, int outrate, int stereo)
 
   // compute filter ratio with largest multiplier for smallest error
   for (mul = minmult; mul <= maxmult; mul++) {
-    div = (inrate*mul + outrate/2) / outrate;
+    div = DIV_ROUND(inrate*mul, outrate);
     diff = outrate*div/mul - inrate;
     if (abs(diff) < abs(mindiff)) {
       mindiff = diff;
       Pico.snd.fm_fir_mul = mul;
       Pico.snd.fm_fir_div = div;
-      if (abs(mindiff)*1000 <= inrate) break; // below error limit
+      if (abs(mindiff)*2500 <= inrate) break; // below 0.04% error limit
     }
   }
   printf("FM polyphase FIR ratio=%d/%d error=%.3f%%\n",
