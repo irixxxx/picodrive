@@ -80,6 +80,9 @@
 			(((v)<<8)&0xff0000)|(u32)((v)<<24))
 #endif
 
+#define ONEQ(m)        (1LL<<(m))
+#define HALFQ(m)       (1LL<<((m)-1))
+
 #define INVQ(n,m)      (long long)((1LL<<(m))/(n)+1) // to replace div by mult with inverse
 #define MULQ(n,d,m)    ((n)*(d) >> (m))
 #define DIVQ(n,d,m)    ((n)*INVQ(d,m) >> (m))
@@ -87,5 +90,9 @@
 #define INVQ32(n)      INVQ(n,32)
 #define MULQ32(n,d)    MULQ(n,d,32)
 #define DIVQ32(n,d)    DIVQ(n,d,32)
+
+/* round to nearest: add half the divisor before truncating */
+#define DIV_ROUND(n,d) (((n) + (d)/2) / (d))        /* n >= 0, d > 0 */
+#define SHR_ROUND(n,s) (((n) + HALFQ(s)) >> (s))    /* arithmetic shift */
 
 #endif // PICO_PORT_INCLUDED

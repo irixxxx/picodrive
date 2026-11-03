@@ -152,7 +152,6 @@ static void SekRunS68k(unsigned int to)
 void PicoMCDPrepare(void)
 {
   // 12500000/(osc/7), ~1.63 for NTSC, ~1.645 for PAL
-#define DIV_ROUND(x,y) ((x)+(y)/2) / (y) // round to nearest, x/y+0.5 -> (x+y/2)/y
   unsigned int osc = (Pico.m.pal ? OSC_PAL : OSC_NTSC);
   mcd_m68k_cycle_mult = DIV_ROUND(7 * 12500000ull << 16, osc);
   mcd_s68k_cycle_mult = DIV_ROUND(1ull * osc << 16, 7 * 12500000);

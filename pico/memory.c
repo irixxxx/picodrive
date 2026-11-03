@@ -1615,7 +1615,9 @@ static u32 ym2612_read_local_68k(u32 a)
     return 0;
 }
 
-// timers are saved as tick counts, in 16.16 int format
+// timers are saved as tick counts, in 16.16 int format.
+// busy/decay go through the exactly-invertible cycles_* macros; the tick
+// encode/decode below must round the same way for the round trip to be lossless.
 void ym2612_pack_timer_vals(int *tat_, int *tbt_, int *busy_)
 {
   int tac, tat = 0, tbc, tbt = 0, busy = 0;
@@ -1625,9 +1627,11 @@ void ym2612_pack_timer_vals(int *tat_, int *tbt_, int *busy_)
   if (Pico.t.ym2612_busy > 0)
     busy = cycles_z80_to_68k(Pico.t.ym2612_busy);
   if (Pico.t.timer_a_next_oflow != TIMER_NO_OFLOW)
-    tat = MULQ((Pico.t.timer_a_step - Pico.t.timer_a_next_oflow), INVQ32(TIMER_A_TICK_ZCYCLES), 16);
+    tat = DIV_ROUND((Pico.t.timer_a_step - Pico.t.timer_a_next_oflow) * ONEQ(16),
+                    TIMER_A_TICK_ZCYCLES);
   if (Pico.t.timer_b_next_oflow != TIMER_NO_OFLOW)
-    tbt = MULQ((Pico.t.timer_b_step - Pico.t.timer_b_next_oflow), INVQ32(TIMER_B_TICK_ZCYCLES), 16);
+    tbt = DIV_ROUND((Pico.t.timer_b_step - Pico.t.timer_b_next_oflow) * ONEQ(16),
+                    TIMER_B_TICK_ZCYCLES);
   elprintf(EL_YMTIMER, "save: timer a %i/%i", tat >> 16, tac);
   elprintf(EL_YMTIMER, "save: timer b %i/%i", tbt >> 16, tbc);
 
@@ -1735,11 +1739,11 @@ void ym2612_unpack_timers(const void *buf, size_t size)
   Pico.t.timer_a_step = TIMER_A_TICK_ZCYCLES * (1024 - ym2612.OPN.ST.TA);
   Pico.t.timer_b_step = TIMER_B_TICK_ZCYCLES * (256  - ym2612.OPN.ST.TB);
   if (ym2612.OPN.ST.mode & 1)
-    Pico.t.timer_a_next_oflow = (1LL * (tac-tat) * TIMER_A_TICK_ZCYCLES)>>16;
+    Pico.t.timer_a_next_oflow = SHR_ROUND(1LL * (tac - tat) * TIMER_A_TICK_ZCYCLES, 16);
   else
     Pico.t.timer_a_next_oflow = TIMER_NO_OFLOW;
   if (ym2612.OPN.ST.mode & 2)
-    Pico.t.timer_b_next_oflow = (1LL * (tbc-tbt) * TIMER_B_TICK_ZCYCLES)>>16;
+    Pico.t.timer_b_next_oflow = SHR_ROUND(1LL * (tbc - tbt) * TIMER_B_TICK_ZCYCLES, 16);
   else
     Pico.t.timer_b_next_oflow = TIMER_NO_OFLOW;
   elprintf(EL_YMTIMER, "load: %i/%i, timer_a_next_oflow %i", tat>>16, tac>>16, Pico.t.timer_a_next_oflow >> 8);
