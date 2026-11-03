@@ -25,7 +25,23 @@ void *emu2413_calloc(size_t nmemb, size_t size)
 }
 #endif
 
+/* PicoDrive always renders the chip at its native clk/72 rate and resamples
+ * externally, so bypass emu2413's fractional-rate wrapper. This advances
+ * exactly one native sample per call and keeps the soft-float rate
+ * accumulator out of the per-sample path. */
+#define OPLL_calc emu2413_OPLL_calc
 #include "emu2413/emu2413.c"
+#undef OPLL_calc
+
+int16_t OPLL_calc(OPLL *o)
+{
+  if (o->conv)
+    return emu2413_OPLL_calc(o); /* internal SRC, if ever enabled */
+
+  update_output(o);
+  mix_output(o);
+  return o->mix_out[0];
+}
 
 #if defined(__GP2X__) && !defined(CODE940)
 #include <platform/gp2x/940ctl.h>
