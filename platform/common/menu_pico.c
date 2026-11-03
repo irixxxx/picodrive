@@ -77,6 +77,23 @@ static int menu_w, menu_h;
 #include <platform/linux/menu.c>
 #endif
 
+// nearest-neighbor scale + darken into an arbitrary rect
+static void scale_bg_rect(void *dst, int dpp, const void *src, int sw, int sh,
+			  int spp, int x, int y, int w, int h)
+{
+	uint16_t *d = (uint16_t *)dst + y * dpp + x;
+	const uint16_t *s = src;
+	int i, j;
+
+	for (j = 0; j < h; j++, d += dpp) {
+		const uint16_t *srow = s + (j * sh / h) * spp;
+		for (i = 0; i < w; i++) {
+			uint16_t p = srow[i * sw / w];
+			d[i] = (PXMASKH(p, 1) >> 1) - (PXMASKH(p, 3) >> 3);
+		}
+	}
+}
+
 static void make_bg(int no_scale, int from_screen)
 {
 	unsigned short *src = (void *)g_menubg_src_ptr;
@@ -95,6 +112,16 @@ static void make_bg(int no_scale, int from_screen)
 	memset(g_menubg_ptr, 0, g_menuscreen_w * g_menuscreen_h * 2);
 	if (src == NULL)
 		return;
+
+	// windowed SDL: fill the same aspect-correct rect the game is shown in
+	if (!no_scale && plat_has_wm()) {
+		int x, y, rw, rh;
+
+		plat_aspect_rect(&x, &y, &rw, &rh, g_menuscreen_w, g_menuscreen_h);
+		scale_bg_rect(g_menubg_ptr, g_menuscreen_w, src, w, h, pp,
+			      x, y, rw, rh);
+		return;
+	}
 
 	if (!no_scale && g_menuscreen_w / w >= 2 && g_menuscreen_h / h >= 2)
 	{

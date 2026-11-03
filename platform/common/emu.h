@@ -64,6 +64,11 @@ enum {
 };
 
 enum {
+	EOPT_ASPECT_43 = 0,
+	EOPT_ASPECT_16_9,
+};
+
+enum {
 	EOPT_CONFIRM_NONE = 0,
 	EOPT_CONFIRM_SAVE = 1,
 	EOPT_CONFIRM_LOAD = 2,
@@ -87,6 +92,7 @@ typedef struct _currentConfig_t {
 	int gamma;
 	int scaling;  // EOPT_SCALE_*
 	int vscaling;
+	int aspect;   // EOPT_ASPECT_*
 	int rotation; // for UIQ
 	int gamma2;  // psp: black level
 	int turbo_rate;
@@ -205,6 +211,14 @@ void plat_show_cursor(int on);
 int plat_grab_cursor(int on);
 int plat_has_wm(void);
 void plat_set_window(int w, int h);
+void plat_aspect_rect(int *x, int *y, int *w, int *h, int win_w, int win_h);
+
+// preset window for an integer line scale (all lines kept)
+#define	plat_window_height(scale)	\
+	(scale * 240)
+// 4:3 -> 320x240, 16:9 -> ceil(240*scale * 16/9)
+#define	plat_window_width(scale,aspect)	\
+	((aspect) == EOPT_ASPECT_16_9 ? (1280 * (scale) + 2) / 3 : (scale) * 320)
 
 /* used before things blocking for a while (these funcs redraw on return) */
 void plat_status_msg_busy_first(const char *msg);

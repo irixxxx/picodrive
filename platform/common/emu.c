@@ -679,6 +679,7 @@ void emu_prep_defconfig(void)
 	defaultConfig.volume = 50;
 	defaultConfig.gamma = 100;
 	defaultConfig.scaling = 0;
+	defaultConfig.aspect = EOPT_ASPECT_43;
 	defaultConfig.turbo_rate = 15;
 	defaultConfig.mouse_speed = 4;
 	defaultConfig.mouse_wheel = 2;

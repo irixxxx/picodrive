@@ -8,6 +8,7 @@
  */
 
 #include <stdio.h>
+#include <string.h>
 
 #include "../libpicofe/input.h"
 #include "../libpicofe/plat.h"
@@ -179,28 +180,73 @@ void rgb565_to_uyvy(void *d, const void *s, int w, int h, int pitch, int dpitch,
 	}
 }
 
-void copy_intscale(void *dst, int w, int h, int pp, void *src, int sw, int sh, int spp)
+/* copy a 16bpp image into a rectangle, stretching as needed */
+static void copy_stretch(void *dst, int dpp, const void *src,
+                         int sw, int sh, int spp, int x, int y, int w, int h)
 {
-	int xf = w / sw, yf = h / sh, f = xf < yf ? xf : yf;
-	int wf = f * sw, hf = f * sh;
-	int x = (w - wf)/2, y = (h - hf)/2;
-	uint16_t *p = (uint16_t *)dst;
-	uint16_t *q = (uint16_t *)src;
+	uint16_t *__restrict d = (uint16_t *)dst + y*dpp + x;
+	const uint16_t *__restrict s = src;
+	uint32_t xstep, ystep, ypos;
+	int i, j;
 
-	// copy 16bit image with scaling by an integer factor
-	int i, j, k, l;
-	p += y * pp + x;
-	for (i = 0; i < sh; i++) {
-		for (j = 0; j < sw; j++, q++)
-			for (l = 0; l < f; l++)
-				*p++ = *q;
-		p += pp - wf;
-		q += spp - sw;
-		for (k = 1; k < f; k++) {
-			memcpy(p, p-pp, wf*2);
-			p += pp;
+	if (w <= 0 || h <= 0 || sw <= 0 || sh <= 0)
+		return;
+
+	// Q16 source steps; avoids a division for every output pixel.
+	xstep = (uint32_t)sw * 65536 / w;
+	ystep = (uint32_t)sh * 65536 / h;
+	ypos = 0;
+
+	// no horizontal scaling: copy whole rows
+	if (sw == w) {
+		for (j = 0; j < h; j++) {
+			const uint16_t *srow = s + (ypos >> 16) * spp;
+			memcpy(d, srow, w * sizeof(uint16_t));
+			d += dpp;
+			ypos += ystep;
 		}
+		return;
 	}
+
+	for (j = 0; j < h; j++) {
+		const uint16_t *srow = s + (ypos >> 16) * spp;
+		uint32_t xpos = 0;
+
+		// unrolled so the source index calculations are independent
+		for (i = 0; i + 8 <= w; i += 8) {
+			d[i+0] = srow[(xpos             ) >> 16];
+			d[i+1] = srow[(xpos +   xstep    ) >> 16];
+			d[i+2] = srow[(xpos + 2*xstep    ) >> 16];
+			d[i+3] = srow[(xpos + 3*xstep    ) >> 16];
+			d[i+4] = srow[(xpos + 4*xstep    ) >> 16];
+			d[i+5] = srow[(xpos + 5*xstep    ) >> 16];
+			d[i+6] = srow[(xpos + 6*xstep    ) >> 16];
+			d[i+7] = srow[(xpos + 7*xstep    ) >> 16];
+			xpos += 8*xstep;
+		}
+		for (; i < w; i++) {
+			d[i] = srow[xpos >> 16];
+			xpos += xstep;
+		}
+		d += dpp;
+		ypos += ystep;
+	}
+}
+
+static inline void get_aspect_rect(SDL_Rect *r, int win_w, int win_h)
+{
+	int x, y, w, h;
+
+	plat_aspect_rect(&x, &y, &w, &h, win_w, win_h);
+	r->x = x;
+	r->y = y;
+	r->w = w;
+	r->h = h;
+}
+
+static int rect_needs_bars(const SDL_Rect *r, int win_w, int win_h)
+{
+	return r->x != 0 || r->y != 0 || r->w != win_w || r->h != win_h;
 }
 
 static int clear_buf_cnt, clear_stat_cnt;
@@ -223,16 +269,6 @@ static void resize_buffers(void)
 
 void plat_video_set_size(int w, int h)
 {
-	if ((plat_sdl_overlay || plat_sdl_gl_active || !plat_sdl_is_windowed()) &&
-			w <= 320 && h <= 240) {
-		// scale to the window, but mind aspect ratio (scaled to 4:3):
-		// w *= win_aspect / 4:3_aspect or h *= 4:3_aspect / win_aspect
-		if (g_menuscreen_w * 3/4 >= g_menuscreen_h)
-			w = (w * 3 * g_menuscreen_w/g_menuscreen_h)/4 & ~1;
-		else
-			h = (h * 4 * g_menuscreen_h/g_menuscreen_w)/3 & ~1;
-	}
-
 	if (area.w != w || area.h != h) {
 		area = (struct area) { w, h };
 
@@ -251,15 +287,15 @@ void plat_video_set_size(int w, int h)
 			g_screen_height = area.h;
 			g_screen_ppitch = area.w;
 			g_screen_ptr = shadow_fb;
-		} else if (plat_sdl_is_windowed() &&
-		    (plat_sdl_screen->w >= 320*2 || plat_sdl_screen->h >= 240*2 ||
-		     plat_sdl_screen->w < 320 || plat_sdl_screen->h < 240)) {
-			// shadow buffer for integer scaling
+		}
+		else if (plat_sdl_is_windowed()) {
+			// shadow buffer, scaled to the window
 			g_screen_width = 320;
 			g_screen_height = 240;
 			g_screen_ppitch = 320;
 			g_screen_ptr = shadow_fb;
-		} else {
+		}
+		else {
 			// unscaled SDL window buffer can be used directly
 			g_screen_width = plat_sdl_screen->w;
 			g_screen_height = plat_sdl_screen->h;
@@ -277,11 +313,20 @@ void plat_video_set_shadow(int w, int h)
 	g_screen_ptr = shadow_fb;
 }
 
+
+static float gl_verts[12];
+static int gl_win_w = -1, gl_win_h = -1, gl_aspect = -1;
+
 void plat_video_flip(void)
 {
+	SDL_Rect r;
+
 	if (plat_sdl_overlay != NULL) {
-		SDL_Rect dstrect =
-			{ 0, 0, plat_sdl_screen->w, plat_sdl_screen->h };
+		get_aspect_rect(&r, plat_sdl_screen->w, plat_sdl_screen->h);
+
+		if (rect_needs_bars(&r, plat_sdl_screen->w, plat_sdl_screen->h))
+			SDL_FillRect(plat_sdl_screen, NULL, 0);
+
 		SDL_LockYUVOverlay(plat_sdl_overlay);
 		if (area.w <= plat_sdl_overlay->w && area.h <= plat_sdl_overlay->h)
 			rgb565_to_uyvy(plat_sdl_overlay->pixels[0], shadow_fb,
@@ -289,17 +334,46 @@ void plat_video_flip(void)
 					plat_sdl_overlay->pitches[0]/2,
 					plat_sdl_overlay->w >= 2*area.w);
 		SDL_UnlockYUVOverlay(plat_sdl_overlay);
-		SDL_DisplayYUVOverlay(plat_sdl_overlay, &dstrect);
+		SDL_DisplayYUVOverlay(plat_sdl_overlay, &r);
 	}
 	else if (plat_sdl_gl_active) {
-		gl_flip(shadow_fb, g_screen_ppitch, g_screen_height);
+		// The vertices only depend on the window size and aspect setting.
+		int w = g_screen_ppitch, h = g_screen_height;
+		int win_w = plat_sdl_screen->w, win_h = plat_sdl_screen->h;
+
+		if (win_w != gl_win_w || win_h != gl_win_h ||
+		    currentConfig.aspect != gl_aspect) {
+			get_aspect_rect(&r, win_w, win_h);
+
+			// normalized device coords
+			float x0 = 2.0f * r.x / win_w - 1.0f;
+			float x1 = 2.0f * (r.x + r.w) / win_w - 1.0f;
+			float y1 = 1.0f - 2.0f * r.y / win_h;
+			float y0 = 1.0f - 2.0f * (r.y + r.h) / win_h;
+
+			gl_verts[0] = x0; gl_verts[1] = y1; gl_verts[2] = 0.0f;
+			gl_verts[3] = x1; gl_verts[4] = y1; gl_verts[5] = 0.0f;
+			gl_verts[6] = x0; gl_verts[7] = y0; gl_verts[8] = 0.0f;
+			gl_verts[9] = x1; gl_verts[10] = y0; gl_verts[11] = 0.0f;
+
+			gl_win_w = win_w;
+			gl_win_h = win_h;
+			gl_aspect = currentConfig.aspect;
+		}
+
+		gl_flip_v(shadow_fb, w, h, gl_verts);
 	}
 	else {
 		int copy = g_screen_ptr != plat_sdl_screen->pixels;
-		if (copy)
-			copy_intscale(plat_sdl_screen->pixels, plat_sdl_screen->w,
-				plat_sdl_screen->h, plat_sdl_screen->pitch/2,
-				shadow_fb, g_screen_width, g_screen_height, g_screen_ppitch);
+		if (copy) {
+			get_aspect_rect(&r, plat_sdl_screen->w, plat_sdl_screen->h);
+			if (rect_needs_bars(&r, plat_sdl_screen->w, plat_sdl_screen->h))
+				memset(plat_sdl_screen->pixels, 0, plat_sdl_screen->pitch*plat_sdl_screen->h);
+			copy_stretch(plat_sdl_screen->pixels,
+				     plat_sdl_screen->pitch/2,
+				     shadow_fb, g_screen_width, g_screen_height,
+				     g_screen_ppitch, r.x, r.y, r.w, r.h);
+		}
 
 		if (SDL_MUSTLOCK(plat_sdl_screen))
 			SDL_UnlockSurface(plat_sdl_screen);
@@ -362,8 +436,35 @@ void plat_video_clear_buffers(void)
 	clear_buf_cnt = 3; // do it thrice in case of triple buffering
 }
 
+// keep the window size in sync with the configured aspect ratio, but
+// only if it currently uses one of the two preset sizes
+static void plat_sdl_sync_window_aspect(void)
+{
+	static int last_aspect = -1;
+	int scale, want_w, want_h;
+
+	if (last_aspect == currentConfig.aspect)
+		return;
+	last_aspect = currentConfig.aspect;
+
+	if (!plat_sdl_is_windowed() || plat_target.vout_fullscreen != 0)
+		return;
+
+	scale = g_menuscreen_h / 240;
+	want_h = plat_window_height(scale);
+	want_w = plat_window_width(scale, currentConfig.aspect);
+
+	if (g_menuscreen_h == want_h &&
+	    (g_menuscreen_w == plat_window_width(scale, EOPT_ASPECT_43) ||
+	     g_menuscreen_w == plat_window_width(scale, EOPT_ASPECT_16_9)) &&
+	    g_menuscreen_w != want_w)
+		plat_set_window(want_w, want_h);
+}
+
 void plat_video_menu_update(void)
 {
+	plat_sdl_sync_window_aspect();
+
 	// WM may grab input while resizing the window; our own window resizing
 	// is only safe if the WM isn't active anymore, so try to grab input.
 	if (plat_sdl_is_windowed() && SDL_WM_GrabInput(SDL_GRAB_ON) == SDL_GRAB_ON) {
@@ -379,6 +480,8 @@ void plat_video_menu_update(void)
 
 void plat_video_menu_enter(int is_rom_loaded)
 {
+	plat_sdl_sync_window_aspect();
+
 	if (SDL_MUSTLOCK(plat_sdl_screen))
 		SDL_UnlockSurface(plat_sdl_screen);
 	plat_sdl_change_video_mode(g_menuscreen_w, g_menuscreen_h, 1);
@@ -471,6 +574,23 @@ void plat_set_window(int w, int h)
 	g_menuscreen_w = w;
 	g_menuscreen_h = h;
 	resized = 1;
+}
+
+// aspect-correct image rect centered in a win_w x win_h area
+void plat_aspect_rect(int *x, int *y, int *w, int *h, int win_w, int win_h)
+{
+	int an = currentConfig.aspect == EOPT_ASPECT_16_9 ? 16 : 4;
+	int ad = currentConfig.aspect == EOPT_ASPECT_16_9 ? 9 : 3;
+	int dw = win_w, dh = dw * ad / an;
+
+	if (dh > win_h) {
+		dh = win_h;
+		dw = dh * an / ad;
+	}
+	*x = (win_w - dw) / 2;
+	*y = (win_h - dh) / 2;
+	*w = dw;
+	*h = dh;
 }
 
 static void plat_sdl_resize(int w, int h)
