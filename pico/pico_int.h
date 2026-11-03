@@ -209,9 +209,11 @@ extern struct DrZ80 drZ80;
 #define z80_cyclesDone() \
   (Pico.t.z80c_aim - z80_cyclesLeft)
 
-// 68k clock = OSC/7, z80 clock = OSC/15, 68k:z80 ratio = 7/15 = 3822.9/8192
-#define cycles_68k_to_z80(x) ((x) * 3823 >> 13)
-#define cycles_z80_to_68k(x) ((x) * 8777 >> 12)
+// 68k clock = OSC/7, z80 clock = OSC/15, so 68k:z80 = 15:7.
+// 32-bit mantissa fixed point, rounded to nearest:
+// the pair is exactly invertible for the (per-frame) counts used here.
+#define cycles_68k_to_z80(x) SHR_ROUND((x) * ((7LL<<32)/15), 32)
+#define cycles_z80_to_68k(x) SHR_ROUND((x) * ((15LL<<32)/7), 32)
 
 // ----------------------- SH2 CPU -----------------------
 
