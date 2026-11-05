@@ -82,6 +82,28 @@ unsigned char *movie_data = NULL;
 static int movie_size = 0;
 
 
+// image rect for the current widescreen setting, centered in win_w x win_h;
+// kept in common code so every platform that compiles menu_pico.c links
+void emu_aspect_rect(int *x, int *y, int *w, int *h, int win_w, int win_h)
+{
+	int ws = currentConfig.EmuOpt & EOPT_WIDESCREEN;
+	int an = ws ? 16 : 4;
+	int ad = ws ? 9 : 3;
+	int dw = win_w & ~1, dh = win_h & ~1;
+
+	if (win_h * an <= win_w * ad)
+		dw = ((dh * an + ad/2)/ad + 1) & ~1;
+	else	dh = ((dw * ad + an/2)/an + 1) & ~1;
+	if (dw > win_w) dw = win_w;
+	if (dh > win_h) dh = win_h;
+
+	*x = (win_w - dw) / 2;
+	*y = (win_h - dh) / 2;
+	*w = dw;
+	*h = dh;
+}
+
+
 /* don't use tolower() for easy old glibc binary compatibility */
 static void strlwr_(char *string)
 {

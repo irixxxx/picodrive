@@ -1,4 +1,7 @@
 
+// this platform provides its own filter entry (see menu_pico.c)
+#define MENU_HAS_FILTER_ENTRY
+
 static const char *men_vscaling_opts[] = { "OFF", "fullscreen", "borderless", NULL };
 static const char *men_hscaling_opts[] = { "1:1", "4:3", "extended", "fullwidth", NULL };
 static const char *men_filter_opts[] = { "nearest", "bilinear", NULL };

@@ -15,6 +15,9 @@
 #include "input_pico.h"
 #include "keyboard.h"
 #include "version.h"
+#ifdef USE_SDL_VIDEO
+#include "upscale.h"
+#endif
 
 #include "../libpicofe/plat.h"
 
@@ -62,7 +65,7 @@ static unsigned short fname2color(const char *fname)
 #include <platform/libpicofe/menu.c>
 
 static const char *men_dummy[] = { NULL };
-static int menu_w, menu_h;
+static int menu_w, menu_h, menu_ws = -1;
 
 /* platform specific options and handlers */
 #if   defined(__GP2X__)
@@ -75,6 +78,21 @@ static int menu_w, menu_h;
 #include <platform/pandora/menu.c>
 #else
 #include <platform/linux/menu.c>
+#endif
+
+#ifdef USE_SDL_VIDEO
+// nearest-neighbor scale + darken into an arbitrary rect
+static void scale_bg_rect(void *dst, int dpp, const void *src, int sw, int sh,
+			  int spp, int x, int y, int w, int h)
+{
+	uint16_t *d = (uint16_t *)dst + y * dpp + x;
+
+	if (w <= 0 || h <= 0 || sw <= 0 || sh <= 0)
+		return;
+	upscale_rgb_stretch(d, dpp, src, spp, w, h, sw, sh, 0);
+	for (; h > 0; h--, d += dpp)
+		menu_darken_bg(d, d, w, 1);
+}
 #endif
 
 static void make_bg(int no_scale, int from_screen)
@@ -95,6 +113,20 @@ static void make_bg(int no_scale, int from_screen)
 	memset(g_menubg_ptr, 0, g_menuscreen_w * g_menuscreen_h * 2);
 	if (src == NULL)
 		return;
+
+#ifdef USE_SDL_VIDEO
+	// fill the same aspect-correct rect the game is shown in, including
+	// fullscreen when widescreen is enabled
+	if (!no_scale && (plat_has_wm() ||
+	    (currentConfig.EmuOpt & EOPT_WIDESCREEN))) {
+		int x, y, rw, rh;
+
+		emu_aspect_rect(&x, &y, &rw, &rh, g_menuscreen_w, g_menuscreen_h);
+		scale_bg_rect(g_menubg_ptr, g_menuscreen_w, src, w, h, pp,
+			      x, y, rw, rh);
+		return;
+	}
+#endif
 
 	if (!no_scale && g_menuscreen_w / w >= 2 && g_menuscreen_h / h >= 2)
 	{
@@ -203,14 +235,17 @@ static void menu_update_scale(void)
 
 static void menu_draw_prep(void)
 {
+	int ws = currentConfig.EmuOpt & EOPT_WIDESCREEN;
+
 	plat_video_menu_update();
 
 	menu_set_mouse_enabled(menu_mouse_opt && plat_has_wm());
 	menu_update_scale();
 
-	if (menu_w == g_menuscreen_w && menu_h == g_menuscreen_h)
+	if (menu_w == g_menuscreen_w && menu_h == g_menuscreen_h && menu_ws == ws)
 		return;
 	menu_w = g_menuscreen_w, menu_h = g_menuscreen_h;
+	menu_ws = ws;
 
 	/* the cursor now maps to a different place; don't let a stationary
 	 * mouse move the selection until it is actually moved */
@@ -234,6 +269,26 @@ static void menu_draw_prep(void)
 			memset(g_menubg_ptr, 0, g_menuscreen_w * g_menuscreen_h * 2);
 	}
 }
+
+// watch the platform's plain widescreen toggle here and resize with it;
+// only the gfx options menu passes this hook, so game configs don't resize
+#ifdef MENU_WS_PRESET_SYNC
+static int menu_ws_last;
+
+static void menu_draw_prep_ws(void)
+{
+	int ws = currentConfig.EmuOpt & EOPT_WIDESCREEN;
+
+	if (ws != menu_ws_last) {
+		menu_ws_last = ws;
+		plat_sync_window_preset();
+	}
+	menu_draw_prep();
+}
+#define MENU_GFX_DRAW_PREP menu_draw_prep_ws
+#else
+#define MENU_GFX_DRAW_PREP menu_draw_prep
+#endif
 
 static void draw_savestate_bg(int slot)
 {
@@ -1240,7 +1295,9 @@ static menu_entry e_menu_gfx_options[] =
 	mee_enum      ("Video output mode", MA_OPT_VOUT_MODE, plat_target.vout_method, men_dummy),
 	mee_range_cust("Frameskip",         MA_OPT_FRAMESKIP, currentConfig.Frameskip, -1, 16, mgn_opt_fskip),
 	mee_range     ("Max auto frameskip",MA_OPT2_MAX_FRAMESKIP, currentConfig.max_skip, 1, 10),
+#ifndef MENU_HAS_FILTER_ENTRY
 	mee_enum      ("Filter",            MA_OPT3_FILTERING, currentConfig.filter, men_dummy),
+#endif
 	mee_range_cust_h("Gamma correction",MA_OPT2_GAMMA, currentConfig.gamma, 1, 300, mgn_aopt_gamma, h_gamma),
 	MENU_OPTIONS_GFX
 	mee_end,
@@ -1250,7 +1307,11 @@ static int menu_loop_gfx_options(int id, int keys)
 {
 	static int sel = 0;
 
-	me_loop_d(e_menu_gfx_options, &sel, menu_draw_prep, NULL);
+#ifdef MENU_WS_PRESET_SYNC
+	/* baseline, so entering the menu never resizes the window */
+	menu_ws_last = currentConfig.EmuOpt & EOPT_WIDESCREEN;
+#endif
+	me_loop_d(e_menu_gfx_options, &sel, MENU_GFX_DRAW_PREP, NULL);
 
 	return 0;
 }
@@ -2116,10 +2177,12 @@ void menu_init(void)
 	me_enable(e_menu_gfx_options, MA_OPT_VOUT_MODE,
 		plat_target.vout_methods != NULL);
 
+#ifndef MENU_HAS_FILTER_ENTRY
 	i = me_id2offset(e_menu_gfx_options, MA_OPT3_FILTERING);
 	e_menu_gfx_options[i].data = plat_target.hwfilters;
 	me_enable(e_menu_gfx_options, MA_OPT3_FILTERING,
 		plat_target.hwfilters != NULL);
+#endif
 
 	me_enable(e_menu_gfx_options, MA_OPT2_GAMMA,
 		plat_target.gamma_set != NULL);

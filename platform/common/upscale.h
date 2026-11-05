@@ -648,3 +648,8 @@ void upscale_rgb_nn_x_1_2_y_3_5(u16 *__restrict di, int ds, u8 *__restrict si, i
 void upscale_rgb_bl2_x_1_2_y_3_5(u16 *__restrict di, int ds, u8 *__restrict si, int ss, int width, int height, u16 *pal);
 void upscale_rgb_bl4_x_1_2_y_3_5(u16 *__restrict di, int ds, u8 *__restrict si, int ss, int width, int height, u16 *pal);
 
+/* arbitrary-ratio 16bpp scaling, source already in destination pixel format.
+ * filter: 0 nearest, 1 snn, 2 bl2, 3 bl4 (matches EOPT_FILTER_*) */
+void upscale_rgb_stretch(u16 *__restrict di, int ds, const u16 *__restrict si, int ss,
+                         int dw, int dh, int sw, int sh, int filter);
+

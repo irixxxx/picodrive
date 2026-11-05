@@ -175,6 +175,7 @@ endif
 ifeq ("$(PLATFORM)",$(filter "$(PLATFORM)","rpi1" "rpi2"))
 CFLAGS += -DHAVE_GLES -DEGL_NO_X11 -DSDL_BUFFER_3X -DSDL_REDRAW_EVT
 OBJS += platform/linux/emu.o platform/linux/blit.o # FIXME
+OBJS += platform/common/upscale.o
 OBJS += platform/common/plat_sdl.o platform/common/inputmap_kbd.o
 OBJS += platform/libpicofe/plat_sdl.o platform/libpicofe/in_sdl.o
 OBJS += platform/libpicofe/linux/plat.o
@@ -186,6 +187,7 @@ CFLAGS += -DHAVE_GLES -DEGL_NO_X11
 endif
 CFLAGS += -DSDL_OVERLAY_2X -DSDL_BUFFER_3X -DSDL_REDRAW_EVT
 OBJS += platform/linux/emu.o platform/linux/blit.o # FIXME
+OBJS += platform/common/upscale.o
 ifeq "$(use_inputmap)" "1"
 OBJS += platform/common/plat_sdl.o platform/opendingux/inputmap.o
 else
@@ -252,6 +254,7 @@ ifeq "$(PLATFORM)" "win32"
 CFLAGS += -DSDL_OVERLAY_2X -DSDL_BUFFER_3X -DSDL_REDRAW_EVT
 OBJS += platform/win32/plat.o
 OBJS += platform/linux/emu.o platform/linux/blit.o # FIXME
+OBJS += platform/common/upscale.o
 OBJS += platform/common/plat_sdl.o platform/common/inputmap_kbd.o
 OBJS += platform/libpicofe/plat_sdl.o platform/libpicofe/in_sdl.o
 USE_FRONTEND = 1
@@ -287,7 +290,7 @@ endif
 ifeq "$(USE_FRONTEND)" "1"
 
 # common
-OBJS += platform/common/main.o platform/common/emu.o platform/common/upscale.o \
+OBJS += platform/common/main.o platform/common/emu.o \
 	platform/common/menu_pico.o platform/common/keyboard.o platform/common/config_file.o
 
 # libpicofe
@@ -401,6 +404,12 @@ ifneq (,$(findstring sdl,$(OBJS)))
 CFLAGS += -DUSE_SDL
 endif
 
+# USE_SDL above also matches sndout_sdl.o, which is linked on platforms that
+# don't use the SDL video backend; use a separate flag for video code.
+ifneq (,$(findstring platform/common/plat_sdl.o,$(OBJS)))
+CFLAGS += -DUSE_SDL_VIDEO
+endif
+
 ifneq ($(findstring gcc,$(CC)),)
 ifneq ($(findstring SunOS,$(shell uname -a)),SunOS)
 ifneq ($(findstring clang,$(shell $(CC) -v 2>&1)),)
@@ -506,4 +515,6 @@ pico/memory.o pico/cd/memory.o pico/32x/memory.o : pico/memory.h
 $(shell grep -rl pico_int.h pico) : pico/pico_int.h
 # pico/cart.o : pico/carthw_cfg.c
 cpu/fame/famec.o: cpu/fame/famec.c cpu/fame/famec_opcodes.h
-platform/common/menu_pico.o: platform/libpicofe/menu.c
+platform/common/menu_pico.o: platform/libpicofe/menu.c \
+	platform/linux/menu.c platform/gp2x/menu.c platform/pandora/menu.c \
+	platform/ps2/menu.c platform/psp/menu.c

@@ -37,6 +37,7 @@ extern int g_screen_ppitch; // pitch in pixels
 #define EOPT_PICO_PEN     (1<<21)
 #define EOPT_MOUSE        (1<<22)
 #define EOPT_CROSSHAIR    (1<<23)
+#define EOPT_WIDESCREEN   (1<<24) // stretch 4:3 output to 16:9
 
 
 enum {
@@ -183,6 +184,10 @@ void  emu_sound_wait(void);
 /* used by some (but not all) platforms */
 void  emu_cmn_forced_frame(int no_scale, int do_emu, void *buf);
 
+// aspect-correct image rect for the current widescreen setting, centered in
+// win_w x win_h; common code because menu_pico.c needs it on every platform
+void  emu_aspect_rect(int *x, int *y, int *w, int *h, int win_w, int win_h);
+
 /* stuff to be implemented by platform code */
 extern const char *renderer_names[];
 extern const char *renderer_names32x[];
@@ -205,6 +210,9 @@ void plat_show_cursor(int on);
 int plat_grab_cursor(int on);
 int plat_has_wm(void);
 void plat_set_window(int w, int h);
+// move a preset-matching window to the current mode's preset; game configs
+// applied from the menu leave it alone
+void plat_sync_window_preset(void);
 
 /* used before things blocking for a while (these funcs redraw on return) */
 void plat_status_msg_busy_first(const char *msg);

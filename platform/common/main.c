@@ -98,8 +98,11 @@ int main(int argc, char *argv[])
 
 	if (engineState == PGS_ReloadRom)
 	{
+		int loaded;
+
 		plat_video_menu_begin();
-		if (emu_reload_rom(rom_fname_reload)) {
+		loaded = emu_reload_rom(rom_fname_reload);
+		if (loaded) {
 			engineState = PGS_Running;
 			if (load_state_slot >= 0) {
 				state_slot = load_state_slot;
@@ -107,6 +110,10 @@ int main(int argc, char *argv[])
 			}
 		}
 		plat_video_menu_end();
+#ifdef USE_SDL_VIDEO
+		if (loaded)
+			plat_sync_window_preset();
+#endif
 	}
 	plat_video_menu_leave();
 
@@ -123,8 +130,12 @@ int main(int argc, char *argv[])
 				break;
 
 			case PGS_ReloadRom:
-				if (emu_reload_rom(rom_fname_reload))
+				if (emu_reload_rom(rom_fname_reload)) {
 					engineState = PGS_Running;
+#ifdef USE_SDL_VIDEO
+					plat_sync_window_preset();
+#endif
+				}
 				else {
 					printf("PGS_ReloadRom == 0\n");
 					engineState = PGS_Menu;

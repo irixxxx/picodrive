@@ -32,6 +32,8 @@
  *  - MAME license.
  */
 
+#include <stdlib.h>
+#include <string.h>
 #include "upscale.h"
 
 /* X x Y -> X*5/4 x Y */
@@ -604,6 +606,304 @@ void upscale_rgb_bl4_y_3_5(u16 *__restrict di, int ds, u8 *__restrict si, int ss
 		di += ds;
 		v_mix(&di[0], &di[ 0], &di[  ds], width, p_05, f_nop); /* 1+2 */
 		di += 2*ds;
+	}
+}
+
+/* Quantized blend weight toward the second source pixel, in 1/4 units (0..4).
+ * filter: 1 = snn, 2 = bl2, 3 = bl4 (see the scaler types at the top). */
+static inline int blend_qweight(u32 frac, int filter)
+{
+	if (filter == 1)	/* snn: average only if neither pixel covers >65% */
+		return (frac >= 22938 && frac <= 42598) ? 2 : 0;
+	if (filter == 2)	/* bl2: 2-level, round to 1/2 (0, 2, 4) */
+		return ((frac + 16384) >> 15) * 2;
+	return (frac + 8192) >> 14;	/* bl4: 4-level, round to 1/4 (0..4) */
+}
+
+/* Per-filter horizontal blend "lambdas".  Each one handles exactly the q
+ * values the corresponding filter can produce, so the generic five-way switch
+ * is gone from the inner loop.  channel-safe for RGB565/BGR555. */
+#define STRETCH_BLEND_SNN(dst, a, b, q) \
+	do { \
+		if (q) { p_05(dst, a, b); } \
+		else   { dst = a; } \
+	} while (0)
+
+#define STRETCH_BLEND_BL2(dst, a, b, q) \
+	do { \
+		if (q == 0)      { dst = a; } \
+		else if (q == 4) { dst = b; } \
+		else             { p_05(dst, a, b); } \
+	} while (0)
+
+#define STRETCH_BLEND_BL4(dst, a, b, q) \
+	do { \
+		u16 t; \
+		if (q == 0)      { dst = a; } \
+		else if (q == 4) { dst = b; } \
+		else if (q == 2) { p_05(dst, a, b); } \
+		else if (q == 1) { p_075(dst, a, b); } \
+		else             { p_025(dst, a, b); } \
+	} while (0)
+
+/* Blend two source rows with weight q/4 toward b. */
+static void blend_row(u16 *d, const u16 *a, const u16 *b, int n, int q)
+{
+	u16 t;
+	int i;
+
+	switch (q) {
+	case 0:
+		if (d != a)
+			memcpy(d, a, n * sizeof(*d));
+		break;
+	case 1:
+		/* p_075/p_025 expand to two statements, so keep the braces */
+		for (i = 0; i < n; i++) {
+			p_075(d[i], a[i], b[i]);
+		}
+		break;
+	case 2:
+		for (i = 0; i < n; i++)
+			p_05(d[i], a[i], b[i]);
+		break;
+	case 3:
+		for (i = 0; i < n; i++) {
+			p_025(d[i], a[i], b[i]);
+		}
+		break;
+	default:
+		if (d != b)
+			memcpy(d, b, n * sizeof(*d));
+		break;
+	}
+}
+
+/* Generate the horizontal pass for one filter.  "blend" is the per-pixel
+ * lambda; "clamped" selects the right-edge handling at compile time.  Keeping
+ * the loop in a macro gives each filter its own copy with no runtime
+ * filter/switch. */
+#define STRETCH_H_ROW(name, clamped, blend) \
+static void name(u16 *d, const u16 *s, int sw, int dw, \
+		 const u16 *xmap, const u8 *qmap) \
+{ \
+	int i; \
+	for (i = 0; i < dw; i++) { \
+		u32 sx = xmap[i]; \
+		u16 a = s[sx]; \
+		u16 b = s[sx + (clamped ? (sx + 1 < (u32)sw) : 1)]; \
+		blend(d[i], a, b, qmap[i]); \
+	} \
+}
+
+STRETCH_H_ROW(blend_row_h_snn, 0, STRETCH_BLEND_SNN)
+STRETCH_H_ROW(blend_row_h_snn_clamped, 1, STRETCH_BLEND_SNN)
+STRETCH_H_ROW(blend_row_h_bl2, 0, STRETCH_BLEND_BL2)
+STRETCH_H_ROW(blend_row_h_bl2_clamped, 1, STRETCH_BLEND_BL2)
+STRETCH_H_ROW(blend_row_h_bl4, 0, STRETCH_BLEND_BL4)
+STRETCH_H_ROW(blend_row_h_bl4_clamped, 1, STRETCH_BLEND_BL4)
+
+#define STRETCH_H_CALL(f, d, s, sw, dw, xmap, qmap) \
+	do { \
+		switch (f) { \
+		case 1: blend_row_h_snn(d, s, sw, dw, xmap, qmap); break; \
+		case 2: blend_row_h_bl2(d, s, sw, dw, xmap, qmap); break; \
+		default: blend_row_h_bl4(d, s, sw, dw, xmap, qmap); break; \
+		} \
+	} while (0)
+
+#define STRETCH_H_CALL_CLAMPED(f, d, s, sw, dw, xmap, qmap) \
+	do { \
+		switch (f) { \
+		case 1: blend_row_h_snn_clamped(d, s, sw, dw, xmap, qmap); break; \
+		case 2: blend_row_h_bl2_clamped(d, s, sw, dw, xmap, qmap); break; \
+		default: blend_row_h_bl4_clamped(d, s, sw, dw, xmap, qmap); break; \
+		} \
+	} while (0)
+
+/* Scratch space for the separable path. It is reused between frames and only
+ * grows when the source or destination size changes. */
+static u16 *stretch_row;
+static u16 *stretch_xmap;
+static u8 *stretch_qmap;
+static int stretch_row_len, stretch_map_len;
+
+static int stretch_prepare_row(int sw)
+{
+	u16 *p;
+
+	if (stretch_row_len >= sw + 1)
+		return 1;
+	p = realloc(stretch_row, (sw + 1) * sizeof(*p));
+	if (p == NULL)
+		return 0;
+	stretch_row = p;
+	stretch_row_len = sw + 1;
+	return 1;
+}
+
+static int stretch_prepare_map(int dw)
+{
+	u16 *xp;
+	u8 *qp;
+
+	if (stretch_map_len >= dw)
+		return 1;
+	xp = realloc(stretch_xmap, dw * sizeof(*xp));
+	if (xp == NULL)
+		return 0;
+	stretch_xmap = xp;
+	qp = realloc(stretch_qmap, dw * sizeof(*qp));
+	if (qp == NULL)
+		return 0;
+	stretch_qmap = qp;
+	stretch_map_len = dw;
+	return 1;
+}
+
+static void stretch_map_fill(int dw, u32 xstep, int filter)
+{
+	u32 xpos = 0;
+	int i;
+
+	for (i = 0; i < dw; i++, xpos += xstep) {
+		stretch_xmap[i] = xpos >> 16;
+		stretch_qmap[i] = blend_qweight(xpos & 0xffff, filter);
+	}
+}
+
+/* Arbitrary-ratio 16bpp scaler, source already in destination pixel format.
+ * The filter is separable: blend rows vertically at source width, then scale
+ * the result horizontally. Only-vertical and only-horizontal cases skip the
+ * unused pass. */
+void upscale_rgb_stretch(u16 *__restrict di, int ds, const u16 *__restrict si, int ss,
+                         int dw, int dh, int sw, int sh, int filter)
+{
+	u32 xstep, ystep, xpos, ypos;
+	int i, j;
+
+	if (dw <= 0 || dh <= 0 || sw <= 0 || sh <= 0)
+		return;
+
+	/* nothing to scale: plain row copy */
+	if (dw == sw && dh == sh) {
+		for (j = 0; j < dh; j++) {
+			memcpy(di, si, dw * sizeof(u16));
+			di += ds, si += ss;
+		}
+		return;
+	}
+
+	xstep = (u32)sw * 65536 / dw;
+	ystep = (u32)sh * 65536 / dh;
+
+	if (filter <= 0) {
+		/* exact integer ratio: replicate columns and rows */
+		if (dw % sw == 0 && dh % sh == 0) {
+			int fx = dw / sw, fy = dh / sh;
+
+			for (j = 0; j < sh; j++) {
+				const u16 *srow = si + j * ss;
+				u16 *row = di + j * fy * ds;
+				int k;
+
+				if (fx == 1) {
+					memcpy(row, srow, dw * sizeof(u16));
+				} else {
+					for (k = 0; k < sw; k++) {
+						u16 p = srow[k];
+						u16 *dp = row + k * fx;
+
+						for (i = 0; i < fx; i++)
+							dp[i] = p;
+					}
+				}
+				for (i = 1; i < fy; i++)
+					memcpy(row + i * ds, row, dw * sizeof(u16));
+			}
+			return;
+		}
+
+		/* no horizontal scaling: copy whole rows */
+		if (dw == sw) {
+			for (j = 0, ypos = 0; j < dh; j++, ypos += ystep) {
+				memcpy(di, si + (ypos >> 16) * ss, dw * sizeof(u16));
+				di += ds;
+			}
+			return;
+		}
+
+		/* Q16 stepping, unrolled so the index math is independent */
+		for (j = 0, ypos = 0; j < dh; j++, ypos += ystep) {
+			const u16 *srow = si + (ypos >> 16) * ss;
+
+			xpos = 0;
+			for (i = 0; i + 8 <= dw; i += 8) {
+				di[i+0] = srow[(xpos             ) >> 16];
+				di[i+1] = srow[(xpos +   xstep    ) >> 16];
+				di[i+2] = srow[(xpos + 2*xstep    ) >> 16];
+				di[i+3] = srow[(xpos + 3*xstep    ) >> 16];
+				di[i+4] = srow[(xpos + 4*xstep    ) >> 16];
+				di[i+5] = srow[(xpos + 5*xstep    ) >> 16];
+				di[i+6] = srow[(xpos + 6*xstep    ) >> 16];
+				di[i+7] = srow[(xpos + 7*xstep    ) >> 16];
+				xpos += 8*xstep;
+			}
+			for (; i < dw; i++, xpos += xstep)
+				di[i] = srow[xpos >> 16];
+			di += ds;
+		}
+		return;
+	}
+
+	/* vertical scaling only */
+	if (dw == sw) {
+		for (j = 0, ypos = 0; j < dh; j++, ypos += ystep) {
+			u32 sy = ypos >> 16;
+			int qy = blend_qweight(ypos & 0xffff, filter);
+			const u16 *r0 = si + sy * ss;
+			const u16 *r1 = sy + 1 < (u32)sh ? r0 + ss : r0;
+
+			blend_row(di, r0, r1, dw, qy);
+			di += ds;
+		}
+		return;
+	}
+
+	if (sh == dh) {
+		/* horizontal scaling only */
+		if (!stretch_prepare_map(dw)) {
+			/* scratch allocation failed: nearest-neighbour still works */
+			upscale_rgb_stretch(di, ds, si, ss, dw, dh, sw, sh, 0);
+			return;
+		}
+		stretch_map_fill(dw, xstep, filter);
+		for (j = 0; j < dh; j++) {
+			STRETCH_H_CALL_CLAMPED(filter, di, si + j * ss, sw, dw,
+					       stretch_xmap, stretch_qmap);
+			di += ds;
+		}
+		return;
+	}
+
+	if (!stretch_prepare_row(sw) || !stretch_prepare_map(dw)) {
+		/* scratch allocation failed: nearest-neighbour still works */
+		upscale_rgb_stretch(di, ds, si, ss, dw, dh, sw, sh, 0);
+		return;
+	}
+	stretch_map_fill(dw, xstep, filter);
+
+	for (j = 0, ypos = 0; j < dh; j++, ypos += ystep) {
+		u32 sy = ypos >> 16;
+		int qy = blend_qweight(ypos & 0xffff, filter);
+		const u16 *r0 = si + sy * ss;
+		const u16 *r1 = sy + 1 < (u32)sh ? r0 + ss : r0;
+
+		blend_row(stretch_row, r0, r1, sw, qy);
+		stretch_row[sw] = stretch_row[sw - 1];
+		STRETCH_H_CALL(filter, di, stretch_row, sw, dw,
+			       stretch_xmap, stretch_qmap);
+		di += ds;
 	}
 }
 

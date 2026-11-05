@@ -8,6 +8,7 @@
  */
 
 #include <stdio.h>
+#include <string.h>
 
 #include "../libpicofe/input.h"
 #include "../libpicofe/plat.h"
@@ -18,6 +19,7 @@
 #include "menu_pico.h"
 #include "input_pico.h"
 #include "plat_sdl.h"
+#include "upscale.h"
 #include "version.h"
 
 #include <pico/pico_int.h>
@@ -27,6 +29,10 @@ static int shadow_size;
 static struct area { int w, h; } area;
 
 static int resized;
+
+static float gl_verts[12];
+static int gl_win_w = -1, gl_win_h = -1, gl_widescreen = -1;
+static int gl_need_clear = 1;
 
 static struct in_pdata in_sdl_platform_data;
 
@@ -179,28 +185,27 @@ void rgb565_to_uyvy(void *d, const void *s, int w, int h, int pitch, int dpitch,
 	}
 }
 
-void copy_intscale(void *dst, int w, int h, int pp, void *src, int sw, int sh, int spp)
+/* copy a 16bpp image into a rectangle, stretching as needed */
+static void copy_stretch(void *dst, int dpp, const void *src,
+                         int sw, int sh, int spp, int x, int y, int w, int h)
 {
-	int xf = w / sw, yf = h / sh, f = xf < yf ? xf : yf;
-	int wf = f * sw, hf = f * sh;
-	int x = (w - wf)/2, y = (h - hf)/2;
-	uint16_t *p = (uint16_t *)dst;
-	uint16_t *q = (uint16_t *)src;
+	uint16_t *d = (uint16_t *)dst + y*dpp + x;
 
-	// copy 16bit image with scaling by an integer factor
-	int i, j, k, l;
-	p += y * pp + x;
-	for (i = 0; i < sh; i++) {
-		for (j = 0; j < sw; j++, q++)
-			for (l = 0; l < f; l++)
-				*p++ = *q;
-		p += pp - wf;
-		q += spp - sw;
-		for (k = 1; k < f; k++) {
-			memcpy(p, p-pp, wf*2);
-			p += pp;
-		}
-	}
+	if (w <= 0 || h <= 0 || sw <= 0 || sh <= 0)
+		return;
+	upscale_rgb_stretch(d, dpp, src, spp, w, h, sw, sh,
+			    currentConfig.filter & 3);
+}
+
+static inline void get_aspect_rect(SDL_Rect *r, int win_w, int win_h)
+{
+	int x, y, w, h;
+
+	emu_aspect_rect(&x, &y, &w, &h, win_w, win_h);
+	r->x = x;
+	r->y = y;
+	r->w = w;
+	r->h = h;
 }
 
 static int clear_buf_cnt, clear_stat_cnt;
@@ -213,28 +218,23 @@ static void resize_buffers(void)
 	else
 		g_menuscreen_pp = plat_sdl_screen->pitch / 2;
 
-	// make sure the shadow buffers are big enough in case of resize
-	if (shadow_size < g_menuscreen_pp * g_menuscreen_h * 2) {
-		shadow_size = g_menuscreen_pp * g_menuscreen_h * 2;
-		shadow_fb = realloc(shadow_fb, shadow_size);
-		g_menubg_ptr = realloc(g_menubg_ptr, shadow_size);
+	// cover both widths: g_menuscreen_pp may still describe the old surface
+	{
+		int w = (g_menuscreen_pp > g_menuscreen_w ? g_menuscreen_pp : g_menuscreen_w);
+		if (shadow_size < w * g_menuscreen_h * 2) {
+			shadow_size = w * g_menuscreen_h * 2;
+			shadow_fb = realloc(shadow_fb, shadow_size);
+			g_menubg_ptr = realloc(g_menubg_ptr, shadow_size);
+		}
 	}
 }
 
 void plat_video_set_size(int w, int h)
 {
-	if ((plat_sdl_overlay || plat_sdl_gl_active || !plat_sdl_is_windowed()) &&
-			w <= 320 && h <= 240) {
-		// scale to the window, but mind aspect ratio (scaled to 4:3):
-		// w *= win_aspect / 4:3_aspect or h *= 4:3_aspect / win_aspect
-		if (g_menuscreen_w * 3/4 >= g_menuscreen_h)
-			w = (w * 3 * g_menuscreen_w/g_menuscreen_h)/4 & ~1;
-		else
-			h = (h * 4 * g_menuscreen_h/g_menuscreen_w)/3 & ~1;
-	}
-
 	if (area.w != w || area.h != h) {
 		area = (struct area) { w, h };
+		// the GL surface may have been recreated, so clear it again
+		gl_need_clear = 1;
 
 		if (plat_sdl_overlay || plat_sdl_gl_active || !plat_sdl_is_windowed()) {
 			// create surface for overlays, or try using a hw scaler
@@ -251,15 +251,18 @@ void plat_video_set_size(int w, int h)
 			g_screen_height = area.h;
 			g_screen_ppitch = area.w;
 			g_screen_ptr = shadow_fb;
-		} else if (plat_sdl_is_windowed() &&
-		    (plat_sdl_screen->w >= 320*2 || plat_sdl_screen->h >= 240*2 ||
-		     plat_sdl_screen->w < 320 || plat_sdl_screen->h < 240)) {
-			// shadow buffer for integer scaling
+		}
+		else if ((currentConfig.EmuOpt & EOPT_WIDESCREEN) ||
+			 (plat_sdl_is_windowed() &&
+			  (plat_sdl_screen->w >= 320*2 || plat_sdl_screen->h >= 240*2 ||
+			   plat_sdl_screen->w < 320 || plat_sdl_screen->h < 240))) {
+			// shadow buffer, scaled to the window or the widescreen rect
 			g_screen_width = 320;
 			g_screen_height = 240;
 			g_screen_ppitch = 320;
 			g_screen_ptr = shadow_fb;
-		} else {
+		}
+		else {
 			// unscaled SDL window buffer can be used directly
 			g_screen_width = plat_sdl_screen->w;
 			g_screen_height = plat_sdl_screen->h;
@@ -277,29 +280,76 @@ void plat_video_set_shadow(int w, int h)
 	g_screen_ptr = shadow_fb;
 }
 
+
 void plat_video_flip(void)
 {
+	SDL_Rect r;
+
 	if (plat_sdl_overlay != NULL) {
-		SDL_Rect dstrect =
-			{ 0, 0, plat_sdl_screen->w, plat_sdl_screen->h };
+		int w = g_screen_width, h = g_screen_height;
+
+		get_aspect_rect(&r, plat_sdl_screen->w, plat_sdl_screen->h);
+		// the image doesn't cover the bars, so drain the old contents
+		// of all buffers before showing a new frame
+		if (clear_buf_cnt) {
+			SDL_FillRect(plat_sdl_screen, NULL, 0);
+			clear_buf_cnt--;
+		}
+
 		SDL_LockYUVOverlay(plat_sdl_overlay);
-		if (area.w <= plat_sdl_overlay->w && area.h <= plat_sdl_overlay->h)
+		// only convert the active emulator display area
+		if (w <= plat_sdl_overlay->w && h <= plat_sdl_overlay->h)
 			rgb565_to_uyvy(plat_sdl_overlay->pixels[0], shadow_fb,
-					area.w, area.h, g_screen_ppitch,
+					w, h, g_screen_ppitch,
 					plat_sdl_overlay->pitches[0]/2,
-					plat_sdl_overlay->w >= 2*area.w);
+					plat_sdl_overlay->w >= 2*w);
 		SDL_UnlockYUVOverlay(plat_sdl_overlay);
-		SDL_DisplayYUVOverlay(plat_sdl_overlay, &dstrect);
+		SDL_DisplayYUVOverlay(plat_sdl_overlay, &r);
 	}
 	else if (plat_sdl_gl_active) {
-		gl_flip(shadow_fb, g_screen_ppitch, g_screen_height);
+		// The vertices only depend on the window size and widescreen setting.
+		int w = g_screen_ppitch, h = g_screen_height;
+		int win_w = plat_sdl_screen->w, win_h = plat_sdl_screen->h;
+		int ws = currentConfig.EmuOpt & EOPT_WIDESCREEN;
+
+		if (gl_need_clear || win_w != gl_win_w || win_h != gl_win_h ||
+		    ws != gl_widescreen) {
+			get_aspect_rect(&r, win_w, win_h);
+
+			// normalized device coords
+			float x0 = 2.0f * r.x / win_w - 1.0f;
+			float x1 = 2.0f * (r.x + r.w) / win_w - 1.0f;
+			float y1 = 1.0f - 2.0f * r.y / win_h;
+			float y0 = 1.0f - 2.0f * (r.y + r.h) / win_h;
+
+			gl_verts[0] = x0; gl_verts[1] = y1; gl_verts[2] = 0.0f;
+			gl_verts[3] = x1; gl_verts[4] = y1; gl_verts[5] = 0.0f;
+			gl_verts[6] = x0; gl_verts[7] = y0; gl_verts[8] = 0.0f;
+			gl_verts[9] = x1; gl_verts[10] = y0; gl_verts[11] = 0.0f;
+
+			gl_win_w = win_w;
+			gl_win_h = win_h;
+			gl_widescreen = ws;
+
+			// the texture doesn't cover the bars, so drain the old
+			// contents of all buffers before the first new frame
+			gl_clear();
+			gl_need_clear = 0;
+		}
+
+		gl_flip_v(shadow_fb, w, h, gl_verts);
 	}
 	else {
 		int copy = g_screen_ptr != plat_sdl_screen->pixels;
-		if (copy)
-			copy_intscale(plat_sdl_screen->pixels, plat_sdl_screen->w,
-				plat_sdl_screen->h, plat_sdl_screen->pitch/2,
-				shadow_fb, g_screen_width, g_screen_height, g_screen_ppitch);
+		if (copy) {
+			get_aspect_rect(&r, plat_sdl_screen->w, plat_sdl_screen->h);
+			// no need to clear the bars here: the 3-frame clear_buf_cnt
+			// drain after any mode/size change keeps the surface clean
+			copy_stretch(plat_sdl_screen->pixels,
+				     plat_sdl_screen->pitch/2,
+				     shadow_fb, g_screen_width, g_screen_height,
+				     g_screen_ppitch, r.x, r.y, r.w, r.h);
+		}
 
 		if (SDL_MUSTLOCK(plat_sdl_screen))
 			SDL_UnlockSurface(plat_sdl_screen);
@@ -332,6 +382,11 @@ void plat_video_flip(void)
 		plat_video_set_buffer(g_screen_ptr);
 		rendstatus_old = -1;
 		resized = 0;
+
+		// new surface has undefined pixels in the bars; clear them
+		memset(plat_sdl_screen->pixels, 0,
+		       plat_sdl_screen->pitch * plat_sdl_screen->h);
+		clear_buf_cnt = 3; // do it thrice in case of triple buffering
 	}
 
 	if (clear_stat_cnt) {
@@ -355,11 +410,37 @@ void plat_video_clear_buffers(void)
 {
 	int count = g_menuscreen_w * g_menuscreen_h;
 	if (count < area.w * area.h) count = area.w * area.h;
+	if (count * 2 > shadow_size) count = shadow_size / 2;
 	memset(shadow_fb, 0, count * 2);
 	if (plat_sdl_overlay)
 		plat_sdl_overlay_clear();
 	memset(plat_sdl_screen->pixels, 0, plat_sdl_screen->pitch*plat_sdl_screen->h);
 	clear_buf_cnt = 3; // do it thrice in case of triple buffering
+}
+
+// move a window that matches a preset to the current mode's preset at the
+// same line scale; game configs applied from the menu leave it alone
+void plat_sync_window_preset(void)
+{
+	int scale, want_w, want_h;
+	int ws = currentConfig.EmuOpt & EOPT_WIDESCREEN;
+
+	if (!plat_sdl_is_windowed() || plat_target.vout_fullscreen != 0)
+		return;
+
+	scale = g_menuscreen_h / 240;
+	if (scale < 1)
+		return;
+	want_h = plat_window_height(scale);
+	want_w = plat_window_width(scale, ws);
+
+	if (g_menuscreen_h == want_h &&
+	    (g_menuscreen_w == plat_window_width(scale, 0) ||
+	     g_menuscreen_w == plat_window_width(scale, 1)) &&
+	    g_menuscreen_w != want_w) {
+		plat_set_window(want_w, want_h);
+		resize_buffers();
+	}
 }
 
 void plat_video_menu_update(void)
