@@ -80,7 +80,7 @@ code940.elf : $(OBJS940) $(LIBHELIX)
 
 940ym2413.o : ../../../pico/sound/ym2413.c ../../../pico/sound/ym2413.h
 	@echo ">>>" $@
-	$(GCC) $(CFLAGS) -Os -DCODE940 -c $< -o $@
+	$(GCC) $(CFLAGS) -O2 -finline-limit=12 -DCODE940 -c $< -o $@
 
 misc_arm.o : ../../../pico/misc_arm.s
 	@echo ">>>" $@
@@ -88,7 +88,7 @@ misc_arm.o : ../../../pico/misc_arm.s
 
 mp3_sync.o: ../../common/mp3_sync.c
 	@echo ">>>" $@
-	$(GCC) $(CFLAGS) -Os -DCODE940 -c $< -o $@
+	$(GCC) $(CFLAGS) -DCODE940 -c $< -o $@
 
 # the math files share these headers
 $(UCLIBC_OBJS): uClibc/math.h uClibc/math_private.h
