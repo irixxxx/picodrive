@@ -10,9 +10,7 @@
 
 #ifdef CODE940
 /* The 940 has no usable allocator: serve OPLL_new()'s single calloc()
- * from .bss and reject the rest. Keep the redirect local to emu2413. */
-#define calloc emu2413_calloc
-
+ * from .bss and reject the rest. Keep the redirects local to emu2413. */
 static OPLL opll_inst;
 
 void *emu2413_calloc(size_t nmemb, size_t size)
@@ -23,15 +21,33 @@ void *emu2413_calloc(size_t nmemb, size_t size)
   memset(&opll_inst, 0, sizeof(opll_inst));
   return &opll_inst;
 }
+
+/* OPLL_delete() frees the instance, which lives in .bss on the 940 and must
+ * never be handed to the heap's free(). The rate converter's buffers still go
+ * to the real allocator. Defined before the redirect, so the free() below is
+ * the real one. */
+void emu2413_free(void *ptr)
+{
+  if (ptr == &opll_inst)
+    return;
+
+  free(ptr);
+}
+
+#define calloc emu2413_calloc
+#define free emu2413_free
 #endif
 
 /* PicoDrive always renders the chip at its native clk/72 rate and resamples
- * externally, so bypass emu2413's fractional-rate wrapper. This advances
- * exactly one native sample per call and keeps the soft-float rate
- * accumulator out of the per-sample path. */
+ * externally, so advance exactly one native sample per call instead of
+ * running emu2413's fractional rate loop. That loop keeps out_time/inp_step
+ * bookkeeping in the per-sample path and, since rate is a rounded clk/72,
+ * repeats or drops a native sample every few seconds. */
 #define OPLL_calc emu2413_OPLL_calc
 #include "emu2413/emu2413.c"
 #undef OPLL_calc
+#undef calloc /* keep the 940 redirects local to emu2413.c */
+#undef free
 
 int16_t OPLL_calc(OPLL *o)
 {
