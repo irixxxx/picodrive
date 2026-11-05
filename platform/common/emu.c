@@ -203,11 +203,10 @@ static const char *find_bios(int *region, const char *cd_fname)
 	int i, count;
 	const char * const *files;
 	FILE *f = NULL;
-	int ret;
 
-	// we need to have config loaded at this point
-	ret = emu_read_config(cd_fname, 0);
-	if (!ret) emu_read_config(NULL, 0);
+	// we need to have config loaded at this point; this also applies the
+	// region override from the game config, if there is one
+	emu_read_config(cd_fname);
 
 	if (PicoIn.regionOverride) {
 		*region = PicoIn.regionOverride;
@@ -423,8 +422,7 @@ static void system_announce(void)
 static void do_region_override(const char *media_fname)
 {
 	// we only need to override region if config tells us so
-	int ret = emu_read_config(media_fname, 0);
-	if (!ret) emu_read_config(NULL, 0);
+	emu_read_config(media_fname);
 }
 
 int emu_reload_rom(const char *rom_fname_in)
@@ -678,6 +676,18 @@ static void make_config_cfg(char *cfg_buff_512)
 	cfg_buff_512[511] = 0;
 }
 
+static void make_game_cfg(char *cfg_buff_512, const char *rom_fname)
+{
+	char ext[16];
+
+	if (config_slot != 0)
+		snprintf(ext, sizeof(ext), ".%i.cfg", config_slot);
+	else
+		strcpy(ext, ".cfg");
+
+	fname_ext(cfg_buff_512, 512, "cfg"PATH_SEP, ext, rom_fname);
+}
+
 void emu_prep_defconfig(void)
 {
 	memset(&defaultConfig, 0, sizeof(defaultConfig));
@@ -726,45 +736,45 @@ void emu_set_defconfig(void)
 	PicoIn.sndFilterAlpha = currentConfig.s_PicoSndFilterAlpha;
 }
 
-int emu_read_config(const char *rom_fname, int no_defaults)
+int emu_read_config(const char *rom_fname)
 {
 	char cfg[512];
 	int ret;
-
-	if (!no_defaults)
-		emu_set_defconfig();
 
 	if (rom_fname == NULL)
 	{
 		// global config
 		make_config_cfg(cfg);
-		ret = config_readsect(cfg, NULL);
+		ret = config_readsect(cfg, NULL, CFG_LOAD_ALL);
 	}
 	else
 	{
-		char ext[16];
-		int vol;
+		int ws = currentConfig.EmuOpt & EOPT_WIDESCREEN;
 
-		if (config_slot != 0)
-			snprintf(ext, sizeof(ext), ".%i.cfg", config_slot);
-		else
-			strcpy(ext, ".cfg");
+		// keep the emulator settings live: the game options go back to the
+		// global ones, then the global and game configs overlay what they
+		// actually mention
+		config_reset_game_binds();
+		config_game_opts_restore();
 
-		fname_ext(cfg, sizeof(cfg), "cfg"PATH_SEP, ext, rom_fname);
+		make_config_cfg(cfg);
+		config_readsect(cfg, NULL, CFG_LOAD_BINDS);
 
-		// read user's config
-		vol = currentConfig.volume;
-		ret = config_readsect(cfg, NULL);
-		currentConfig.volume = vol; // make vol global (bah)
+		make_game_cfg(cfg, rom_fname);
+		ret = config_readsect(cfg, NULL, CFG_LOAD_GAME);
 
 		if (ret != 0)
 		{
-			// read global config, and apply game_def.cfg on top
-			make_config_cfg(cfg);
-			config_readsect(cfg, NULL);
-
+			// no game config, try the game_def.cfg section
 			emu_make_path(cfg, "game_def.cfg", sizeof(cfg));
-			ret = config_readsect(cfg, emu_make_rom_id(rom_fname));
+			ret = config_readsect(cfg, emu_make_rom_id(rom_fname), CFG_LOAD_GAME);
+		}
+
+		/* no config for this game: keep the aspect ratio it was loaded
+		 * with instead of taking the global default */
+		if (ret != 0) {
+			currentConfig.EmuOpt &= ~EOPT_WIDESCREEN;
+			currentConfig.EmuOpt |= ws;
 		}
 	}
 
@@ -775,6 +785,11 @@ int emu_read_config(const char *rom_fname, int no_defaults)
 	PicoIn.stkTime = currentConfig.stick_timeout;
 	PicoIn.stkRate = currentConfig.stick_rate;
 	PicoIn.stkCenter = currentConfig.stick_centering;
+
+	/* the global config was just applied: remember its game options, a
+	 * game load restores them before overlaying a game config */
+	if (rom_fname == NULL)
+		config_game_opts_capture();
 
 	// some sanity checks
 	if (currentConfig.volume < 0 || currentConfig.volume > 99)
@@ -797,19 +812,14 @@ int emu_write_config(int is_game)
 		make_config_cfg(cfg);
 		write_lrom = 1;
 	} else {
-		char ext[16];
-
-		if (config_slot != 0)
-			snprintf(ext, sizeof(ext), ".%i.cfg", config_slot);
-		else
-			strcpy(ext, ".cfg");
-
-		romfname_ext(cfg, sizeof(cfg), "cfg"PATH_SEP, ext);
+		make_game_cfg(cfg, rom_fname_loaded);
 	}
 
 	lprintf("emu_write_config: %s ", cfg);
-	ret = config_write(cfg);
+	ret = config_write(cfg, is_game);
 	if (write_lrom) config_writelrom(cfg);
+	if (ret == 0 && !is_game)
+		config_game_opts_capture(); // the new global baseline
 #ifdef __GP2X__
 	sync();
 #endif
@@ -979,6 +989,26 @@ char *emu_get_save_fname(int load, int is_sram, int slot, int *time)
 int emu_check_save_file(int slot, int *time)
 {
 	return emu_get_save_fname(1, 0, slot, time) ? 1 : 0;
+}
+
+/* Apply configured SH2 clocks; Pico32xSetClocks() ignores zero, so use
+ * defaults instead of leaving stale multipliers. */
+static void emu_apply_sh2_clocks(void)
+{
+	const int max_khz = 0x7fffffff / 1000;
+	int msh2_khz = currentConfig.msh2_khz;
+	int ssh2_khz = currentConfig.ssh2_khz;
+
+	if (msh2_khz < 1)
+		msh2_khz = PICO_MSH2_HZ / 1000;
+	else if (msh2_khz > max_khz)
+		msh2_khz = max_khz;
+	if (ssh2_khz < 1)
+		ssh2_khz = PICO_SSH2_HZ / 1000;
+	else if (ssh2_khz > max_khz)
+		ssh2_khz = max_khz;
+
+	Pico32xSetClocks(msh2_khz * 1000, ssh2_khz * 1000);
 }
 
 int emu_save_load_game(int load, int sram)
@@ -1648,6 +1678,8 @@ static void emu_loop_prep(void)
 	static int pal_old = -1;
 	static int filter_old = -1;
 	int i;
+
+	emu_apply_sh2_clocks();
 
 	if (currentConfig.CPUclock != plat_target_cpu_clock_get())
 		plat_target_cpu_clock_set(currentConfig.CPUclock);

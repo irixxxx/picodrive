@@ -155,7 +155,7 @@ void  emu_reset_game(void);
 
 void  emu_prep_defconfig(void);
 void  emu_set_defconfig(void);
-int   emu_read_config(const char *rom_fname, int no_defaults);
+int   emu_read_config(const char *rom_fname);
 int   emu_write_config(int game);
 
 char *emu_get_save_fname(int load, int is_sram, int slot, int *time);

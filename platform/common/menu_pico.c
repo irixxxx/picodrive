@@ -11,6 +11,7 @@
 #include <time.h>
 
 #include "emu.h"
+#include "config_file.h"
 #include "menu_pico.h"
 #include "input_pico.h"
 #include "keyboard.h"
@@ -1070,8 +1071,6 @@ static int mh_opt_sh2cycles(int id, int keys)
 	else if (*khz > 0x7fffffff / 1000)
 		*khz = 0x7fffffff / 1000;
 
-	Pico32xSetClocks(currentConfig.msh2_khz * 1000, currentConfig.ssh2_khz * 1000);
-
 	return 0;
 }
 
@@ -1469,6 +1468,7 @@ static int mh_opt_misc(int id, int keys)
 static int mh_restore_defaults(int id, int keys)
 {
 	emu_set_defconfig();
+	config_game_opts_capture(); // defaults are the new baseline
 	menu_update_msg("defaults restored");
 	return 1;
 }
@@ -1951,8 +1951,8 @@ static int mh_saveloadcfg(int id, int keys)
 			menu_update_msg("failed to write config");
 		break;
 	case MA_OPT_LOADCFG:
-		ret = emu_read_config(rom_fname_loaded, 1);
-		if (!ret) ret = emu_read_config(NULL, 1);
+		/* only the game options are loaded, emulator settings stay */
+		ret = emu_read_config(rom_fname_loaded);
 		if (ret)  menu_update_msg("config loaded");
 		else      menu_update_msg("failed to load config");
 		break;
@@ -2093,6 +2093,7 @@ static menu_entry e_menu_hidden[] =
 	mee_cust_h("Input device 1",          MA_OPT_INPUT_DEV0,     mh_indev, mgn_indev, NULL),
 	mee_cust_h("Input device 2",          MA_OPT_INPUT_DEV1,     mh_indev, mgn_indev, NULL),
 	mee_onoff("Accurate sprites",         MA_OPT_ACC_SPRITES,    PicoIn.opt, POPT_ACC_SPRITES),
+	mee_range("Sound Volume",             MA_OPT_VOLUME,         currentConfig.volume, 0, 99),
 //	mee_range("Save slot",                MA_OPT_SAVE_SLOT,      state_slot, 0, 9),
 
 //	mee_enum ("Confirm savestate",        MA_OPT_CONFIRM_STATES, currentConfig.confirm_save, men_confirm_save),

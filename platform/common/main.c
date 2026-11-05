@@ -89,7 +89,7 @@ int main(int argc, char *argv[])
 	menu_init();
 
 	emu_prep_defconfig(); // depends on input
-	emu_read_config(NULL, 0);
+	emu_read_config(NULL);
 
 	emu_init();
 
