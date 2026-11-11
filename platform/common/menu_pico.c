@@ -149,13 +149,64 @@ static void copy_bg(int dir)
 	}
 }
 
+// menu text/skin scaling, so menus stay readable on big windows
+
+#if defined(PANDORA) || defined(__PS2__)
+#define MENU_SCALE_DEF 2
+#else
+#define MENU_SCALE_DEF 1
+#endif
+
+static int menu_scale_opt = MENU_SCALE_DEF - 1;	// 0..2 -> 1x..3x
+static int menu_scale_cur;	// scale currently used by libpicofe
 static int menu_mouse_opt = 1;	// allow the mouse to drive menus
+
+// assumed menu size in characters; 40x24 is the full text grid at
+// 320x240 (1x) and at 640x480 (2x)
+#define MENU_FIT_COLS 40
+#define MENU_FIT_ROWS 24
+
+static int menu_scale_get(void)
+{
+	int s;
+
+	// menu scaling is for windowed systems; handhelds keep the traditional
+	// fixed scale and ignore the option
+	if (!plat_has_wm())
+		return MENU_SCALE_DEF;
+
+	// start from the selected scale, then shrink it if a 40x24 character
+	// menu wouldn't fit the current resolution. the setting itself is left
+	// alone, so it comes back when the window is big enough again.
+	s = menu_scale_opt + 1;
+	if (s * MENU_FIT_COLS * 8 > g_menuscreen_w)
+		s = g_menuscreen_w / (MENU_FIT_COLS * 8);
+	if (s * MENU_FIT_ROWS * 10 > g_menuscreen_h)
+		s = g_menuscreen_h / (MENU_FIT_ROWS * 10);
+	if (s < 1)
+		s = 1;
+
+	return s;
+}
+
+static void menu_update_scale(void)
+{
+	int s = menu_scale_get();
+
+	if (s == menu_scale_cur)
+		return;
+	lprintf("menu: %dx scale, screen %dx%d\n", s, g_menuscreen_w, g_menuscreen_h);
+	menu_scale_cur = s;
+	menu_init_base_scale(s);
+	me_mouse_inited = 0;
+}
 
 static void menu_draw_prep(void)
 {
 	plat_video_menu_update();
 
 	menu_set_mouse_enabled(menu_mouse_opt && plat_has_wm());
+	menu_update_scale();
 
 	if (menu_w == g_menuscreen_w && menu_h == g_menuscreen_h)
 		return;
@@ -1210,6 +1261,9 @@ static const char *men_confirm_save[] = { "OFF", "writes", "loads", "both", NULL
 static const char h_confirm_save[]    = "Ask for confirmation when overwriting save,\n"
 					"loading state or both";
 static const char *men_sort_order[] = { "ignore case", "mind case", NULL };
+static const char *men_menu_size[] = { "1x", "2x", "3x", NULL };
+static const char h_menu_size[]    = "Preferred size of menu text and icons,\n"
+					"reduced automatically on small windows";
 static const char h_menu_mouse[]   = "Allow mouse control of the menu; the mouse\n"
 					"takes over after a click or wheel";
 
@@ -1220,6 +1274,7 @@ static menu_entry e_menu_ui_options[] =
 	mee_onoff     ("Autoload newest savestate",MA_OPT_AUTOLOAD_SAVE,  g_autostateld_opt, 1),
 	mee_onoff     ("Don't save last used game",MA_OPT2_NO_LAST_ROM,   currentConfig.EmuOpt, EOPT_NO_AUTOSVCFG),
 	mee_enum      ("File selector sort order", MA_OPT_SORT_ORDER,     g_alphasort_opt, men_sort_order),
+	mee_enum_h    ("Menu size",                MA_OPT_MENU_SIZE,      menu_scale_opt, men_menu_size, h_menu_size),
 	mee_onoff_h   ("Menu mouse mode",          MA_OPT_MENU_MOUSE,     menu_mouse_opt, 1, h_menu_mouse),
 	mee_end,
 };
@@ -1228,8 +1283,9 @@ static int menu_loop_ui_options(int id, int keys)
 {
 	static int sel = 0;
 
-	// this option only makes sense in windowed mode; disabled entries
-	// are not drawn by libpicofe, so this also hides it
+	// these options only make sense in windowed mode; disabled entries
+	// are not drawn by libpicofe, so this also hides them
+	me_enable(e_menu_ui_options, MA_OPT_MENU_SIZE, plat_has_wm());
 	me_enable(e_menu_ui_options, MA_OPT_MENU_MOUSE, plat_has_wm());
 	if (!e_menu_ui_options[sel].enabled)
 		sel = 0;
@@ -2046,11 +2102,8 @@ void menu_init(void)
 {
 	int i;
 
-	menu_init_base();
-
-#if defined(PANDORA) || defined(__PS2__)
-	menu_init_base_scale(2);
-#endif
+	menu_scale_cur = 0;
+	menu_update_scale();
 
 	i = 0;
 #if defined(_SVP_DRC) || defined(DRC_SH2)
