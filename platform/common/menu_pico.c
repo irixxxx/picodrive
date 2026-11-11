@@ -149,13 +149,21 @@ static void copy_bg(int dir)
 	}
 }
 
+static int menu_mouse_opt = 1;	// allow the mouse to drive menus
+
 static void menu_draw_prep(void)
 {
 	plat_video_menu_update();
 
+	menu_set_mouse_enabled(menu_mouse_opt && plat_has_wm());
+
 	if (menu_w == g_menuscreen_w && menu_h == g_menuscreen_h)
 		return;
 	menu_w = g_menuscreen_w, menu_h = g_menuscreen_h;
+
+	/* the cursor now maps to a different place; don't let a stationary
+	 * mouse move the selection until it is actually moved */
+	me_mouse_inited = 0;
 
 	if (PicoGameLoaded)
 	{
@@ -1202,6 +1210,8 @@ static const char *men_confirm_save[] = { "OFF", "writes", "loads", "both", NULL
 static const char h_confirm_save[]    = "Ask for confirmation when overwriting save,\n"
 					"loading state or both";
 static const char *men_sort_order[] = { "ignore case", "mind case", NULL };
+static const char h_menu_mouse[]   = "Allow mouse control of the menu; the mouse\n"
+					"takes over after a click or wheel";
 
 static menu_entry e_menu_ui_options[] =
 {
@@ -1210,12 +1220,19 @@ static menu_entry e_menu_ui_options[] =
 	mee_onoff     ("Autoload newest savestate",MA_OPT_AUTOLOAD_SAVE,  g_autostateld_opt, 1),
 	mee_onoff     ("Don't save last used game",MA_OPT2_NO_LAST_ROM,   currentConfig.EmuOpt, EOPT_NO_AUTOSVCFG),
 	mee_enum      ("File selector sort order", MA_OPT_SORT_ORDER,     g_alphasort_opt, men_sort_order),
+	mee_onoff_h   ("Menu mouse mode",          MA_OPT_MENU_MOUSE,     menu_mouse_opt, 1, h_menu_mouse),
 	mee_end,
 };
 
 static int menu_loop_ui_options(int id, int keys)
 {
 	static int sel = 0;
+
+	// this option only makes sense in windowed mode; disabled entries
+	// are not drawn by libpicofe, so this also hides it
+	me_enable(e_menu_ui_options, MA_OPT_MENU_MOUSE, plat_has_wm());
+	if (!e_menu_ui_options[sel].enabled)
+		sel = 0;
 
 	me_loop_d(e_menu_ui_options, &sel, menu_draw_prep, NULL);
 
