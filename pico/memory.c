@@ -1615,6 +1615,8 @@ static u32 ym2612_read_local_68k(u32 a)
     return 0;
 }
 
+#define YM_TMSHIFT 20
+
 // timers are saved as tick counts, in 16.16 int format.
 // busy/decay go through the exactly-invertible cycles_* macros; the tick
 // encode/decode below must round the same way for the round trip to be lossless.
@@ -1627,13 +1629,13 @@ void ym2612_pack_timer_vals(int *tat_, int *tbt_, int *busy_)
   if (Pico.t.ym2612_busy > 0)
     busy = cycles_z80_to_68k(Pico.t.ym2612_busy);
   if (Pico.t.timer_a_next_oflow != TIMER_NO_OFLOW)
-    tat = DIV_ROUND((Pico.t.timer_a_step - Pico.t.timer_a_next_oflow) * ONEQ(16),
+    tat = DIV_ROUND((Pico.t.timer_a_step - Pico.t.timer_a_next_oflow) * ONEQ(YM_TMSHIFT),
                     TIMER_A_TICK_ZCYCLES);
   if (Pico.t.timer_b_next_oflow != TIMER_NO_OFLOW)
-    tbt = DIV_ROUND((Pico.t.timer_b_step - Pico.t.timer_b_next_oflow) * ONEQ(16),
+    tbt = DIV_ROUND((Pico.t.timer_b_step - Pico.t.timer_b_next_oflow) * ONEQ(YM_TMSHIFT),
                     TIMER_B_TICK_ZCYCLES);
-  elprintf(EL_YMTIMER, "save: timer a %i/%i", tat >> 16, tac);
-  elprintf(EL_YMTIMER, "save: timer b %i/%i", tbt >> 16, tbc);
+  elprintf(EL_YMTIMER, "save: timer a %i/%i", tat >> YM_TMSHIFT, tac);
+  elprintf(EL_YMTIMER, "save: timer b %i/%i", tbt >> YM_TMSHIFT, tbc);
 
   *tat_ = tat;
   *tbt_ = tbt;
@@ -1642,10 +1644,15 @@ void ym2612_pack_timer_vals(int *tat_, int *tbt_, int *busy_)
 
 int ym2612_pack_timers(void *buf, size_t size)
 {
-  int tat = 0, tbt = 0, busy = 0, decay = 0;
+  int tat = 0, tbt = 0, busy = 0, decay = 0, nib = 0;
   size_t b = 0;
 
   ym2612_pack_timer_vals(&tat, &tbt, &busy);
+  // older builds read the 16.16 field; the extra 4 bits go in the spare byte
+  nib = (tat & 0xf);
+  tat >>= (YM_TMSHIFT - 16);
+  nib |= (tbt & 0xf) << 4;
+  tbt >>= (YM_TMSHIFT - 16);
   if (Pico.t.ym2612_decay > 0)
     decay = cycles_z80_to_68k(Pico.t.ym2612_decay);
 
@@ -1657,6 +1664,7 @@ int ym2612_pack_timers(void *buf, size_t size)
   save_u32(buf, &b, busy);
   save_u32(buf, &b, decay);
   save_u8_(buf, &b, ym2612.OPN.ST.status_latch);
+  save_u8_(buf, &b, (u8)nib);
   return b;
 }
 
@@ -1666,7 +1674,7 @@ void ym2612_pack_state_old(void)
   int tat, tbt, busy;
 
   ym2612_pack_timer_vals(&tat, &tbt, &busy);
-  YM2612PicoStateSave2(tat, tbt, busy);
+  YM2612PicoStateSave2(tat >> (YM_TMSHIFT-16), tbt >> (YM_TMSHIFT-16), busy);
 }
 
 void ym2612_unpack_state_old(void)
@@ -1723,7 +1731,7 @@ void ym2612_unpack_state_old(void)
 
 void ym2612_unpack_timers(const void *buf, size_t size)
 {
-  int tac, tat, tbc, tbt, busy, decay;
+  int tac, tat, tbc, tbt, busy, decay, nib = 0;
   size_t b = 0;
   assert(size >= 16);
   if (size < 16)
@@ -1734,20 +1742,25 @@ void ym2612_unpack_timers(const void *buf, size_t size)
   tbt = load_u32(buf, &b);
   busy = load_u32(buf, &b);
   Pico.t.ym2612_busy = cycles_68k_to_z80(busy);
-  tac = (1024 - ym2612.OPN.ST.TA) << 16;
-  tbc = (256  - ym2612.OPN.ST.TB) << 16;
   Pico.t.timer_a_step = TIMER_A_TICK_ZCYCLES * (1024 - ym2612.OPN.ST.TA);
   Pico.t.timer_b_step = TIMER_B_TICK_ZCYCLES * (256  - ym2612.OPN.ST.TB);
-  if (ym2612.OPN.ST.mode & 1)
-    Pico.t.timer_a_next_oflow = SHR_ROUND(1LL * (tac - tat) * TIMER_A_TICK_ZCYCLES, 16);
-  else
+  if (size >= 22)
+    nib = ((const u8 *)buf)[21]; // spare byte, skipped by older builds
+  // nib is the low part of the stored fraction, so it is subtracted with tat/tbt
+  if (ym2612.OPN.ST.mode & 1) {
+    tac = ((1024 - ym2612.OPN.ST.TA) << YM_TMSHIFT) - (nib & 0xf);
+    Pico.t.timer_a_next_oflow = SHR_ROUND(
+        (tac - ((tat << (YM_TMSHIFT - 16)))) * TIMER_A_TICK_ZCYCLES, YM_TMSHIFT);
+  } else
     Pico.t.timer_a_next_oflow = TIMER_NO_OFLOW;
-  if (ym2612.OPN.ST.mode & 2)
-    Pico.t.timer_b_next_oflow = SHR_ROUND(1LL * (tbc - tbt) * TIMER_B_TICK_ZCYCLES, 16);
-  else
+  if (ym2612.OPN.ST.mode & 2) {
+    tbc = ((256  - ym2612.OPN.ST.TB) << YM_TMSHIFT) - (nib >> 4);
+    Pico.t.timer_b_next_oflow = SHR_ROUND(
+        (tbc - ((tbt << (YM_TMSHIFT - 16)))) * TIMER_B_TICK_ZCYCLES, YM_TMSHIFT);
+  } else
     Pico.t.timer_b_next_oflow = TIMER_NO_OFLOW;
-  elprintf(EL_YMTIMER, "load: %i/%i, timer_a_next_oflow %i", tat>>16, tac>>16, Pico.t.timer_a_next_oflow >> 8);
-  elprintf(EL_YMTIMER, "load: %i/%i, timer_b_next_oflow %i", tbt>>16, tbc>>16, Pico.t.timer_b_next_oflow >> 8);
+  elprintf(EL_YMTIMER, "load: %i ticks, timer_a_next_oflow %i", tat >> 16, Pico.t.timer_a_next_oflow >> 8);
+  elprintf(EL_YMTIMER, "load: %i ticks, timer_b_next_oflow %i", tbt >> 16, Pico.t.timer_b_next_oflow >> 8);
   if (size >= 21) {
     decay = load_u32(buf, &b);
     Pico.t.ym2612_decay = cycles_68k_to_z80(decay);

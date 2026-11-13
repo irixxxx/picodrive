@@ -2430,7 +2430,17 @@ void YM2612PicoStateLoad3(const void *buf_, size_t size)
 	if (lfo_inc_reg)
 		ym2612.OPN.lfo_inc = ym2612.OPN.lfo_freq[--lfo_inc_reg & 7];
 	ym2612.dacout = (u32)ym2612.dacout << DAC_SHIFT;
-	ym2612.slot_mask = 0xffffff;
+	// restore the active slot mask from the loaded envelopes instead of marking
+	// everything active: channels that are idle are skipped by chan_render(),
+	// rendering them once here would advance their upd_cnt/EG out of phase.
+	ym2612.slot_mask = 0;
+	{
+		int c, s;
+		for (c = 0; c < 6; c++)
+			for (s = 0; s < 4; s++)
+				if (ym2612.CH[c].SLOT[s].state != EG_OFF)
+					ym2612.slot_mask |= 1 << (s + c*4);
+	}
 	//printf("ym2612 state size: %zu\n", b);
 	return;
 broken:

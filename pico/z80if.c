@@ -158,7 +158,11 @@ struct z80_state {
   u8 irq_vector[3]; // up to 3 byte vector for irq mode0 handling
   u16 cyc;
   s16 busdelay;
-  u8 reserved[4];
+  // a save can land with an int owed to the cpu and no line to show it
+  u8 irq_level;     // line stays asserted after the irq is taken
+  u8 irq_armed;     // irq is due on the next run
+  u8 nmi_pending;   // nmi is due on the next run
+  u8 reserved;
 };
 
 void z80_pack(void *data)
@@ -189,7 +193,11 @@ void z80_pack(void *data)
   s->iff1 = !!(drZ80.Z80IF & 1);
   s->iff2 = !!(drZ80.Z80IF & 2);
   s->im = drZ80.Z80IM;
+  // z80_irq carries the request and its one-shot bit, iff1 gates taking it
   s->irq_pending = !!drZ80.Z80_IRQ;
+  s->irq_level = (drZ80.Z80_IRQ == 2);
+  s->irq_armed = !!(drZ80.Z80_IRQ & drZ80.Z80IF & 1);
+  s->nmi_pending = !!(drZ80.Z80IF & 8);
   s->irq_vector[0] = drZ80.z80irqvector >> 16;
   s->irq_vector[1] = drZ80.z80irqvector >> 8;
   s->irq_vector[2] = drZ80.z80irqvector;
@@ -213,6 +221,10 @@ void z80_pack(void *data)
     s->iff2 = !!zIFF2;
     s->im = zIM;
     s->irq_pending = (Cz80_Get_Reg(&CZ80, CZ80_IRQ) != CLEAR_LINE);
+    s->irq_level = (Cz80_Get_Reg(&CZ80, CZ80_IRQ) == ASSERT_LINE);
+    // the armed and latched ints outlive the line, so keep them apart
+    s->irq_armed = !!(CZ80.Status & CZ80_HAS_INT);
+    s->nmi_pending = !!(CZ80.Status & CZ80_HAS_NMI);
     s->irq_vector[0] = 0xff;
   }
 #endif
@@ -254,11 +266,12 @@ int z80_unpack(const void *data)
   DRW16(IX, s->ix); DRW16(IY, s->iy);
   drz80_load_pcsp(s->pc, s->sp);
   drZ80.Z80IF = 0;
-  if (s->halted) drZ80.Z80IF |= 4;
-  if (s->iff1)   drZ80.Z80IF |= 1;
-  if (s->iff2)   drZ80.Z80IF |= 2;
+  if (s->halted)      drZ80.Z80IF |= 4;
+  if (s->iff1)        drZ80.Z80IF |= 1;
+  if (s->iff2)        drZ80.Z80IF |= 2;
+  if (s->nmi_pending) drZ80.Z80IF |= 8;
   drZ80.Z80IM = s->im;
-  drZ80.Z80_IRQ = s->irq_pending;
+  drZ80.Z80_IRQ = s->irq_pending ? (s->irq_level ? 2 : 1) : 0;
   drZ80.z80irqvector = ((u32)s->irq_vector[0] << 16) |
     ((u32)s->irq_vector[1] << 8) | s->irq_vector[2];
   return 0;
@@ -281,8 +294,15 @@ int z80_unpack(const void *data)
     Cz80_Set_Reg(&CZ80, CZ80_IFF1, s->iff1);
     Cz80_Set_Reg(&CZ80, CZ80_IFF2, s->iff2);
     zIM = s->im;
-    Cz80_Set_Reg(&CZ80, CZ80_IRQ, s->irq_pending ? ASSERT_LINE : CLEAR_LINE);
+    Cz80_Set_Reg(&CZ80, CZ80_IRQ, s->irq_pending ?
+      (s->irq_level ? ASSERT_LINE : HOLD_LINE) : CLEAR_LINE);
     Cz80_Set_IRQ(&CZ80, 0, Cz80_Get_Reg(&CZ80, CZ80_IRQ));
+    // last, as set_irq arms the int and the halt restore overwrites Status;
+    // the line test also arms states saved before irq_armed existed
+    CZ80.Status = (CZ80.Status & ~(CZ80_HAS_INT | CZ80_HAS_NMI))
+                | ((s->irq_armed || (s->irq_pending && s->iff1))
+                     ? CZ80_HAS_INT : 0)
+                | (s->nmi_pending ? CZ80_HAS_NMI : 0);
     return 0;
   }
 #else

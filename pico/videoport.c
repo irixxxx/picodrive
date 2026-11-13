@@ -1284,8 +1284,8 @@ int PicoVideoSave(void *buf)
   int i;
 
   // FIFO stuff
-  memcpy(bp, &VdpFIFO, offsetof(struct VdpFIFO, fifo_slot));
-  bp += offsetof(struct VdpFIFO, fifo_slot);
+  memcpy(bp, &VdpFIFO, offsetof(struct VdpFIFO, fifo_maxslot));
+  bp += offsetof(struct VdpFIFO, fifo_maxslot);
 
   // SAT Cache
   for (i = 0; i < 80; i++, bp += sizeof(u32))
@@ -1310,10 +1310,15 @@ void PicoVideoLoad(void *buf, int len)
 
   if (len) {
     int i;
-    if (len >= offsetof(struct VdpFIFO, fifo_slot))
-      memcpy(&VdpFIFO, buf, offsetof(struct VdpFIFO, fifo_slot));
-    for (i = 0; i < 80; i++)
-      memcpy(VdpSATCache+2*i, buf + offsetof(struct VdpFIFO, fifo_slot) + 4*i, sizeof(u32));
+    int base = offsetof(struct VdpFIFO, fifo_slot);
+    if (len >= offsetof(struct VdpFIFO, fifo_maxslot) + 80*sizeof(u32)) {
+      // new: scanline FIFO position is part of the state too
+      base = offsetof(struct VdpFIFO, fifo_maxslot);
+    }
+    if (len >= base)
+      memcpy(&VdpFIFO, buf, base);
+    for (i = 0; i < 80 && len > base; i++, base += sizeof(u32))
+      memcpy(VdpSATCache+2*i, buf + base, sizeof(u32));
     Pico.est.rendstatus |= PDRAW_DIRTY_SPRITES;
     return;
   }

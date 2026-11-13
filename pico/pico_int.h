@@ -179,8 +179,22 @@ extern struct DrZ80 drZ80;
 #elif defined(_USE_CZ80)
 #include <cpu/cz80/cz80.h>
 
-#define z80_run(cycles)    Cz80_Exec(&CZ80, cycles)
-#define z80_run_nr(cycles) Cz80_Exec(&CZ80, cycles)
+// cz80 stops at ei and charges the whole slice, so run the owed cycles here
+// to keep the caller's cycle count honest like drz80 does
+static inline int z80_run_cz80(int cycles)
+{
+  int done = Cz80_Exec(&CZ80, cycles), over;
+
+  while (CZ80.ExtraCycles < 0) {
+    over = Cz80_Exec(&CZ80, 0);
+    if (over > 0)
+      done += over;
+  }
+  return done;
+}
+
+#define z80_run(cycles)    z80_run_cz80(cycles)
+#define z80_run_nr(cycles) z80_run_cz80(cycles)
 #define z80_int()          Cz80_Set_IRQ(&CZ80, 0, HOLD_LINE)
 #define z80_int_assert(a)  Cz80_Set_IRQ(&CZ80, 0, (a) ? ASSERT_LINE : CLEAR_LINE)
 #define z80_nmi()          Cz80_Set_IRQ(&CZ80, IRQ_LINE_NMI, ASSERT_LINE)
