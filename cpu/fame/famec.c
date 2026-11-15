@@ -30,8 +30,6 @@
 #define FAMEC_DATABITS  8
 #define FAMEC_32BIT_PC
 
-#define USE_CYCLONE_TIMING
-#define USE_CYCLONE_TIMING_DIV
 #define PICODRIVE_HACK
 // Options //
 
@@ -761,6 +759,63 @@ static FAMEC_EXTRA_INLINE u32 execute_exception_group_0(M68K_CONTEXT *ctx, s32 v
 	return newPC;
 }
 
+
+// count leading zeros, used to skip divide loop iterations the quotient cannot reach
+static int famec_div_clz(u32 v)
+{
+	int n = 0;
+	if (!(v & 0xFFFF0000)) { n += 16; v <<= 16; }
+	if (!(v & 0xFF000000)) { n += 8;  v <<= 8;  }
+	if (!(v & 0xF0000000)) { n += 4;  v <<= 4;  }
+	if (!(v & 0xC0000000)) { n += 2;  v <<= 2;  }
+	if (!(v & 0x80000000))   n += 1;
+	return n;
+}
+
+// penalty pairs of the non-restoring divide loop, two cycles each
+static u32 famec_div_pairs(u32 dividend, u32 divisor)
+{
+	u32 r10 = (divisor << 15) - 1;
+	u32 neg = 0 - (divisor << 16);
+	u32 r2 = dividend, pairs;
+	int shift, k;
+
+	// skipped iterations are faster than real ones, two pairs each
+	k = famec_div_clz(dividend | divisor) - famec_div_clz(divisor << 16) - 1;
+	if (k < 0) k = 0;
+	pairs = 2 * (u32)k;
+
+	for (shift = k; shift < 16; shift++)
+	{
+		u32 x = r2 << shift;
+		u32 diff = r10 - x;
+		int carry = r10 >= x;
+
+		if (!carry) r2 += neg >> (shift + 1);
+		// an iteration costs 0, 1 or 2 pairs depending on the borrow and overflow
+		if (shift != 15 && !(((r10 ^ x) & (diff ^ r10)) >> 31))
+			pairs += carry ? 2 : 1;
+	}
+	return pairs;
+}
+
+// divide loop time, excluding the effective address
+static u32 famec_divu_cycles(u32 dividend, u32 divisor)
+{
+	return 76 + 2 * famec_div_pairs(dividend, divisor);
+}
+
+static u32 famec_divs_cycles(u32 dividend, s32 divisor)
+{
+	u32 dneg = dividend >> 31, sneg = (u32)divisor >> 31;
+	u32 adend = dneg ? 0 - dividend : dividend;
+	u32 adiv  = sneg ? 0 - (u32)divisor : (u32)divisor;
+
+	// the loop is only entered when the quotient fits
+	if (adend >= (adiv << 16))
+		return 16 + 2 * dneg;
+	return 90 + 4 * dneg + 2 * (dneg ^ sneg) + 2 * famec_div_pairs(adend, adiv);
+}
 
 #ifdef FAMEC_NO_GOTOS
 
