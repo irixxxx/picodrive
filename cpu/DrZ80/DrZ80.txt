@@ -29,7 +29,7 @@ See source code for up to date of register usage, however a summary is here:
   r5  : Pointer to Cpu Context
   r6  : Current PC + Memory Base (i.e. pointer to next opcode)
   r7  : Z80 A Register in top 8 bits (i.e. 0xAA000000)
-  r8  : Z80 F Register (Flags) (NZCV) in lowest four bits
+  r8  : Z80 F Register (Flags) (NZCV) in lowest four bits, R Register in the top byte
   r9  : Z80 BC Register pair in top 16 bits (i.e. 0xBBCC0000)
   r10 : Z80 DE Register pair in top 16 bits (i.e. 0xDDEE0000)
   r11 : Z80 HL Register pair in top 16 bits (i.e. 0xHHLL0000)

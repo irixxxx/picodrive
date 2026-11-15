@@ -113,11 +113,11 @@ switch (Opcode)
 
 	OPXY(0x26): // LD   HX,#imm
 		data->B.H = READ_ARG();
-		RET(4)
+		RET(7)
 
 	OPXY(0x2e): // LD   LX,#imm
 		data->B.L = READ_ARG();
-		RET(4)
+		RET(7)
 
 	OPXY(0x0a): // LD   A,(BC)
 		goto OP_LOAD_A_mBC;
@@ -194,9 +194,8 @@ switch (Opcode)
 
 	OPXY(0xc1): // POP  BC
 	OPXY(0xd1): // POP  DE
-		goto OP_POP_RR;
 	OPXY(0xf1): // POP  AF
-		goto OP_POP_AF;
+		goto OP_POP_RR;
 
 	OPXY(0xe1): // POP  IX
 		goto OP_POP;
@@ -207,9 +206,8 @@ switch (Opcode)
 
 	OPXY(0xc5): // PUSH BC
 	OPXY(0xd5): // PUSH DE
-		goto OP_PUSH_RR;
 	OPXY(0xf5): // PUSH AF
-		goto OP_PUSH_AF;
+		goto OP_PUSH_RR;
 
 	OPXY(0xe5): // PUSH IX
 		goto OP_PUSH;
@@ -752,9 +750,7 @@ switch (Opcode)
 
 		adr = data->W + (INT8)READ_ARG();
 		Opcode = READ_ARG();
-#if CZ80_EMULATE_R_EXACTLY
-		zR++;
-#endif
+		/* ddcb refreshes r only for the dd and cb fetches */
 		#include "cz80_opXYCB.c"
 	}
 

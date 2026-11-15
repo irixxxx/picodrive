@@ -54,7 +54,7 @@ struct DrZ80
   unsigned char Z80_IRQ;        /*0x4C - Set IRQ Number (must be halfword aligned) */   
   unsigned char Z80IF;          /*0x4D - Interrupt Flags:  bit0=_IFF1, bit1=_IFF2, bit2=_HALT, b3=NMI */
   unsigned char Z80IM;          /*0x4E - Set IRQ Mode */
-  unsigned char spare;          /*0x4F - N/A */
+  unsigned char Z80R;           /*0x4F - R Register:   (count << 1) | bit7 */
   unsigned int z80irqvector;    /*0x50 - Set IRQ Vector i.e. 0xFF=RST */
   void (*z80_irq_callback )(void);
   void (*z80_write8 )(unsigned char d,unsigned short a); 

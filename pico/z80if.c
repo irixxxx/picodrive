@@ -169,7 +169,9 @@ void z80_pack(void *data)
 {
   struct z80_state *s = data;
   memset(data, 0, Z80_STATE_SIZE);
-  memcpy(s->magic, "Z80a", 4);
+  // 'b': cz80 also stores AF' in A,F order. 'a' states (2022-05..2026-11) hold
+  // AF' in either order, depending on the EX AF,AF' parity since the last load.
+  memcpy(s->magic, "Z80b", 4);
   s->cyc = Pico.t.z80c_cnt;
   s->busdelay = Pico.t.z80_busdelay;
 #if defined(_USE_DRZ80)
@@ -185,7 +187,7 @@ void z80_pack(void *data)
   s->a.b = DRR16H(BC2); s->a.c = DRR16L(BC2);
   s->a.d = DRR16H(DE2); s->a.e = DRR16L(DE2);
   s->a.h = DRR16H(HL2); s->a.l = DRR16L(HL2);
-  s->i = DRR8(I);       s->r = drZ80.spare;
+  s->i = DRR8(I);       s->r = (drZ80.Z80R >> 1) | (drZ80.Z80R << 7); // ror 1: R is (count << 1) | bit7
   s->ix = DRR16(IX);    s->iy = DRR16(IY);
   s->sp = drZ80.Z80SP - drZ80.Z80SP_BASE;
   s->pc = drZ80.Z80PC - drZ80.Z80PC_BASE;
@@ -245,7 +247,7 @@ int z80_unpack(const void *data)
   #define DRW16(n, v)      drZ80.Z80##n = (u32)(v) << 16
   #define DRW16HL(n, h, l) drZ80.Z80##n = ((u32)(h) << 24) | ((u32)(l) << 16)
   u8 mf, af;
-  if (s->magic[3] == 'a') {
+  if (s->magic[3] >= 'a') {
     // new save: flags always in Z80 format
     mf = DrZ80_ARM[s->m.f];
     af = DrZ80_ARM[s->a.f];
@@ -262,9 +264,16 @@ int z80_unpack(const void *data)
   DRW16HL(BC2, s->a.b, s->a.c);
   DRW16HL(DE2, s->a.d, s->a.e);
   DRW16HL(HL2, s->a.h, s->a.l);
-  DRW8(I, s->i);    drZ80.spare = s->r;
+  DRW8(I, s->i);    drZ80.Z80R = (s->r << 1) | (s->r >> 7);
   DRW16(IX, s->ix); DRW16(IY, s->iy);
-  drz80_load_pcsp(s->pc, s->sp);
+  // 'a' states come from the old DrZ80, which left PC on the HALT byte while
+  // halted (and skipped it again on interrupt); the core now keeps PC past
+  // the HALT, so shift those old states over. Only the old format, and only
+  // while halted, is affected.
+  if (s->magic[3] < 'b' && s->halted)
+    drz80_load_pcsp((s->pc + 1) & 0xffff, s->sp);
+  else
+    drz80_load_pcsp(s->pc, s->sp);
   drZ80.Z80IF = 0;
   if (s->halted)      drZ80.Z80IF |= 4;
   if (s->iff1)        drZ80.Z80IF |= 1;
