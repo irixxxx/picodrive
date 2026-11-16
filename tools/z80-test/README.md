@@ -16,14 +16,18 @@ directly, so it can be run on a workstation.
     core.h            shared state/memory definitions
     core_cz80.c       CZ80 adapter (registers, memory and port callbacks)
     core_drz80.c      DrZ80 adapter (xmap tables, register layout, ports)
-    prepare-tests.py  downloads the v1 json files and packs them for the runner
+    prepare-tests.py  fetches the v1 json files with git and packs them for the runner
     Makefile          builds build/z80-test-cz80 and build/z80-test-drz80
     run.sh            builds and runs either core, on the host or in a container
     rcheck/           three hand-built vectors for the R transfers
 
-Only that is in the repo: `tests/` is downloaded by `prepare-tests.py` and
+Only that is in the repo: `tests/` is fetched by `prepare-tests.py` and
 `build/` is made by `make`, both git-ignored. There is no submodule, so a
-checkout neither pulls the vectors nor needs network access to build.
+checkout neither pulls the vectors nor needs network access to build. The
+fetcher uses a shallow, blobless git clone (a few hundred kB of tree metadata;
+the selected blobs are downloaded on demand), which avoids the GitHub contents
+API's 1000-entry listing cap that used to truncate v1. Fetching needs `git`;
+the clone lives under the git-ignored `tests/` directory.
 
 ## Prerequisites
 
@@ -51,7 +55,7 @@ CONTAINER=builder CONT_REPO=/src/picodrive ./run.sh
 
 ## Building and running
 
-    ./prepare-tests.py        # fetch the 45-file smoke set
+    ./prepare-tests.py        # fetch the 47-file smoke set
     make                      # native CZ80 runner
     ./build/z80-test-cz80 tests/z80/v1
 
@@ -81,36 +85,41 @@ The runner takes the same options for both cores:
     -q, --quiet          only print the final summary
     -v, --verbose        print every failure/warning (default: first 20)
         --cycles         treat cycle-count mismatches as failures
-        --skip-r         do not compare R (cores that do not maintain it)
+        --skip-r         do not compare R (hides R differences)
         --max-fail=N     stop after N failures (0 = unlimited)
         --filter=SUBSTR  only run tests whose name contains SUBSTR
         --list           list test names without executing them
 
 Cycle mismatches are warnings by default, so a run reports instruction results
-first and timing separately. `--skip-r` is the same idea for the refresh
-counter; both cores maintain it, so it is only useful for a core that does not.
+first and timing separately. `--skip-r` does the same for the refresh counter;
+both cores maintain R, so it only hides genuine R differences.
 
-`./prepare-tests.py --all` fetches the whole v1 directory (1000 files, about
-650 MB, downloaded with 8 connections) and packs it the same way.
+`./prepare-tests.py --all` fetches the whole v1 directory (1604 files) in one
+`git archive` and packs it the same way. `--rev=REV` (or `SST_Z80_REV`) pins a
+different revision; the results below are from commit `ebe1875` (2026-11-16).
 
 ## Results
 
-Whole v1 directory, 1000 files, 1,000,000 vectors:
+Whole v1 directory at commit `ebe1875` (2026-11-16), 1604 files, 1,604,000
+vectors:
 
 | core | comparison | passed | failed | warnings |
 | --- | --- | ---: | ---: | ---: |
-| CZ80 | default | 992,657 | 7,343 | 0 |
-| DrZ80 | default | 988,657 | 11,343 | 0 |
+| CZ80 | default | 1,592,789 | 11,211 | 0 |
+| DrZ80 | default | 1,592,789 | 11,211 | 1,000 |
 
-Both cores model R and cycles now, so `--skip-r` and `--cycles` give the
-same numbers as a plain run for either.
+Both cores model R and cycles. The block-instruction fix also corrected CZ80's
+R accounting, so `--skip-r` no longer changes its result; DrZ80's number is
+unchanged either way. `--cycles` leaves CZ80 at 11,211 but turns DrZ80's 1,000
+`ED 73` cycle warnings into failures (12,211).
 
-Smoke set (45 files, 45,000 vectors): CZ80 43,479 passed, 1,521 failed, 0
-warnings.
+Smoke set (47 files, 47,000 vectors): CZ80 44,479 passed, 2,521 failed, 0
+warnings; DrZ80 the same.
 
-`rcheck/` holds three vectors built by hand, `00`, `ed 4f` and `ed 5f`: v1
-ships only `ed 40` and covers neither `LD R,A` nor `LD A,R`.  Both cores pass
-all three with matching cycle counts, and they are part of the default run.
+`rcheck/` holds three vectors built by hand, `00`, `ed 4f` and `ed 5f`. They
+predate v1 shipping `ED 4F`/`ED 5F`, but still exercise `LD R,A` and `LD A,R`
+in a three-vector default run. Both cores pass all three with matching cycle
+counts.
 
 ### CZ80
 
@@ -120,27 +129,39 @@ Fixed, verified against the whole v1 set (those vectors all pass now):
   in `zR2`; the increments now keep bit 7 and wrap at 7 bits, the `DD CB`
   form refreshes it twice instead of three times, `CZ80_R` returns and accepts
   the combined byte, and `LD R,A` masks it the same way.
-- **`DD F3` / `DD FB`**: `DI`/`EI` ended in `goto Cz80_Exec_nocheck`, which
-  fetched one more opcode; they now end the step, except that `EI` still runs
-  one instruction before a pending interrupt is taken so the delay stays.
+- **`DD F3` (DI)**: `DI` ended in `goto Cz80_Exec_nocheck`, which fetched
+  one more opcode; it now ends the step.
 - **`DD 26` / `DD 2E`**: `LD HX,n` / `LD LX,n` cost 7 T-states, not 4.
+- **ED block instructions** (8,490 vectors: `INI` plus the repeating
+  `LDIR`/`LDDR`/`CPIR`/`CPDR`/`INIR`/`INDR`/`OTIR`/`OTDR`): `INI` now sums
+  `((C+1)&0xff)+data` (`IND` keeps `C-1`); the repeating forms overwrite the
+  undocumented bits 3/5 from PC bits 11/13 (PC after the two-byte rewind,
+  matching Ares/SST), and the port forms apply the repeat-time PV/H
+  correction; the leftover `zR--` at the slice-boundary rewind is gone, which
+  also fixes the last R mismatch.
 
-Still failing, both only in undocumented flag bits 5 and 3:
+Expected: `EI` (`fb`, `dd fb`, `fd fb`) runs the following instruction (the
+delay slot) before checking interrupts, so the single-step vectors report PC
+and R one instruction ahead. That is the long-standing EI behaviour and is
+intentional; `DI` now ends the step.
+
+Still failing:
 
 - **`BIT n,(HL)`** (6,001 across `cb 46`, `cb 4e`, `cb 56`, `cb 5e`, `cb 66`,
   `cb 6e`, `cb 76`, `cb 7e`): these flags come from the high byte of the
   internal WZ/MEMPTR register, which BIT does not modify and which CZ80 does
   not model at all; the address high byte is used as the best available
   approximation (`BIT n,(IX+d)` matches, because there the address *is* WZ).
-- **`SCF` / `CCF`** (1,342 across `37`, `3f`, `dd 37`, `dd 3f`): these follow
-  Patrik Rak's rule, `YF/XF = ((Q ^ F) | A) & 0x28`, where Q is the value the
-  previous instruction wrote into F, or 0 if it wrote none; a prefix counts as
-  the previous instruction, so Q is 0 for `dd 37`/`dd 3f`. That rule
-  reproduces all 1000 vectors of each of the four files exactly (using the
-  `q` byte for the unprefixed ones and Q = 0 for the prefixed ones). Modelling
-  Q would mean tracking whether each instruction writes flags, a per-instruction
-  cost that is not worth paying for two undocumented bits, so CZ80 keeps using
-  A alone, which is only what the vectors expect when `Q == F` (about half).
+- **`SCF` / `CCF`** (2,210 across `37`, `3f`, `dd 37`, `dd 3f`, `fd 37`,
+  `fd 3f`): these follow Patrik Rak's rule, `YF/XF = ((Q ^ F) | A) & 0x28`,
+  where Q is the value the previous instruction wrote into F, or 0 if it wrote
+  none; a prefix counts as the previous instruction, so Q is 0 for the DD/FD
+  forms. That rule reproduces all 1000 vectors of each of the six files
+  (using the `q` byte for the unprefixed ones and Q = 0 for the prefixed
+  ones). Modelling Q would mean tracking whether each instruction writes
+  flags, a per-instruction cost that is not worth paying for two undocumented
+  bits, so CZ80 keeps using A alone, which is only what the vectors expect
+  when `Q == F` (about half).
 
 ### DrZ80
 
@@ -159,6 +180,16 @@ top byte of `z80f` as scratch, the `BIT n,(HL)` WZ stash and the byte the
 `LDI`/`LDD` family copies, keep that value in bits 8-15 instead.
 Interrupt acknowledge adds its two M1 cycles, which no vector covers.
 
+The ED block repeats now match the vectors too: `LDIR`/`LDDR` and
+`CPIR`/`CPDR` take bits 3/5 from PC bits 11/13 when they repeat, and
+`INIR`/`INDR`/`OTIR`/`OTDR` additionally apply the repeat-time PV/H correction
+(parity of `(B±1)&7`, `H` from the low nibble). The non-repeating forms were
+already correct.
+
+`LD A,I` / `LD A,R` (`ED 57` / `ED 5F`) now copy the undocumented YF/XF from
+the byte loaded into A (`copyFlag35 z80a`), matching CZ80 and hardware; these
+files pass 1000/1000. `LD R,A` (`ED 4F`) was already correct.
+
 Still failing:
 
 - **`BIT n,(HL)`** (6,001 across `cb 46`, `cb 4e`, `cb 56`, `cb 5e`, `cb 66`,
@@ -167,20 +198,25 @@ Still failing:
   forced in for ZEXALL. Both cores now fail exactly the same vectors, because
   these flags really come from the internal WZ/MEMPTR register, which BIT
   leaves untouched and neither core models.
-- **`SCF` / `CCF`** (1,342): `copyFlag35` takes X/Y from A, so DrZ80 fails the
-  same vectors CZ80 does, the ones where the Q rule differs from A alone.
-- **`HALT` and prefixed `DI`/`EI` PC** (4,000): `HALT` does
-  `sub z80pc,z80pc,#1` so the byte is re-executed when the next run starts,
-  and the `DI`/`EI` tail fetches the following opcode byte before the run
-  ends, which is how the core keeps an interrupt from being taken between
-  those instructions and a run boundary; the vectors expect the plain
-  post-instruction PC.
+- **`SCF` / `CCF`** (2,210 across the unprefixed, DD and FD files):
+  `copyFlag35` takes X/Y from A, so DrZ80 fails the same vectors CZ80 does,
+  the ones where the Q rule differs from A alone.
+- **`EI` PC** (3,000 across `fb`, `dd fb`, `fd fb`): `EI` deliberately
+  executes the following instruction (the delay slot) before checking
+  interrupts, so the PC is one instruction ahead of the single-step vector.
+  This is the long-standing behaviour and is intentional; `HALT` and `DI` now
+  report the plain post-instruction PC.
+
+`ED 73` (`LD (nn),SP`) is cycle-only: DrZ80 charges 16 T-states where the
+vectors expect 20, so all 1,000 vectors are warnings by default and failures
+under `--cycles`.
 
 The `DD CB` forms that also copy the result to a register are implemented:
 168 handlers replace what used to fall through to `opcode_DD_NF2`, and the
 `bit` rows reuse the `(ix+d)` handlers because the register field is ignored
 there.  The same change charges the 4 T-states of the `DD`/`FD` prefix in the
-shared dispatcher instead of leaving it out, so all cycle counts match too.
+shared dispatcher instead of leaving it out, so the `DD CB` cycle counts match
+too.
 
 ## Comparison model
 

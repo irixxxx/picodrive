@@ -44,9 +44,13 @@ ARM because `struct Cyclone.membase` is an `int`, and they run under
 
 ## Test data
 
-`fetch-tests.sh` downloads the binary vectors into `tests/m68000/v1/`, which
-is git-ignored. The vectors are not in the repo and are not a submodule, so a
-checkout pulls nothing and needs no network to build:
+`fetch-tests.sh` fetches the binary vectors into `tests/m68000/v1/`, which is
+git-ignored. It uses a shallow, blobless git clone (a couple hundred kB of
+tree metadata; blobs are downloaded on demand) instead of the GitHub contents
+API, whose 1000-entry listing cap truncates large directories. Fetching needs
+`git`; the clone lives under the git-ignored `tests/` directory. The vectors are
+not in the repo and are not a submodule, so a checkout pulls nothing and needs
+no network to build:
 
 ```sh
 ./fetch-tests.sh            # 48-file smoke set (120,000 vectors)
@@ -54,6 +58,9 @@ checkout pulls nothing and needs no network to build:
 ./fetch-tests.sh --force    # re-download existing files
 ./fetch-tests.sh --list     # list remote file names
 ```
+
+`SST_M68K_REV` selects the revision to fetch (default `origin/main`). The
+results below were produced from commit `64b2531` (2026-11-16).
 
 ## Building and running
 
@@ -126,7 +133,7 @@ reports per file and then per core.
 
 ## Results
 
-Full 127-file run (317,500 vectors, 2,500 per file), 2026-11-14:
+Full 127-file run (317,500 vectors, 2,500 per file), 2026-11-16:
 
 | core | passed | skipped | failed | warnings |
 | --- | ---: | ---: | ---: | ---: |

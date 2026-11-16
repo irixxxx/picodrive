@@ -138,6 +138,15 @@ DrZ80Ver: .long 0x0003
 	orr z80f,z80f,r1,lsr#24-(Flag3-Z80_Flag3)
 .endm
 
+;@ The undocumented X/Y of a repeating block op come from bits 11/13 of the
+;@ real PC after the two-byte rewind (Ares/SST).  Clobbers r1.
+.macro copyFlag35_PC
+	ldr r1,[cpucontext,#z80pc_base]
+	sub r1,z80pc,r1
+	and r1,r1,#((1<<Z80_Flag3)|(1<<Z80_Flag5))<<8
+	orr z80f,z80f,r1,lsr#8-(Flag3-Z80_Flag3)
+.endm
+
 	.equ R_INC, (2<<24)				;@ R lives in the top byte of z80f
 
 ;@ R is (count << 1) | bit7 in the top byte of z80f, so adding 2 per
@@ -1536,7 +1545,13 @@ DrZ80Run:
 	blne DoInterrupt
 .endif
 
+	ldrb r1,[cpucontext,#z80if]
 	PIC_LDR(opcodes, r0, MAIN_opcodes)
+
+	;@ halted and no irq: burn the slice without fetching
+	tst r1,#Z80_HALT
+	bne z80_halt_idle
+
 	sub r0,opcodes,#MAIN_opcodes-PZSTable_data
 	str r0,[cpucontext,#tables]
 
@@ -1554,6 +1569,10 @@ z80_execute_end:
 	mov r0,z80_icount
 	ldmia sp!,{r4-r12,pc}					;@ restore registers from stack and return to C code
 .pool
+
+z80_halt_idle:
+	mov z80_icount,#0
+	b z80_execute_end
 
 DoInterrupt:
 .if INTERRUPT_MODE
@@ -1574,9 +1593,6 @@ DoInterrupt:
 	;@ r0 == z80if
 	stmfd sp!,{r2,lr}
 	inc_r 2			;@ acknowledge is two M1 cycles
-
-	tst r0,#Z80_HALT ;@ check halt
-	addne z80pc,z80pc,#1
 
 	ldrb r1,[cpucontext,#z80im]
 
@@ -5194,11 +5210,12 @@ opcode_7_5:
 	fetch 7
 ;@HALT
 opcode_7_6:
-	sub z80pc,z80pc,#1
 	ldrb r0,[cpucontext,#z80if]
 	orr r0,r0,#Z80_HALT
 	strb r0,[cpucontext,#z80if]
-	mov z80_icount,#0
+	eatcycles 4
+	cmp z80_icount,#0
+	movgt z80_icount,#0
 	b z80_execute_end
 ;@LD (HL),A
 opcode_7_7:
@@ -5891,10 +5908,7 @@ opcode_F_3:
 	ldrb r1,[cpucontext,#z80if]
 	bic r1,r1,#(Z80_IF1)|(Z80_IF2)
 	strb r1,[cpucontext,#z80if]
-
-	ldrb r0,[z80pc],#1
-	eatcycles 4
-	ldr pc,[opcodes, r0, lsl #2]
+	fetch 4
 ;@CALL P,NN
 opcode_F_4:
 	tst z80f,#1<<SFlag
@@ -5942,10 +5956,10 @@ opcode_F_A:
 ;@EI
 opcode_F_B:
 	ldrb r1,[cpucontext,#z80if]
-	mov r2,opcodes
 	orr r1,r1,#(Z80_IF1)|(Z80_IF2)
 	strb r1,[cpucontext,#z80if]
 
+	PIC_LDR(r2, r1, MAIN_opcodes)
 	ldrb r0,[z80pc],#1
 	eatcycles 4
 	PIC_LDR(opcodes, r1, EI_DUMMY_opcodes)
@@ -8393,6 +8407,7 @@ opcode_ED_57:
 	ldrb r0,[cpucontext,#z80if]
 	tst r0,#Z80_IF2
 	orrne z80f,z80f,#(1<<VFlag)
+	copyFlag35 z80a
 	fetch 9
 ;@IN E,(C)
 opcode_ED_58:
@@ -8439,6 +8454,7 @@ opcode_ED_5F:
 	ldrb r0,[cpucontext,#z80if]
 	tst r0,#Z80_IF2
 	orrne z80f,z80f,#(1<<VFlag)
+	copyFlag35 z80a
 	fetch 9
 ;@IN H,(C)
 opcode_ED_60:
@@ -8757,9 +8773,13 @@ opcode_ED_B0:
 	bic z80f,z80f,#0xf1
 	bic z80f,z80f,#0xff00
 	subs z80bc,z80bc,#1<<16
-	orrne z80f,z80f,#1<<VFlag
-	subne z80pc,z80pc,#2
-	subne z80_icount,z80_icount,#5
+	beq opcode_ED_B0_done
+	orr z80f,z80f,#1<<VFlag
+	sub z80pc,z80pc,#2
+	sub z80_icount,z80_icount,#5
+	copyFlag35_PC
+	fetch 16
+opcode_ED_B0_done:
 	tst r0,#0x8<<24				;@ copies bits 3+1 instead of 3+5
 	orrne z80f,z80f,#1<<Flag3
 	tst r0,#0x2<<24
@@ -8787,8 +8807,11 @@ opcode_ED_B1:
 	beq opcode_ED_B1_done
 	orr z80f,z80f,#1<<VFlag
 	tst z80f,#1<<ZFlag
-	subeq z80pc,z80pc,#2
-	subeq z80_icount,z80_icount,#5
+	bne opcode_ED_B1_done
+	sub z80pc,z80pc,#2
+	sub z80_icount,z80_icount,#5
+	bic z80f,z80f,#(1<<Flag3)|(1<<Flag5)
+	copyFlag35_PC
 opcode_ED_B1_done:
 	fetch 16
 ;@INIR
@@ -8812,8 +8835,13 @@ opcode_ED_B2:
 	movs r1,z80bc,asr#24			;@ B
 	orrmi z80f,z80f,#1<<SFlag
 	orreq z80f,z80f,#1<<ZFlag
-	subne z80pc,z80pc,#2
-	subne z80_icount,z80_icount,#5
+	beq opcode_ED_B2_write
+	sub z80pc,z80pc,#2
+	sub z80_icount,z80_icount,#5
+	bic z80f,z80f,#(1<<Flag3)|(1<<Flag5)
+	copyFlag35_PC
+	bl ed_io_r_fix
+opcode_ED_B2_write:
 	writemem8HL
 	add z80hl,z80hl,#1<<16
 	fetch 16
@@ -8838,8 +8866,13 @@ opcode_ED_B3:
 	movs r1,z80bc,asr#24			;@ B
 	orrmi z80f,z80f,#1<<SFlag
 	orreq z80f,z80f,#1<<ZFlag
-	subne z80pc,z80pc,#2
-	subne z80_icount,z80_icount,#5
+	beq opcode_ED_B3_write
+	sub z80pc,z80pc,#2
+	sub z80_icount,z80_icount,#5
+	bic z80f,z80f,#(1<<Flag3)|(1<<Flag5)
+	copyFlag35_PC
+	bl ed_io_r_fix
+opcode_ED_B3_write:
 	mov r1,r0
 	opOUT_C
 	fetch 16
@@ -8852,9 +8885,13 @@ opcode_ED_B8:
 	bic z80f,z80f,#0xf1
 	bic z80f,z80f,#0xff00
 	subs z80bc,z80bc,#1<<16
-	orrne z80f,z80f,#1<<VFlag
-	subne z80pc,z80pc,#2
-	subne z80_icount,z80_icount,#5
+	beq opcode_ED_B8_done
+	orr z80f,z80f,#1<<VFlag
+	sub z80pc,z80pc,#2
+	sub z80_icount,z80_icount,#5
+	copyFlag35_PC
+	fetch 16
+opcode_ED_B8_done:
 	tst r0,#0x8<<24				;@ copies bits 3+1 instead of 3+5
 	orrne z80f,z80f,#1<<Flag3
 	tst r0,#0x2<<24
@@ -8882,8 +8919,11 @@ opcode_ED_B9:
 	beq opcode_ED_B9_done
 	orr z80f,z80f,#1<<VFlag
 	tst z80f,#1<<ZFlag
-	subeq z80pc,z80pc,#2
-	subeq z80_icount,z80_icount,#5
+	bne opcode_ED_B9_done
+	sub z80pc,z80pc,#2
+	sub z80_icount,z80_icount,#5
+	bic z80f,z80f,#(1<<Flag3)|(1<<Flag5)
+	copyFlag35_PC
 opcode_ED_B9_done:
 	fetch 16
 ;@INDR
@@ -8907,8 +8947,13 @@ opcode_ED_BA:
 	movs r1,z80bc,asr#24			;@ B
 	orrmi z80f,z80f,#1<<SFlag
 	orreq z80f,z80f,#1<<ZFlag
-	subne z80pc,z80pc,#2
-	subne z80_icount,z80_icount,#5
+	beq opcode_ED_BA_write
+	sub z80pc,z80pc,#2
+	sub z80_icount,z80_icount,#5
+	bic z80f,z80f,#(1<<Flag3)|(1<<Flag5)
+	copyFlag35_PC
+	bl ed_io_r_fix
+opcode_ED_BA_write:
 	writemem8HL
 	sub z80hl,z80hl,#1<<16
 	fetch 16
@@ -8933,11 +8978,50 @@ opcode_ED_BB:
 	movs r1,z80bc,asr#24			;@ B
 	orrmi z80f,z80f,#1<<SFlag
 	orreq z80f,z80f,#1<<ZFlag
-	subne z80pc,z80pc,#2
-	subne z80_icount,z80_icount,#5
+	beq opcode_ED_BB_write
+	sub z80pc,z80pc,#2
+	sub z80_icount,z80_icount,#5
+	bic z80f,z80f,#(1<<Flag3)|(1<<Flag5)
+	copyFlag35_PC
+	bl ed_io_r_fix
+opcode_ED_BB_write:
 	mov r1,r0
 	opOUT_C
 	fetch 16
+
+;@ XOR the parity of the low three bits of r1 into the V flag.
+.macro parity3V r
+	eor r2,\r,\r,lsr#1
+	eor r2,r2,\r,lsr#2
+	and r2,r2,#1<<24
+	eor z80f,z80f,r2,lsr#(24-VFlag)
+.endm
+
+;@ Repeat-time undocumented-flag fix for the IN/OUT block ops.  On entry r0
+;@ holds the transferred byte (only bit 7 matters), z80bc holds B, and the
+;@ carry flag records whether the byte-plus-counter sum overflowed.  Clobbers
+;@ r1/r2/z80f and returns to the caller's write-and-fetch.
+ed_io_r_fix:
+	tst z80f,#1<<CFlag
+	beq ed_io_r_fix_noc
+	bic z80f,z80f,#1<<HFlag
+	tst r0,#0x80
+	beq ed_io_r_fix_add
+	sub r1,z80bc,#1<<24
+	parity3V r1
+	tst z80bc,#0x0F<<24
+	orreq z80f,z80f,#1<<HFlag
+	bx lr
+ed_io_r_fix_add:
+	add r1,z80bc,#1<<24
+	parity3V r1
+	and r1,z80bc,#0x0F<<24
+	cmp r1,#0x0F<<24
+	orreq z80f,z80f,#1<<HFlag
+	bx lr
+ed_io_r_fix_noc:
+	parity3V z80bc
+	bx lr
 ;@##################################
 ;@##################################
 ;@###  opcodes FD  #########################

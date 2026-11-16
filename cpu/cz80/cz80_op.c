@@ -709,10 +709,11 @@ OP_EI:
 			}
 		}
 		zIFF1 = zIFF2 = (1 << 2);
-		/* a pending irq is taken after the next instruction, so run it */
-		if (CPU->Status & CZ80_HAS_INT)
-			goto Cz80_Exec_nocheck;
-		goto Cz80_Exec;
+		/* the insn after EI runs before a maskable int is taken. an NMI
+		 * is not delayed by EI, so let Cz80_Exec handle it first. */
+		if (CPU->Status & CZ80_HAS_NMI)
+			goto Cz80_Exec;
+		goto Cz80_Exec_nocheck;
 
 /*-----------------------------------------
  INC r16

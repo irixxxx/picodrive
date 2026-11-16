@@ -20,7 +20,8 @@ NATIVE_CFLAGS  ?= -O2 -g -std=gnu11 -Wall -Wextra
 NATIVE_LDFLAGS ?=
 NATIVE_CPPFLAGS := -I. -I$(ROOT)
 
-# v1 has only ed 40 for the R transfers, so the hand-built vectors run too.
+# rcheck/ holds hand-built R-transfer vectors; v1 ships ED 4F/ED 5F now, but
+# keep the three-vector sanity run in the default set.
 TESTS ?= tests/z80/v1 rcheck
 
 CZ80_DIR  := $(BUILD)/cz80
