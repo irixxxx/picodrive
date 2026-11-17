@@ -29,6 +29,7 @@ static int shadow_size;
 static struct area { int w, h; } area;
 
 static int resized;
+static int resize_w, resize_h;
 
 static float gl_verts[12];
 static int gl_win_w = -1, gl_win_h = -1, gl_widescreen = -1;
@@ -212,6 +213,11 @@ static int clear_buf_cnt, clear_stat_cnt;
 
 static void resize_buffers(void)
 {
+	void *old_shadow = shadow_fb;
+
+	if (plat_sdl_screen == NULL)
+		return;
+
 	// update pitch as it is needed for resizing, and the menu bg scaler
 	if (plat_sdl_overlay || plat_sdl_gl_active)
 		g_menuscreen_pp = g_menuscreen_w;
@@ -225,8 +231,66 @@ static void resize_buffers(void)
 			shadow_size = w * g_menuscreen_h * 2;
 			shadow_fb = realloc(shadow_fb, shadow_size);
 			g_menubg_ptr = realloc(g_menubg_ptr, shadow_size);
+
+			// keep pointers that referred to the old allocation valid
+			if (g_screen_ptr == old_shadow)
+				g_screen_ptr = shadow_fb;
+			if (g_menuscreen_ptr == old_shadow)
+				g_menuscreen_ptr = shadow_fb;
 		}
 	}
+}
+
+static void set_resize_pending(int w, int h)
+{
+	w &= ~3;
+	h &= ~3;
+
+	if (w <= 0 || h <= 0)
+		return;
+
+	// resized back to the current mode: cancel any pending change
+	if (w == g_menuscreen_w && h == g_menuscreen_h) {
+		resized = 0;
+		return;
+	}
+
+	resize_w = w;
+	resize_h = h;
+	resized = 1;
+}
+
+static int apply_resize(int force)
+{
+	int grab, ret;
+
+	if (!resized || !plat_sdl_is_windowed())
+		return 0;
+
+	grab = SDL_WM_GrabInput(SDL_GRAB_ON);
+	if (grab != SDL_GRAB_ON && !force)
+		return 0;
+
+	ret = plat_sdl_change_video_mode(resize_w, resize_h, 1);
+
+	if (grab == SDL_GRAB_ON)
+		SDL_WM_GrabInput(SDL_GRAB_OFF);
+
+	if (ret < 0 || plat_sdl_screen == NULL)
+		return 0; // keep pending, but keep drawing at the old size
+
+	g_menuscreen_w = plat_sdl_screen->w;
+	g_menuscreen_h = plat_sdl_screen->h;
+	resize_buffers();
+
+	// GL context was recreated; its back buffer is undefined
+	if (plat_sdl_gl_active) {
+		gl_need_clear = 1;
+		gl_win_w = gl_win_h = -1;
+	}
+
+	resized = 0;
+	return 1;
 }
 
 void plat_video_set_size(int w, int h)
@@ -371,17 +435,11 @@ void plat_video_flip(void)
 	}
 
 	// take over resized settings for the physical SDL surface
-	if (resized && plat_sdl_is_windowed() &&
-	    SDL_WM_GrabInput(SDL_GRAB_ON) == SDL_GRAB_ON) {
-		plat_sdl_change_video_mode(g_menuscreen_w, g_menuscreen_h, 1);
-		SDL_WM_GrabInput(SDL_GRAB_OFF);
-		resize_buffers();
-
+	if (apply_resize(0)) {
 		// force upper layer to use new dimensions
 		plat_video_set_shadow(g_screen_width, g_screen_height);
 		plat_video_set_buffer(g_screen_ptr);
 		rendstatus_old = -1;
-		resized = 0;
 
 		// new surface has undefined pixels in the bars; clear them
 		memset(plat_sdl_screen->pixels, 0,
@@ -439,30 +497,54 @@ void plat_sync_window_preset(void)
 	     g_menuscreen_w == plat_window_width(scale, 1)) &&
 	    g_menuscreen_w != want_w) {
 		plat_set_window(want_w, want_h);
-		resize_buffers();
 	}
 }
 
 void plat_video_menu_update(void)
 {
+	int grab;
+
+	if (!plat_sdl_is_windowed())
+		return;
+
+	if (resized) {
+		if (apply_resize(0))
+			plat_sdl_gl_scaling(currentConfig.filter);
+		return;
+	}
+
 	// WM may grab input while resizing the window; our own window resizing
 	// is only safe if the WM isn't active anymore, so try to grab input.
-	if (plat_sdl_is_windowed() && SDL_WM_GrabInput(SDL_GRAB_ON) == SDL_GRAB_ON) {
-		plat_sdl_change_video_mode(g_menuscreen_w, g_menuscreen_h, 1);
+	grab = SDL_WM_GrabInput(SDL_GRAB_ON);
+	if (grab != SDL_GRAB_ON)
+		return;
+
+	if (plat_sdl_change_video_mode(g_menuscreen_w, g_menuscreen_h, 1) == 0 &&
+	    plat_sdl_screen != NULL) {
 		// w/h might change in change_video_mode, e.g. for fullscreen
 		g_menuscreen_w = plat_sdl_screen->w;
 		g_menuscreen_h = plat_sdl_screen->h;
 		plat_sdl_gl_scaling(currentConfig.filter);
-		SDL_WM_GrabInput(SDL_GRAB_OFF);
 		resize_buffers();
 	}
+
+	SDL_WM_GrabInput(SDL_GRAB_OFF);
 }
 
 void plat_video_menu_enter(int is_rom_loaded)
 {
 	if (SDL_MUSTLOCK(plat_sdl_screen))
 		SDL_UnlockSurface(plat_sdl_screen);
-	plat_sdl_change_video_mode(g_menuscreen_w, g_menuscreen_h, 1);
+
+	if (apply_resize(1))
+		return;
+
+	if (plat_sdl_change_video_mode(g_menuscreen_w, g_menuscreen_h, 1) == 0 &&
+	    plat_sdl_screen != NULL) {
+		g_menuscreen_w = plat_sdl_screen->w;
+		g_menuscreen_h = plat_sdl_screen->h;
+		resize_buffers();
+	}
 }
 
 void plat_video_menu_begin(void)
@@ -549,9 +631,7 @@ int plat_has_wm(void)
 
 void plat_set_window(int w, int h)
 {
-	g_menuscreen_w = w;
-	g_menuscreen_h = h;
-	resized = 1;
+	set_resize_pending(w, h);
 }
 
 static void plat_sdl_resize(int w, int h)
@@ -561,11 +641,7 @@ static void plat_sdl_resize(int w, int h)
 	if (currentConfig.vscaling != EOPT_SCALE_HW && w == 320 && h == 480)
 		h = 240;
 #endif
-	if (g_menuscreen_w != (w & ~3) || g_menuscreen_h != (h & ~3)){
-		g_menuscreen_h = h & ~3;
-		g_menuscreen_w = w & ~3;
-		resized = 1;
-	}
+	set_resize_pending(w, h);
 }
 
 static void plat_sdl_quit(void)
