@@ -44,6 +44,11 @@ extern void  plat_munmap(void *ptr, size_t size);
 extern void *plat_mem_get_for_drc(size_t size);
 extern int   plat_mem_set_exec(void *ptr, size_t size);
 
+// the same for hosts that enforce W^X, where the dynarec buffer has to be
+// switched between writable (code emission) and executable (running it)
+extern int   plat_drc_jit_set_exec(void *ptr, size_t size);
+extern void  plat_drc_jit_protect(int writable);
+
 // this one should handle display mode changes
 extern void emu_video_mode_change(int start_line, int line_count, int start_col, int col_count);
 

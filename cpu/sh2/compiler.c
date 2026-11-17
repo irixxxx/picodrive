@@ -3252,6 +3252,7 @@ static void sh2_smc_rm_blocks(u32 a, int len, int tcache_id, int free);
 
 static void REGPARM(2) *sh2_translate(SH2 *sh2, int tcache_id)
 {
+  plat_drc_jit_protect(1); // called from generated code, tcache must be writable
   // branch targets in current block
   static struct linkage branch_targets[MAX_LOCAL_TARGETS];
   int branch_target_count = 0;
@@ -3335,6 +3336,7 @@ static void REGPARM(2) *sh2_translate(SH2 *sh2, int tcache_id)
       base_pc, end_pc, base_literals, end_literals, block->entryp->tcache_ptr);
     dr_activate_block(block, tcache_id, sh2->is_slave);
     emith_update_cache();
+    plat_drc_jit_protect(0); // returning to generated code
     return block->entryp[0].tcache_ptr;
   }
 
@@ -3439,8 +3441,10 @@ static void REGPARM(2) *sh2_translate(SH2 *sh2, int tcache_id)
 
   block = dr_add_block(branch_target_count, base_pc, end_pc - base_pc,
     base_literals, end_literals-base_literals, crc, sh2->is_slave, &blkid_main);
-  if (block == NULL)
+  if (block == NULL) {
+    plat_drc_jit_protect(0); // returning to generated code
     return NULL;
+  }
 
   block_entry_ptr = tcache_ptr;
   dbg(2, "== %csh2 block #%d,%d %08x-%08x,%08x-%08x -> %p", sh2->is_slave ? 's' : 'm',
@@ -5263,6 +5267,7 @@ end_op:
  printf("~~~\n");
 */
 
+  plat_drc_jit_protect(0); // returning to generated code
   return block_entry_ptr;
 }
 
@@ -5716,12 +5721,16 @@ static void sh2_smc_rm_blocks(u32 a, int len, int tcache_id, int free)
 
 void sh2_drc_wcheck_ram(u32 a, unsigned len, SH2 *sh2)
 {
+  plat_drc_jit_protect(1); // patches block links
   sh2_smc_rm_blocks(a, len, 0, 0);
+  plat_drc_jit_protect(0);
 }
 
 void sh2_drc_wcheck_da(u32 a, unsigned len, SH2 *sh2)
 {
+  plat_drc_jit_protect(1); // patches block links
   sh2_smc_rm_blocks(a, len, 1 + sh2->is_slave, 0);
+  plat_drc_jit_protect(0);
 }
 
 int sh2_execute_drc(SH2 *sh2c, int cycles)
@@ -5738,6 +5747,9 @@ int sh2_execute_drc(SH2 *sh2c, int cycles)
 #endif
 
   sh2c->state |= SH2_IN_DRC;
+  // tcache is executable whenever generated code runs: it's only writable
+  // while a writer has it switched, and every writer (block compile, link
+  // patching, flush, init) restores the executable mode before returning.
   host_call(sh2_drc_entry, (SH2 *))(sh2c);
   sh2c->state &= ~SH2_IN_DRC;
 
@@ -5917,6 +5929,8 @@ void sh2_drc_flush_all(void)
   if (block_tables[0] == NULL)
     return;
 
+  plat_drc_jit_protect(1); // block orphaning patches jumps
+
   backtrace();
   state_dump();
   block_stats();
@@ -5926,6 +5940,7 @@ void sh2_drc_flush_all(void)
   dr_flush_tcache(1);
   dr_flush_tcache(2);
   Pico32x.emu_flags &= ~P32XF_DRC_ROM_C;
+  plat_drc_jit_protect(0); // tcache is executable again
 }
 
 void sh2_drc_mem_setup(SH2 *sh2)
@@ -5939,6 +5954,7 @@ int sh2_drc_init(SH2 *sh2)
 {
   int i;
 
+  plat_drc_jit_protect(1); // helper functions are generated below
   if (block_tables[0] == NULL)
   {
     for (i = 0; i < TCACHE_BUFFERS; i++) {
@@ -6009,6 +6025,8 @@ int sh2_drc_init(SH2 *sh2)
   memset(sh2->branch_cache, -1, sizeof(sh2->branch_cache));
   memset(sh2->rts_cache, -1, sizeof(sh2->rts_cache));
   sh2->rts_cache_idx = 0;
+
+  plat_drc_jit_protect(0); // tcache is executable again
 
   return 0;
 

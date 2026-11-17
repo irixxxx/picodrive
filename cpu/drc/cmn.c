@@ -27,7 +27,10 @@ void drc_cmn_init(void)
   if (tcache == NULL)
     tcache = tcache_default;
 
-  ret = plat_mem_set_exec(tcache, DRC_TCACHE_SIZE);
+  ret = plat_drc_jit_set_exec(tcache, DRC_TCACHE_SIZE);
+  // C code (code generation) runs with tcache writable
+  plat_drc_jit_protect(1);
+
   elprintf(EL_STATUS, "drc_cmn_init: %p, %zd bytes: %d",
     tcache, DRC_TCACHE_SIZE, ret);
 

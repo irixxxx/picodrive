@@ -539,6 +539,16 @@ int plat_mem_set_exec(void *ptr, size_t size)
    return ret;
 }
 
+int plat_drc_jit_set_exec(void *ptr, size_t size)
+{
+   return plat_mem_set_exec(ptr, size);
+}
+
+void plat_drc_jit_protect(int writable)
+{
+   (void)writable;
+}
+
 static void apply_renderer()
 {
    PicoIn.opt &= ~(POPT_ALT_RENDERER|POPT_EN_SOFTSCALE);

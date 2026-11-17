@@ -170,6 +170,16 @@ int plat_mem_set_exec(void *ptr, size_t size)
 	return 0;
 }
 
+int plat_drc_jit_set_exec(void *ptr, size_t size)
+{
+	return plat_mem_set_exec(ptr, size);
+}
+
+void plat_drc_jit_protect(int writable)
+{
+	(void)writable;
+}
+
 int _flush_cache (char *addr, const int size, const int op)
 { 
     FlushCache(WRITEBACK_DCACHE); /* WRITEBACK_DCACHE */

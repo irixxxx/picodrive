@@ -174,7 +174,7 @@ PLATFORM := generic
 endif
 ifeq ("$(PLATFORM)",$(filter "$(PLATFORM)","rpi1" "rpi2"))
 CFLAGS += -DHAVE_GLES -DEGL_NO_X11 -DSDL_BUFFER_3X -DSDL_REDRAW_EVT
-OBJS += platform/linux/emu.o platform/linux/blit.o # FIXME
+OBJS += platform/linux/plat.o platform/linux/emu.o platform/linux/blit.o # FIXME
 OBJS += platform/common/plat_sdl.o platform/common/inputmap_kbd.o
 OBJS += platform/libpicofe/plat_sdl.o platform/libpicofe/in_sdl.o
 OBJS += platform/libpicofe/linux/plat.o
@@ -185,7 +185,7 @@ ifeq "$(HAVE_GLES)" "1"
 CFLAGS += -DHAVE_GLES -DEGL_NO_X11
 endif
 CFLAGS += -DSDL_OVERLAY_2X -DSDL_BUFFER_3X -DSDL_REDRAW_EVT
-OBJS += platform/linux/emu.o platform/linux/blit.o # FIXME
+OBJS += platform/linux/plat.o platform/linux/emu.o platform/linux/blit.o # FIXME
 ifeq "$(use_inputmap)" "1"
 OBJS += platform/common/plat_sdl.o platform/opendingux/inputmap.o
 else
@@ -251,7 +251,7 @@ endif
 ifeq "$(PLATFORM)" "win32"
 CFLAGS += -DSDL_OVERLAY_2X -DSDL_BUFFER_3X -DSDL_REDRAW_EVT
 OBJS += platform/win32/plat.o
-OBJS += platform/linux/emu.o platform/linux/blit.o # FIXME
+OBJS += platform/linux/plat.o platform/linux/emu.o platform/linux/blit.o # FIXME
 OBJS += platform/common/plat_sdl.o platform/common/inputmap_kbd.o
 OBJS += platform/libpicofe/plat_sdl.o platform/libpicofe/in_sdl.o
 USE_FRONTEND = 1
