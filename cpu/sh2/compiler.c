@@ -3310,6 +3310,11 @@ static void REGPARM(2) *sh2_translate(SH2 *sh2, int tcache_id)
 
   // initial passes to disassemble and analyze the block
   crc = scan_block(base_pc, sh2->is_slave, op_flags, &end_pc, &base_literals, &end_literals);
+#ifdef SH2_DRC_SINGLE_STEP
+  // one instruction per block (plus a delay slot) so that a budget of one
+  // cycle retires exactly one instruction, as sh2_execute_interpreter() does
+  end_pc = base_pc + ((op_flags[1] & OF_DELAY_OP) ? 4 : 2);
+#endif
   end_literals = dr_check_nolit(base_literals, end_literals, tcache_id);
   if (base_literals == end_literals) // map empty lit section to end of code
     base_literals = end_literals = end_pc;
@@ -4216,8 +4221,13 @@ static void REGPARM(2) *sh2_translate(SH2 *sh2, int tcache_id)
       case 0x0d: // XTRCT  Rm,Rn        0010nnnnmmmm1101
         tmp2 = rcache_get_reg(GET_Rm(), RC_GR_READ, NULL);
         tmp  = rcache_get_reg(GET_Rn(), RC_GR_RMW, &tmp3);
-        emith_lsr(tmp, tmp3, 16);
-        emith_or_r_r_lsl(tmp, tmp2, 16);
+        if (GET_Rm() == GET_Rn()) {
+          // both halves come from the same register, which is just a rotate
+          emith_ror(tmp, tmp3, 16);
+        } else {
+          emith_lsr(tmp, tmp3, 16);
+          emith_or_r_r_lsl(tmp, tmp2, 16);
+        }
         goto end_op;
       case 0x0e: // MULU.W Rm,Rn        0010nnnnmmmm1110
       case 0x0f: // MULS.W Rm,Rn        0010nnnnmmmm1111
@@ -4651,6 +4661,8 @@ static void REGPARM(2) *sh2_translate(SH2 *sh2, int tcache_id)
           FLUSH_CYCLES(sr);
           rcache_get_reg_arg(0, GET_Rn(), NULL);
           tmp = emit_memhandler_read(0);
+          // the read dropped SR if it isn't statically mapped
+          sr = rcache_get_reg(SHR_SR, RC_GR_RMW, NULL);
           emith_clr_t_cond(sr);
           emith_cmp_r_imm(tmp, 0);
           emith_set_t_cond(sr, DCOND_EQ);

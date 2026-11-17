@@ -1713,18 +1713,20 @@ static NOINLINE void host_instructions_updated(void *base, void *end, int force)
  */
 #define emith_sh2_div1_step(rn, rm, sr) do {      \
 	int t_ = rcache_get_tmp();                \
+	int rm_ = (rn == rm) ? t_ : rm; /* Rm == shifted Rn */ \
 	emith_and_r_r_imm(AT, sr, T);             \
 	emith_lsr(FC, rn, 31); /*Rn = (Rn<<1)+T*/ \
 	emith_lsl(t_, rn, 1);                     \
 	emith_or_r_r(t_, AT);                     \
+	/* Rm is the shifted Rn above when aliased */\
 	emith_or_r_imm(sr, T); /* T = !carry */   \
 	emith_eor_r_r(sr, FC);                    \
 	emith_tst_r_imm(sr, Q);  /* if (Q ^ M) */ \
 	EMITH_JMP3_START(DCOND_EQ);               \
-	emith_add_r_r_r(rn, t_, rm);              \
+	emith_add_r_r_r(rn, t_, rm_);             \
 	EMIT(MIPS_SLTU_REG(FC, rn, t_));          \
 	EMITH_JMP3_MID(DCOND_EQ);                 \
-	emith_sub_r_r_r(rn, t_, rm);              \
+	emith_sub_r_r_r(rn, t_, rm_);             \
 	EMIT(MIPS_SLTU_REG(FC, t_, rn));          \
 	EMITH_JMP3_END();                         \
 	emith_eor_r_r(sr, FC); /* T ^= carry */   \
