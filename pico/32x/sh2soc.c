@@ -197,20 +197,30 @@ static void dmac_trigger(SH2 *sh2, struct dma_chan *chan)
 static u32 timer_tick_shift[2];
 static u32 timer_last_cycle[2];
 
+static void p32x_timer_set_shift(SH2 *sh2)
+{
+  int tmp, i = sh2->is_slave;
+
+  if (!(PREG8(sh2->peri_regs, 0x80) & 0x20)) // TME
+    return;
+
+  // SH2 timer step
+  tmp = PREG8(sh2->peri_regs, 0x80) & 7;
+
+  // Sclk cycles per timer tick
+  if (tmp >= 6) tmp++;
+  if (tmp) tmp += 5;
+  else tmp = 1;
+  timer_tick_shift[i] = tmp;
+  elprintf(EL_32XP, "WDT cycles[%d] = %d", i, 1 << tmp);
+}
+
 void p32x_timer_recalc(SH2 *sh2)
 {
   int tmp, i = sh2->is_slave;
 
   if (PREG8(sh2->peri_regs, 0x80) & 0x20) { // TME
-    // SH2 timer step
-    tmp = PREG8(sh2->peri_regs, 0x80) & 7;
-
-    // Sclk cycles per timer tick
-    if (tmp >= 6) tmp++;
-    if (tmp) tmp += 5;
-    else tmp = 1;
-    timer_tick_shift[i] = tmp;
-    elprintf(EL_32XP, "WDT cycles[%d] = %d", i, 1 << tmp);
+    p32x_timer_set_shift(sh2);
 
     tmp = (1 << timer_tick_shift[i]) - Pico32x.wdt_cycle[i]; // current tick
     if (tmp < 0) tmp = 0; // in case of invalid tick cycle data
@@ -279,9 +289,13 @@ void sh2_peripheral_reset(SH2 *sh2)
 
 void sh2_peripheral_state_loaded(void)
 {
+  // the pending event times are part of the state and were just loaded, so
+  // only recompute the timer base cycle and tick shift here. rescheduling
+  // from the counters would round the event time by a cycle or two and the
+  // loaded run would no longer match the one that was saved.
   timer_last_cycle[0] = timer_last_cycle[1] = Pico.t.m68c_aim;
-  p32x_timer_recalc(&msh2);
-  p32x_timer_recalc(&ssh2);
+  p32x_timer_set_shift(&msh2);
+  p32x_timer_set_shift(&ssh2);
 }
 
 // ------------------------------------------------------------------
