@@ -306,7 +306,12 @@ static int state_save(void *file)
   CHECKED_WRITE_BUFF(CHUNK_VRAM,  PicoMem.vram);
   CHECKED_WRITE_BUFF(CHUNK_CRAM,  PicoMem.cram);
 
-  CHECKED_WRITE_BUFF(CHUNK_MISC,  Pico.m);
+  {
+    // dirtyPal is only a renderer hint, don't let it cause state mismatches
+    struct PicoMisc m = Pico.m;
+    m.dirtyPal = 0;
+    CHECKED_WRITE(CHUNK_MISC, sizeof(m), &m);
+  }
   len = PicoVideoSave(buf2);
   CHECKED_WRITE(CHUNK_VDP, len, buf2);
   CHECKED_WRITE_BUFF(CHUNK_VIDEO, Pico.video);
@@ -363,7 +368,9 @@ static int state_save(void *file)
     CHECKED_WRITE_BUFF(CHUNK_SSH2_PERI, sh2s[1].peri_regs);
 
     {
+      // dirty_pal is only a renderer hint, don't let it cause state mismatches
       struct Pico32x p32x = Pico32x;
+      p32x.dirty_pal = 0;
       if (poll_stopped)
         p32x.emu_flags &= ~(P32XF_68KCPOLL|P32XF_68KVPOLL);
       CHECKED_WRITE(CHUNK_32XSYS, sizeof(p32x), &p32x);
