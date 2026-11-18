@@ -398,15 +398,28 @@ static event_cb *p32x_event_cbs[P32X_EVENT_COUNT] = {
 // schedule event at some time 'after', in m68k clocks
 void p32x_event_schedule(unsigned int now, enum p32x_event event, int after)
 {
-  unsigned int when;
+  unsigned int when, prev;
+  int i;
 
   when = (now + after) | 1;
 
   elprintf(EL_32X, "32x: new event #%u %u->%u", event, now, when);
+  prev = p32x_event_times[event];
   p32x_event_times[event] = when;
 
-  if (event_time_next == 0 || CYCLES_GT(event_time_next, when))
-    event_time_next = when;
+  // event_time_next must name the earliest pending event; if this slot is
+  // the one it named, that time is gone and the next one must be derived
+  // again, else a stale time is kept in some cases (a pending event moved
+  // later, e.g. when a timer is reprogrammed)
+  if (event_time_next != 0 && event_time_next != prev &&
+      !CYCLES_GT(event_time_next, when))
+    return;
+
+  event_time_next = 0;
+  for (i = 0; i < P32X_EVENT_COUNT; i++)
+    if (p32x_event_times[i] && (!event_time_next ||
+        CYCLES_GT(event_time_next, p32x_event_times[i])))
+      event_time_next = p32x_event_times[i];
 }
 
 void p32x_event_schedule_sh2(SH2 *sh2, enum p32x_event event, int after)

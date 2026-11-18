@@ -234,22 +234,34 @@ static event_cb *pcd_event_cbs[PCD_EVENT_COUNT] = {
 
 void pcd_event_schedule(unsigned int now, enum pcd_event event, int after)
 {
-  unsigned int when;
+  unsigned int when, prev;
+  int i;
 
   if ((now|after) == 0) {
     // event cancelled
-    pcd_event_times[event] = 0;
-    return;
+    when = 0;
+  }
+  else {
+    when = now + after;
+    when |= 1;
+    elprintf(EL_CD, "cd: new event #%u %u->%u", event, now, when);
   }
 
-  when = now + after;
-  when |= 1;
-
-  elprintf(EL_CD, "cd: new event #%u %u->%u", event, now, when);
+  prev = pcd_event_times[event];
   pcd_event_times[event] = when;
 
-  if (event_time_next == 0 || CYCLES_GT(event_time_next, when))
-    event_time_next = when;
+  // event_time_next must name the earliest pending event; if this slot is
+  // the one it named, that time is gone (or moved later) and the next one
+  // must be derived again, else a stale time is kept in some cases
+  if (event_time_next != 0 && when != 0 && event_time_next != prev &&
+      !CYCLES_GT(event_time_next, when))
+    return;
+
+  event_time_next = 0;
+  for (i = 0; i < PCD_EVENT_COUNT; i++)
+    if (pcd_event_times[i] && (!event_time_next ||
+        CYCLES_GT(event_time_next, pcd_event_times[i])))
+      event_time_next = pcd_event_times[i];
 }
 
 void pcd_event_schedule_s68k(enum pcd_event event, int after)
