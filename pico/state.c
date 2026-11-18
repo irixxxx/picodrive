@@ -464,6 +464,12 @@ static int state_load(void *file)
     R_ERROR_RETURN("bad header");
   CHECKED_READ(4, &ver);
 
+  if (!(PicoIn.AHW & PAHW_SMS)) {
+    // the idle detector patches code in RAM; remove the patches before the
+    // saved RAM is loaded over them
+    SekFinishIdleDet();
+  }
+
   memset(pcd_event_times, 0, sizeof(pcd_event_times));
   memset(p32x_event_times, 0, sizeof(p32x_event_times));
 
@@ -665,6 +671,9 @@ readend:
     Pico.video.status &= ~(SR_VB | SR_F);
     Pico.video.status |= ((Pico.video.reg[1] >> 3) ^ SR_VB) & SR_VB;
     Pico.video.status |= (Pico.video.pending_ints << 2) & SR_F;
+    // resume the detector in the same phase a save leaves it in
+    if (!(PicoIn.opt & POPT_DIS_IDLE_DET))
+      SekInitIdleDet();
   }
 
   // kludge: if there is no new ports data save, they must be initialised
