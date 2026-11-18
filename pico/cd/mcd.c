@@ -474,7 +474,7 @@ void pcd_state_loaded(void)
         (Pico_mcd->s68k_regs[0x31]+1) * 384);
   }
 
-  if (CYCLES_GE(cycles - Pico_mcd->pcm.update_cycles, 12500000/50))
+  if (CYCLES_GE(cycles - Pico_mcd->pcm.update_cycles, PCM_MIXBUF_LEN * 384))
     Pico_mcd->pcm.update_cycles = cycles;
 
   if (Pico_mcd->m.need_sync) {
