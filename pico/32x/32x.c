@@ -651,6 +651,10 @@ void PicoFrame32x(void)
 {
   int offs = (240-rendlines)>>1;
 
+  // drop poll detection state at the frame boundary, so that a state saved
+  // here reloads and runs exactly like an uninterrupted run (netplay)
+  p32x_clear_poll_state();
+
   if (PicoIn.AHW & PAHW_MCD)
     pcd_prepare_frame();
 
@@ -699,10 +703,9 @@ void Pico32xStateLoaded(int is_early)
   p32x_pwm_state_loaded();
   p32x_run_events(Pico.t.m68c_aim);
 
-  // TODO wakeup CPUs for now. poll detection stuff must go to the save state!
-  p32x_m68k_poll_event(0, -1);
-  p32x_sh2_poll_event(msh2.poll_addr, &msh2, SH2_IDLE_STATES, msh2.m68krcycles_done);
-  p32x_sh2_poll_event(ssh2.poll_addr, &ssh2, SH2_IDLE_STATES, ssh2.m68krcycles_done);
+  // the SH2s may have been saved while polling, restart them from a known
+  // state, same as is done at every frame start
+  p32x_clear_poll_state();
 }
 
 void Pico32xPrepare(void)

@@ -1125,6 +1125,7 @@ void Pico32xSwapDRAM(int b);
 void Pico32xMemStateLoaded(void);
 void p32x_update_banks(void);
 void p32x_m68k_poll_event(u32 a, u32 flags);
+void p32x_clear_poll_state(void);
 u32 REGPARM(3) p32x_sh2_poll_memory8(u32 a, u32 d, SH2 *sh2);
 u32 REGPARM(3) p32x_sh2_poll_memory16(u32 a, u32 d, SH2 *sh2);
 u32 REGPARM(3) p32x_sh2_poll_memory32(u32 a, u32 d, SH2 *sh2);

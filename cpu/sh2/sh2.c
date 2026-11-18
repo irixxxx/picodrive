@@ -116,6 +116,8 @@ void sh2_pack(const SH2 *sh2, unsigned char *buff)
 	p[0] = sh2->pending_int_irq;
 	p[1] = sh2->pending_int_vector;
 	p[2] = sh2->m68krcycles_done;
+	/* only a sleep can last across a state save, polling state is rebuilt */
+	p[3] = sh2->state & SH2_STATE_SLEEP;
 }
 
 void sh2_unpack(SH2 *sh2, const unsigned char *buff)
@@ -129,6 +131,9 @@ void sh2_unpack(SH2 *sh2, const unsigned char *buff)
 	sh2->pending_int_vector = p[1];
 	sh2->test_irq = 1;
 	sh2->m68krcycles_done = p[2];
+	/* states from older builds have 0 here, meaning 'awake' */
+	sh2->state = p[3] & SH2_STATE_SLEEP;
+	sh2->poll_addr = sh2->poll_cycles = sh2->poll_cnt = 0;
 }
 
 #ifdef DRC_CMP

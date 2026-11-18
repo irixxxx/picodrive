@@ -171,6 +171,28 @@ void NOINLINE p32x_sh2_poll_event(u32 a, SH2 *sh2, u32 flags, u32 m68k_cycles)
     sh2->poll_addr = sh2->poll_cycles = sh2->poll_cnt = 0;
 }
 
+// clear poll detection state, so the CPUs restart from a known point.
+// Used on state load and at the start of every frame, so that a state
+// loaded and carried on runs the same as an uninterrupted run.
+// SH2_STATE_SLEEP is kept, a DMA wait can span a frame boundary.
+void p32x_clear_poll_state(void)
+{
+  int i;
+
+  if (Pico32x.emu_flags & (P32XF_68KCPOLL|P32XF_68KVPOLL)) {
+    // the 68k was stopped by poll detection, not by a STOP instruction
+    Pico32x.emu_flags &= ~(P32XF_68KCPOLL|P32XF_68KVPOLL);
+    SekSetStop(0);
+  }
+  memset(&m68k_poll, 0, sizeof(m68k_poll));
+  SekNotPolling = 0;
+
+  for (i = 0; i < 2; i++) {
+    sh2s[i].state &= ~(SH2_STATE_CPOLL|SH2_STATE_VPOLL|SH2_STATE_RPOLL);
+    sh2s[i].poll_addr = sh2s[i].poll_cycles = sh2s[i].poll_cnt = 0;
+  }
+}
+
 static NOINLINE void sh2s_sync_on_read(SH2 *sh2, unsigned cycles)
 {
   if (sh2->poll_cnt != 0)
@@ -2534,11 +2556,6 @@ void Pico32xMemStateLoaded(void)
   memset(Pico32xMem->pwm, 0, sizeof(Pico32xMem->pwm));
   Pico32x.dirty_pal = 1;
 
-  memset(&m68k_poll, 0, sizeof(m68k_poll));
-  msh2.state = 0;
-  msh2.poll_addr = msh2.poll_cycles = msh2.poll_cnt = 0;
-  ssh2.state = 0;
-  ssh2.poll_addr = ssh2.poll_cycles = ssh2.poll_cnt = 0;
   memset(sh2_poll_fifo, 0, sizeof(sh2_poll_fifo));
 
   sh2_drc_flush_all();

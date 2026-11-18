@@ -224,6 +224,8 @@ PICO_INTERNAL void SekPackCpu(unsigned char *cpu, int is_sub)
     *(u16 *)(cpu+0x54) = Pico.t.refresh_delay;
     *(u16 *)(cpu+0x56) = Pico.t.z80_buscycles;
   }
+  // poll detection hint, set by the cpu core on delay loops (DBcc)
+  cpu[0x58] = is_sub ? SekNotPollingS68k : SekNotPolling;
 }
 
 PICO_INTERNAL void SekUnpackCpu(const unsigned char *cpu, int is_sub)
@@ -269,6 +271,9 @@ PICO_INTERNAL void SekUnpackCpu(const unsigned char *cpu, int is_sub)
     Pico.t.refresh_delay = *(u16 *)(cpu+0x54);
     Pico.t.z80_buscycles = *(u16 *)(cpu+0x56);
   }
+  // old states have 0 here, meaning 'not in a delay loop'
+  if (is_sub) SekNotPollingS68k = cpu[0x58];
+  else        SekNotPolling = cpu[0x58];
 }
 
 
