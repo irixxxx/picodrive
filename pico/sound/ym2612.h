@@ -163,7 +163,7 @@ typedef struct
 
 	FM_OPN		OPN;				/* OPN state            */
 
-	UINT32		slot_mask;			/* active slot mask (performance hack) */
+	UINT32		slot_mask;			/* active slot mask (performance hack), must match EG state */
 	UINT32		ssg_mask;			/* active ssg mask (performance hack) */
 } YM2612;
 #endif

@@ -593,6 +593,8 @@ static INLINE void FM_KEYOFF(int c , int s )
 				if (SLOT->volume >= 0x200) {
 					SLOT->volume = MAX_ATT_INDEX;
 					SLOT->state  = EG_OFF;
+					/* keep the slot mask in sync */
+					ym2612.slot_mask &= ~(1 << (s + c*4));
 				}
 			}
 		}
@@ -1233,6 +1235,13 @@ static void chan_render_prep(void)
 	crct.eg_timer_add = ym2612.OPN.eg_timer_add;
 	crct.lfo_init_sft16 = ym2612.OPN.lfo_ampm << 16;
 	crct.lfo_inc = ym2612.OPN.lfo_inc;
+	/* chan_render_finish() and the lfo_ampm store in YM2612UpdateOne_() use
+	   these unconditionally, while chan_render() seeds them only for the
+	   channels it renders, so an idle chip would copy stale values over the
+	   ones just restored from a state. Seed them from the chip here. */
+	crct.eg_cnt = ym2612.OPN.eg_cnt;
+	crct.eg_timer = ym2612.OPN.eg_timer;
+	crct.pack = (crct.pack & 0xffff) | ((UINT32)ym2612.OPN.lfo_ampm << 16);
 }
 
 static void chan_render_finish(s32 *buffer, int length, int active_chans)
@@ -1349,8 +1358,15 @@ static int chan_render(s32 *buffer, int length, int c, UINT32 flags) // flags: s
 		crct.CH->SLOT[SLOT3].phase = crct.phase3;
 		crct.CH->SLOT[SLOT4].phase = crct.phase4;
 	}
-	else
-		ym2612.slot_mask &= ~(0xf << (c*4));
+	/* slots can reach EG_OFF in here, so refresh the slot mask */
+	{
+		UINT32 m = 0;
+		if (crct.CH->SLOT[SLOT1].state) m |= 1 << SLOT1;
+		if (crct.CH->SLOT[SLOT2].state) m |= 1 << SLOT2;
+		if (crct.CH->SLOT[SLOT3].state) m |= 1 << SLOT3;
+		if (crct.CH->SLOT[SLOT4].state) m |= 1 << SLOT4;
+		ym2612.slot_mask = (ym2612.slot_mask & ~(0xf << (c*4))) | (m << (c*4));
+	}
 	crct.CH->upd_cnt = (crct.algo >> 4) & 0x7;
 
 	return (crct.algo & 8) >> 3; // had output
