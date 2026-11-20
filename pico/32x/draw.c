@@ -69,20 +69,57 @@ static void convert_pal555(int invert_prio)
   const u16 mg = 0x03e0;                                          \
   const u16 mb = 0x7c00;                                          \
   const u16 mp = 0x0000;                                          \
+  const u32 bg4 = (u32)(u8)mdbg * 0x01010101;                     \
   unsigned short t;                                               \
-  int i = 320;                                                    \
+  int i = 320, k;                                                 \
                                                                   \
-  while (i > 0) {                                                 \
-    for (; i > 0 && (*pmd & 0x3f) == mdbg; pd++, pmd++, i--) {    \
+  /* intro: take up to 3 pixels one by one to get pmd aligned */  \
+  for (; i > 0 && ((uintptr_t)pmd & 3); i--, pd++, pmd++) {       \
+    if ((*pmd & 0x3f) == mdbg) {                                  \
       t = *p32x++;                                                \
       *pd = PXCONV(t);                                            \
     }                                                             \
-    for (; i > 0 && (*pmd & 0x3f) != mdbg; pd++, pmd++, i--) {    \
+    else {                                                        \
       t = *p32x++ ^ inv;                                          \
-      if (t & 0x8000)                                             \
+      if (t & 0x8000) *pd = PXCONV(t);                            \
+      else pmd_draw_code;                                         \
+    }                                                             \
+  }                                                               \
+                                                                  \
+  /* run loop: whole 4 pixel blocks, pmd stays aligned here */    \
+  for (; i >= 4; i -= 4) {                                        \
+    if (((*(u32 *)pmd ^ bg4) & 0x3f3f3f3f) == 0) {                \
+      /* MD background only shows through, 32X layer is on top */ \
+      t = *p32x++; *pd++ = PXCONV(t);                             \
+      t = *p32x++; *pd++ = PXCONV(t);                             \
+      t = *p32x++; *pd++ = PXCONV(t);                             \
+      t = *p32x++; *pd++ = PXCONV(t);                             \
+      pmd += 4;                                                   \
+      continue;                                                   \
+    }                                                             \
+    for (k = 0; k < 4; k++, pd++, pmd++) {                        \
+      if ((*pmd & 0x3f) == mdbg) {                                \
+        t = *p32x++;                                              \
         *pd = PXCONV(t);                                          \
-      else                                                        \
-        pmd_draw_code;                                            \
+      }                                                           \
+      else {                                                      \
+        t = *p32x++ ^ inv;                                        \
+        if (t & 0x8000) *pd = PXCONV(t);                          \
+        else pmd_draw_code;                                       \
+      }                                                           \
+    }                                                             \
+  }                                                               \
+                                                                  \
+  /* outro: the tail of the line, less than 4 pixels */           \
+  for (; i > 0; i--, pd++, pmd++) {                               \
+    if ((*pmd & 0x3f) == mdbg) {                                  \
+      t = *p32x++;                                                \
+      *pd = PXCONV(t);                                            \
+    }                                                             \
+    else {                                                        \
+      t = *p32x++ ^ inv;                                          \
+      if (t & 0x8000) *pd = PXCONV(t);                            \
+      else pmd_draw_code;                                         \
     }                                                             \
   }                                                               \
 }
@@ -90,19 +127,57 @@ static void convert_pal555(int invert_prio)
 // packed pixel mode
 #define do_line_pp(pd, p32x, pmd, pmd_draw_code)                  \
 {                                                                 \
+  const u32 bg4 = (u32)(u8)mdbg * 0x01010101;                     \
   unsigned short t;                                               \
-  int i = 320;                                                    \
-  while (i > 0) {                                                 \
-    for (; i > 0 && (*pmd & 0x3f) == mdbg; pd++, pmd++, i--) {    \
+  int i = 320, k;                                                 \
+                                                                  \
+  /* intro: take up to 3 pixels one by one to get pmd aligned */  \
+  for (; i > 0 && ((uintptr_t)pmd & 3); i--, pd++, pmd++) {       \
+    if ((*pmd & 0x3f) == mdbg) {                                  \
       t = pal[*(u8 *)(MEM_BE2((uintptr_t)(p32x++)))];             \
       *pd = t;                                                    \
     }                                                             \
-    for (; i > 0 && (*pmd & 0x3f) != mdbg; pd++, pmd++, i--) {    \
+    else {                                                        \
       t = pal[*(u8 *)(MEM_BE2((uintptr_t)(p32x++)))];             \
-      if (t & PXPRIO)                                             \
+      if (t & PXPRIO) *pd = t;                                    \
+      else pmd_draw_code;                                         \
+    }                                                             \
+  }                                                               \
+                                                                  \
+  /* run loop: whole 4 pixel blocks, pmd stays aligned here */    \
+  for (; i >= 4; i -= 4) {                                        \
+    if (((*(u32 *)pmd ^ bg4) & 0x3f3f3f3f) == 0) {                \
+      /* MD background only shows through, 32X layer is on top */ \
+      t = pal[*(u8 *)(MEM_BE2((uintptr_t)(p32x++)))]; *pd++ = t;  \
+      t = pal[*(u8 *)(MEM_BE2((uintptr_t)(p32x++)))]; *pd++ = t;  \
+      t = pal[*(u8 *)(MEM_BE2((uintptr_t)(p32x++)))]; *pd++ = t;  \
+      t = pal[*(u8 *)(MEM_BE2((uintptr_t)(p32x++)))]; *pd++ = t;  \
+      pmd += 4;                                                   \
+      continue;                                                   \
+    }                                                             \
+    for (k = 0; k < 4; k++, pd++, pmd++) {                        \
+      if ((*pmd & 0x3f) == mdbg) {                                \
+        t = pal[*(u8 *)(MEM_BE2((uintptr_t)(p32x++)))];           \
         *pd = t;                                                  \
-      else                                                        \
-        pmd_draw_code;                                            \
+      }                                                           \
+      else {                                                      \
+        t = pal[*(u8 *)(MEM_BE2((uintptr_t)(p32x++)))];           \
+        if (t & PXPRIO) *pd = t;                                  \
+        else pmd_draw_code;                                       \
+      }                                                           \
+    }                                                             \
+  }                                                               \
+                                                                  \
+  /* outro: the tail of the line, less than 4 pixels */           \
+  for (; i > 0; i--, pd++, pmd++) {                               \
+    if ((*pmd & 0x3f) == mdbg) {                                  \
+      t = pal[*(u8 *)(MEM_BE2((uintptr_t)(p32x++)))];             \
+      *pd = t;                                                    \
+    }                                                             \
+    else {                                                        \
+      t = pal[*(u8 *)(MEM_BE2((uintptr_t)(p32x++)))];             \
+      if (t & PXPRIO) *pd = t;                                    \
+      else pmd_draw_code;                                         \
     }                                                             \
   }                                                               \
 }
@@ -178,7 +253,7 @@ void FinalizeLine32xRGB555(int sh, int line, struct PicoEState *est)
 
   if ((Pico32x.vdp_regs[0] & P32XV_Mx) == 1) { // Packed Pixel Mode
     unsigned char *p32xb = (void *)p32x;
-    p32xb += (lines_sft_offs >> 8) & 1;                          \
+    p32xb += (lines_sft_offs >> 8) & 1;
     if (lines_sft_offs & (2<<8)) {
       if (lines_sft_offs & (4<<8)) {
         pmd += H32_OFFSET;
