@@ -44,6 +44,11 @@ extern void  plat_munmap(void *ptr, size_t size);
 extern void *plat_mem_get_for_drc(size_t size);
 extern int   plat_mem_set_exec(void *ptr, size_t size);
 
+// the same for hosts that enforce W^X, where the dynarec buffer has to be
+// switched between writable (code emission) and executable (running it)
+extern int   plat_drc_jit_set_exec(void *ptr, size_t size);
+extern void  plat_drc_jit_protect(int writable);
+
 // this one should handle display mode changes
 extern void emu_video_mode_change(int start_line, int line_count, int start_col, int col_count);
 
@@ -82,6 +87,7 @@ extern void *p32x_bios_g, *p32x_bios_m, *p32x_bios_s;
 #define POPT_FM_YM2612      (1<<24) //x00 0000
 #define POPT_EN_FM_FILTER   (1<<25)
 #define POPT_EN_KBD         (1<<26)
+#define POPT_H32_LAYER_32X  (1<<27)
 
 #define PAHW_MCD    (1<<0)
 #define PAHW_32X    (1<<1)
@@ -121,6 +127,8 @@ typedef struct PicoInterface
 	short mouse[4];                // x,y mouse coordinates
 	short mouseInt[4];             // internal copy
 	short gunx, guny;              // light gun offsets
+	short stkCenter;               // stick centering axes (1=x, 2=y)
+	short stkTime, stkRate;        // stick centering timeout, rate
 
 	unsigned short quirks;         // game-specific quirks: PQUIRK_*
 	unsigned short overclockM68k;  // overclock the emulated 68k, in %
@@ -370,6 +378,7 @@ enum input_device {
   PICO_INPUT_NOTHING,
   PICO_INPUT_PAD_3BTN,
   PICO_INPUT_PAD_6BTN,
+  PICO_INPUT_XE_1AP,
   PICO_INPUT_MOUSE,
   PICO_INPUT_LIGHT_GUN,
   PICO_INPUT_JUSTIFIER,

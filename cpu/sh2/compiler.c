@@ -3252,6 +3252,7 @@ static void sh2_smc_rm_blocks(u32 a, int len, int tcache_id, int free);
 
 static void REGPARM(2) *sh2_translate(SH2 *sh2, int tcache_id)
 {
+  plat_drc_jit_protect(1); // called from generated code, tcache must be writable
   // branch targets in current block
   static struct linkage branch_targets[MAX_LOCAL_TARGETS];
   int branch_target_count = 0;
@@ -3310,6 +3311,11 @@ static void REGPARM(2) *sh2_translate(SH2 *sh2, int tcache_id)
 
   // initial passes to disassemble and analyze the block
   crc = scan_block(base_pc, sh2->is_slave, op_flags, &end_pc, &base_literals, &end_literals);
+#ifdef SH2_DRC_SINGLE_STEP
+  // one instruction per block (plus a delay slot) so that a budget of one
+  // cycle retires exactly one instruction, as sh2_execute_interpreter() does
+  end_pc = base_pc + ((op_flags[1] & OF_DELAY_OP) ? 4 : 2);
+#endif
   end_literals = dr_check_nolit(base_literals, end_literals, tcache_id);
   if (base_literals == end_literals) // map empty lit section to end of code
     base_literals = end_literals = end_pc;
@@ -3330,6 +3336,7 @@ static void REGPARM(2) *sh2_translate(SH2 *sh2, int tcache_id)
       base_pc, end_pc, base_literals, end_literals, block->entryp->tcache_ptr);
     dr_activate_block(block, tcache_id, sh2->is_slave);
     emith_update_cache();
+    plat_drc_jit_protect(0); // returning to generated code
     return block->entryp[0].tcache_ptr;
   }
 
@@ -3434,8 +3441,10 @@ static void REGPARM(2) *sh2_translate(SH2 *sh2, int tcache_id)
 
   block = dr_add_block(branch_target_count, base_pc, end_pc - base_pc,
     base_literals, end_literals-base_literals, crc, sh2->is_slave, &blkid_main);
-  if (block == NULL)
+  if (block == NULL) {
+    plat_drc_jit_protect(0); // returning to generated code
     return NULL;
+  }
 
   block_entry_ptr = tcache_ptr;
   dbg(2, "== %csh2 block #%d,%d %08x-%08x,%08x-%08x -> %p", sh2->is_slave ? 's' : 'm',
@@ -4216,8 +4225,13 @@ static void REGPARM(2) *sh2_translate(SH2 *sh2, int tcache_id)
       case 0x0d: // XTRCT  Rm,Rn        0010nnnnmmmm1101
         tmp2 = rcache_get_reg(GET_Rm(), RC_GR_READ, NULL);
         tmp  = rcache_get_reg(GET_Rn(), RC_GR_RMW, &tmp3);
-        emith_lsr(tmp, tmp3, 16);
-        emith_or_r_r_lsl(tmp, tmp2, 16);
+        if (GET_Rm() == GET_Rn()) {
+          // both halves come from the same register, which is just a rotate
+          emith_ror(tmp, tmp3, 16);
+        } else {
+          emith_lsr(tmp, tmp3, 16);
+          emith_or_r_r_lsl(tmp, tmp2, 16);
+        }
         goto end_op;
       case 0x0e: // MULU.W Rm,Rn        0010nnnnmmmm1110
       case 0x0f: // MULS.W Rm,Rn        0010nnnnmmmm1111
@@ -4651,6 +4665,8 @@ static void REGPARM(2) *sh2_translate(SH2 *sh2, int tcache_id)
           FLUSH_CYCLES(sr);
           rcache_get_reg_arg(0, GET_Rn(), NULL);
           tmp = emit_memhandler_read(0);
+          // the read dropped SR if it isn't statically mapped
+          sr = rcache_get_reg(SHR_SR, RC_GR_RMW, NULL);
           emith_clr_t_cond(sr);
           emith_cmp_r_imm(tmp, 0);
           emith_set_t_cond(sr, DCOND_EQ);
@@ -5251,6 +5267,7 @@ end_op:
  printf("~~~\n");
 */
 
+  plat_drc_jit_protect(0); // returning to generated code
   return block_entry_ptr;
 }
 
@@ -5704,12 +5721,16 @@ static void sh2_smc_rm_blocks(u32 a, int len, int tcache_id, int free)
 
 void sh2_drc_wcheck_ram(u32 a, unsigned len, SH2 *sh2)
 {
+  plat_drc_jit_protect(1); // patches block links
   sh2_smc_rm_blocks(a, len, 0, 0);
+  plat_drc_jit_protect(0);
 }
 
 void sh2_drc_wcheck_da(u32 a, unsigned len, SH2 *sh2)
 {
+  plat_drc_jit_protect(1); // patches block links
   sh2_smc_rm_blocks(a, len, 1 + sh2->is_slave, 0);
+  plat_drc_jit_protect(0);
 }
 
 int sh2_execute_drc(SH2 *sh2c, int cycles)
@@ -5726,6 +5747,9 @@ int sh2_execute_drc(SH2 *sh2c, int cycles)
 #endif
 
   sh2c->state |= SH2_IN_DRC;
+  // tcache is executable whenever generated code runs: it's only writable
+  // while a writer has it switched, and every writer (block compile, link
+  // patching, flush, init) restores the executable mode before returning.
   host_call(sh2_drc_entry, (SH2 *))(sh2c);
   sh2c->state &= ~SH2_IN_DRC;
 
@@ -5905,6 +5929,8 @@ void sh2_drc_flush_all(void)
   if (block_tables[0] == NULL)
     return;
 
+  plat_drc_jit_protect(1); // block orphaning patches jumps
+
   backtrace();
   state_dump();
   block_stats();
@@ -5914,6 +5940,7 @@ void sh2_drc_flush_all(void)
   dr_flush_tcache(1);
   dr_flush_tcache(2);
   Pico32x.emu_flags &= ~P32XF_DRC_ROM_C;
+  plat_drc_jit_protect(0); // tcache is executable again
 }
 
 void sh2_drc_mem_setup(SH2 *sh2)
@@ -5927,6 +5954,7 @@ int sh2_drc_init(SH2 *sh2)
 {
   int i;
 
+  plat_drc_jit_protect(1); // helper functions are generated below
   if (block_tables[0] == NULL)
   {
     for (i = 0; i < TCACHE_BUFFERS; i++) {
@@ -5997,6 +6025,8 @@ int sh2_drc_init(SH2 *sh2)
   memset(sh2->branch_cache, -1, sizeof(sh2->branch_cache));
   memset(sh2->rts_cache, -1, sizeof(sh2->rts_cache));
   sh2->rts_cache_idx = 0;
+
+  plat_drc_jit_protect(0); // tcache is executable again
 
   return 0;
 

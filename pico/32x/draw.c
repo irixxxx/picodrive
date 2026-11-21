@@ -1,7 +1,7 @@
 /*
  * PicoDrive
  * (C) notaz, 2009,2010
- * (C) irixxxx, 2019-2024
+ * (C) irixxxx, 2019-2026
  *
  * This work is licensed under the terms of MAME license.
  * See COPYING file in the top-level directory.
@@ -15,8 +15,9 @@
 // slot (signalling the display of background color) is processed in this case
 // is however unclear and might lead to glitches due to race conditions by the
 // different video clocks for H32 and H40.
-// NB: there is an offset of 4 pixels between MD and 32X layers in H32 mode.
-#define H32_OFFSET	4
+
+// NB: there is an offset of 3.25 pixels between MD and 32X layers in H32 mode.
+#define H32_OFFSET	(int)(3.25)
 
 // BGR555 to native conversion
 #if defined(USE_BGR555)
@@ -36,6 +37,8 @@ int Pico32xDrawMode;
 
 void *DrawLineDestBase32x;
 int DrawLineDestIncrement32x;
+
+void *DrawLineDest32x;
 
 static void convert_pal555(int invert_prio)
 {
@@ -66,20 +69,57 @@ static void convert_pal555(int invert_prio)
   const u16 mg = 0x03e0;                                          \
   const u16 mb = 0x7c00;                                          \
   const u16 mp = 0x0000;                                          \
+  const u32 bg4 = (u32)(u8)mdbg * 0x01010101;                     \
   unsigned short t;                                               \
-  int i = 320;                                                    \
+  int i = 320, k;                                                 \
                                                                   \
-  while (i > 0) {                                                 \
-    for (; i > 0 && (*pmd & 0x3f) == mdbg; pd++, pmd++, i--) {    \
+  /* intro: take up to 3 pixels one by one to get pmd aligned */  \
+  for (; i > 0 && ((uintptr_t)pmd & 3); i--, pd++, pmd++) {       \
+    if ((*pmd & 0x3f) == mdbg) {                                  \
       t = *p32x++;                                                \
       *pd = PXCONV(t);                                            \
     }                                                             \
-    for (; i > 0 && (*pmd & 0x3f) != mdbg; pd++, pmd++, i--) {    \
+    else {                                                        \
       t = *p32x++ ^ inv;                                          \
-      if (t & 0x8000)                                             \
+      if (t & 0x8000) *pd = PXCONV(t);                            \
+      else pmd_draw_code;                                         \
+    }                                                             \
+  }                                                               \
+                                                                  \
+  /* run loop: whole 4 pixel blocks, pmd stays aligned here */    \
+  for (; i >= 4; i -= 4) {                                        \
+    if (((*(u32 *)pmd ^ bg4) & 0x3f3f3f3f) == 0) {                \
+      /* MD background only shows through, 32X layer is on top */ \
+      t = *p32x++; *pd++ = PXCONV(t);                             \
+      t = *p32x++; *pd++ = PXCONV(t);                             \
+      t = *p32x++; *pd++ = PXCONV(t);                             \
+      t = *p32x++; *pd++ = PXCONV(t);                             \
+      pmd += 4;                                                   \
+      continue;                                                   \
+    }                                                             \
+    for (k = 0; k < 4; k++, pd++, pmd++) {                        \
+      if ((*pmd & 0x3f) == mdbg) {                                \
+        t = *p32x++;                                              \
         *pd = PXCONV(t);                                          \
-      else                                                        \
-        pmd_draw_code;                                            \
+      }                                                           \
+      else {                                                      \
+        t = *p32x++ ^ inv;                                        \
+        if (t & 0x8000) *pd = PXCONV(t);                          \
+        else pmd_draw_code;                                       \
+      }                                                           \
+    }                                                             \
+  }                                                               \
+                                                                  \
+  /* outro: the tail of the line, less than 4 pixels */           \
+  for (; i > 0; i--, pd++, pmd++) {                               \
+    if ((*pmd & 0x3f) == mdbg) {                                  \
+      t = *p32x++;                                                \
+      *pd = PXCONV(t);                                            \
+    }                                                             \
+    else {                                                        \
+      t = *p32x++ ^ inv;                                          \
+      if (t & 0x8000) *pd = PXCONV(t);                            \
+      else pmd_draw_code;                                         \
     }                                                             \
   }                                                               \
 }
@@ -87,31 +127,70 @@ static void convert_pal555(int invert_prio)
 // packed pixel mode
 #define do_line_pp(pd, p32x, pmd, pmd_draw_code)                  \
 {                                                                 \
+  const u32 bg4 = (u32)(u8)mdbg * 0x01010101;                     \
   unsigned short t;                                               \
-  int i = 320;                                                    \
-  while (i > 0) {                                                 \
-    for (; i > 0 && (*pmd & 0x3f) == mdbg; pd++, pmd++, i--) {    \
-      t = pal[*(unsigned char *)(MEM_BE2((uintptr_t)(p32x++)))];  \
+  int i = 320, k;                                                 \
+                                                                  \
+  /* intro: take up to 3 pixels one by one to get pmd aligned */  \
+  for (; i > 0 && ((uintptr_t)pmd & 3); i--, pd++, pmd++) {       \
+    if ((*pmd & 0x3f) == mdbg) {                                  \
+      t = pal[*(u8 *)(MEM_BE2((uintptr_t)(p32x++)))];             \
       *pd = t;                                                    \
     }                                                             \
-    for (; i > 0 && (*pmd & 0x3f) != mdbg; pd++, pmd++, i--) {    \
-      t = pal[*(unsigned char *)(MEM_BE2((uintptr_t)(p32x++)))];  \
-      if (t & PXPRIO)                                             \
+    else {                                                        \
+      t = pal[*(u8 *)(MEM_BE2((uintptr_t)(p32x++)))];             \
+      if (t & PXPRIO) *pd = t;                                    \
+      else pmd_draw_code;                                         \
+    }                                                             \
+  }                                                               \
+                                                                  \
+  /* run loop: whole 4 pixel blocks, pmd stays aligned here */    \
+  for (; i >= 4; i -= 4) {                                        \
+    if (((*(u32 *)pmd ^ bg4) & 0x3f3f3f3f) == 0) {                \
+      /* MD background only shows through, 32X layer is on top */ \
+      t = pal[*(u8 *)(MEM_BE2((uintptr_t)(p32x++)))]; *pd++ = t;  \
+      t = pal[*(u8 *)(MEM_BE2((uintptr_t)(p32x++)))]; *pd++ = t;  \
+      t = pal[*(u8 *)(MEM_BE2((uintptr_t)(p32x++)))]; *pd++ = t;  \
+      t = pal[*(u8 *)(MEM_BE2((uintptr_t)(p32x++)))]; *pd++ = t;  \
+      pmd += 4;                                                   \
+      continue;                                                   \
+    }                                                             \
+    for (k = 0; k < 4; k++, pd++, pmd++) {                        \
+      if ((*pmd & 0x3f) == mdbg) {                                \
+        t = pal[*(u8 *)(MEM_BE2((uintptr_t)(p32x++)))];           \
         *pd = t;                                                  \
-      else                                                        \
-        pmd_draw_code;                                            \
+      }                                                           \
+      else {                                                      \
+        t = pal[*(u8 *)(MEM_BE2((uintptr_t)(p32x++)))];           \
+        if (t & PXPRIO) *pd = t;                                  \
+        else pmd_draw_code;                                       \
+      }                                                           \
+    }                                                             \
+  }                                                               \
+                                                                  \
+  /* outro: the tail of the line, less than 4 pixels */           \
+  for (; i > 0; i--, pd++, pmd++) {                               \
+    if ((*pmd & 0x3f) == mdbg) {                                  \
+      t = pal[*(u8 *)(MEM_BE2((uintptr_t)(p32x++)))];             \
+      *pd = t;                                                    \
+    }                                                             \
+    else {                                                        \
+      t = pal[*(u8 *)(MEM_BE2((uintptr_t)(p32x++)))];             \
+      if (t & PXPRIO) *pd = t;                                    \
+      else pmd_draw_code;                                         \
     }                                                             \
   }                                                               \
 }
 
 // run length mode
-#define do_line_rl(pd, p32x, pmd, pmd_draw_code)                  \
+#define do_line_rl(pd, p32x, pmd, offs, pmd_draw_code)            \
 {                                                                 \
-  unsigned short len, t;                                          \
+  short len = offs, t;                                            \
   int i;                                                          \
   for (i = 320; i > 0; p32x++) {                                  \
     t = pal[*p32x & 0xff];                                        \
-    for (len = (*p32x >> 8) + 1; len > 0 && i > 0; len--, i--, pd++, pmd++) { \
+    len += (*p32x >> 8) + 1;                                      \
+    for (; len > 0 && i > 0; len--, i--, pd++, pmd++) {           \
       if ((*pmd & 0x3f) == mdbg || (t & PXPRIO))                  \
         *pd = t;                                                  \
       else                                                        \
@@ -123,7 +202,7 @@ static void convert_pal555(int invert_prio)
 #define MD_LAYER_CODE_H32 \
   *dst = dst[H32_OFFSET]
 
-// this is almost never used (Wiz and menu bg gen only)
+// this is almost never used (Wiz, vert sw scaling and menu bg gen only)
 void FinalizeLine32xRGB555(int sh, int line, struct PicoEState *est)
 {
   unsigned short *dst = est->DrawLineDest;
@@ -131,7 +210,7 @@ void FinalizeLine32xRGB555(int sh, int line, struct PicoEState *est)
   unsigned char  *pmd = est->HighCol + 8;
   unsigned short *dram, *p32x;
   unsigned char   mdbg;
-  int h32 = !(Pico.video.reg[12] & 0x1);
+  int lines_sft_offs = 0;
 
   FinalizeLine555(sh, line, est);
 
@@ -144,12 +223,26 @@ void FinalizeLine32xRGB555(int sh, int line, struct PicoEState *est)
   dram = (void *)Pico32xMem->dram[Pico32x.vdp_regs[0x0a/2] & P32XV_FS];
   p32x = dram + dram[line];
   mdbg = Pico.video.reg[7] & 0x3f;
-  if (h32) pmd += H32_OFFSET;
+
+  // hw bug: shift flag doesn't work if line addr is xxFF
+  if ((Pico32x.vdp_regs[2 / 2] & P32XV_SFT) && ((dram[line]+1) & 0xff))
+    lines_sft_offs |= 1 << 8;
+  if (!(Pico.video.reg[12] & 1)) // H32, mind layer offset bit
+    lines_sft_offs |= 2 << 8;
+  if (PicoIn.opt & POPT_H32_LAYER_32X) // H32 centering
+    lines_sft_offs |= 4 << 8;
 
   if ((Pico32x.vdp_regs[0] & P32XV_Mx) == 2) { // Direct Color Mode
     int inv_bit = (Pico32x.vdp_regs[0] & P32XV_PRI) ? 0x8000 : 0;
-    if (h32) {
-      do_line_dc(dst, p32x, pmd, inv_bit, MD_LAYER_CODE_H32);
+    p32x += (lines_sft_offs >> 8) & 1;                          \
+    if (lines_sft_offs & (2<<8)) {
+      if (lines_sft_offs & (4<<8)) {
+        pmd += H32_OFFSET;
+        do_line_dc(dst, p32x, pmd, inv_bit, MD_LAYER_CODE_H32);
+      } else {
+        p32x -= H32_OFFSET;
+        do_line_dc(dst, p32x, pmd, inv_bit,);
+      }
     } else
       do_line_dc(dst, p32x, pmd, inv_bit,);
     return;
@@ -160,18 +253,28 @@ void FinalizeLine32xRGB555(int sh, int line, struct PicoEState *est)
 
   if ((Pico32x.vdp_regs[0] & P32XV_Mx) == 1) { // Packed Pixel Mode
     unsigned char *p32xb = (void *)p32x;
-    if (Pico32x.vdp_regs[2 / 2] & P32XV_SFT)
-      p32xb++;
-    if (h32) {
-      do_line_pp(dst, p32xb, pmd, MD_LAYER_CODE_H32);
+    p32xb += (lines_sft_offs >> 8) & 1;
+    if (lines_sft_offs & (2<<8)) {
+      if (lines_sft_offs & (4<<8)) {
+        pmd += H32_OFFSET;
+        do_line_pp(dst, p32xb, pmd, MD_LAYER_CODE_H32);
+      } else {
+        p32xb -= H32_OFFSET;
+        do_line_pp(dst, p32xb, pmd,);
+      }
     } else
       do_line_pp(dst, p32xb, pmd,);
   }
   else { // Run Length Mode
-    if (h32) {
-      do_line_rl(dst, p32x, pmd, MD_LAYER_CODE_H32);
+    if (lines_sft_offs & (2<<8)) {
+      if (lines_sft_offs & (4<<8)) {
+        pmd += H32_OFFSET;
+        do_line_rl(dst, p32x, pmd, -((lines_sft_offs>>8)&1), MD_LAYER_CODE_H32);
+      } else {
+        do_line_rl(dst, p32x, pmd, H32_OFFSET - ((lines_sft_offs>>8) & 1), );
+      }
     } else
-      do_line_rl(dst, p32x, pmd,);
+      do_line_rl(dst, p32x, pmd, -((lines_sft_offs>>8) & 1),);
   }
 }
 
@@ -195,14 +298,18 @@ static void do_loop_dc##name(unsigned short *dst,               \
   unsigned char  *pmd = Pico.est.Draw2FB +                      \
                           328 * (lines_sft_offs & 0xff) + 8;    \
   unsigned short *palmd = Pico.est.HighPal;                     \
-  unsigned short *p32x;                                         \
+  unsigned short *p32x, loffs;                                  \
   int lines = (lines_sft_offs >> 16) & 0xff;                    \
+  int h32 = (lines_sft_offs & (2<<8)) ? H32_OFFSET : 0;         \
   int l;                                                        \
-  if (lines_sft_offs & (2<<8)) pmd += H32_OFFSET;               \
+  if (lines_sft_offs & (4<<8)) pmd += h32, h32 = 0;             \
   (void)palmd;                                                  \
   for (l = 0; l < lines; l++, pmd += 8) {                       \
     pre_code;                                                   \
-    p32x = dram + dram[l + (lines_sft_offs >> 24)];             \
+    loffs = dram[l + (lines_sft_offs >> 24)];                   \
+    p32x = dram + loffs - h32;                                  \
+    if ((u8)(loffs+1))                                          \
+      p32x += (lines_sft_offs >> 8) & 1;                        \
     do_line_dc(dst, p32x, pmd, inv_bit, md_code);               \
     post_code;                                                  \
     dst += DrawLineDestIncrement32x/2 - 320;                    \
@@ -218,14 +325,18 @@ static void do_loop_pp##name(unsigned short *dst,               \
                           328 * (lines_sft_offs & 0xff) + 8;    \
   unsigned short *palmd = Pico.est.HighPal;                     \
   unsigned char  *p32x;                                         \
+  unsigned short loffs;                                         \
   int lines = (lines_sft_offs >> 16) & 0xff;                    \
+  int h32 = (lines_sft_offs & (2<<8)) ? H32_OFFSET : 0;         \
   int l;                                                        \
-  if (lines_sft_offs & (2<<8)) pmd += H32_OFFSET;               \
+  if (lines_sft_offs & (4<<8)) pmd += h32, h32 = 0;             \
   (void)palmd;                                                  \
   for (l = 0; l < lines; l++, pmd += 8) {                       \
     pre_code;                                                   \
-    p32x = (void *)(dram + dram[l + (lines_sft_offs >> 24)]);   \
-    p32x += (lines_sft_offs >> 8) & 1;                          \
+    loffs = dram[l + (lines_sft_offs >> 24)];                   \
+    p32x = (u8 *)(dram + loffs) - h32;                          \
+    if ((u8)(loffs+1))                                          \
+      p32x += (lines_sft_offs >> 8) & 1;                        \
     do_line_pp(dst, p32x, pmd, md_code);                        \
     post_code;                                                  \
     dst += DrawLineDestIncrement32x/2 - 320;                    \
@@ -240,15 +351,18 @@ static void do_loop_rl##name(unsigned short *dst,               \
   unsigned char  *pmd = Pico.est.Draw2FB +                      \
                           328 * (lines_sft_offs & 0xff) + 8;    \
   unsigned short *palmd = Pico.est.HighPal;                     \
-  unsigned short *p32x;                                         \
+  unsigned short *p32x, loffs;                                  \
   int lines = (lines_sft_offs >> 16) & 0xff;                    \
+  int h32 = (lines_sft_offs & (2<<8)) ? H32_OFFSET : 0;         \
   int l;                                                        \
-  if (lines_sft_offs & (2<<8)) pmd += H32_OFFSET;               \
   (void)palmd;                                                  \
+  if (lines_sft_offs & (4<<8)) pmd += h32, h32 = 0;             \
   for (l = 0; l < lines; l++, pmd += 8) {                       \
     pre_code;                                                   \
-    p32x = dram + dram[l + (lines_sft_offs >> 24)];             \
-    do_line_rl(dst, p32x, pmd, md_code);                        \
+    loffs = dram[l + (lines_sft_offs >> 24)];                   \
+    p32x = dram + loffs;                                        \
+    loffs = (lines_sft_offs & (1<<8)) && ((loffs+1) & 0xff);    \
+    do_line_rl(dst, p32x, pmd, h32-loffs, md_code);             \
     post_code;                                                  \
     dst += DrawLineDestIncrement32x/2 - 320;                    \
   }                                                             \
@@ -289,7 +403,7 @@ void PicoDraw32xLayer(int offs, int lines, int md_bg)
 
   offs += Pico32x.sync_line;
 
-  Pico.est.DrawLineDest = (char *)DrawLineDestBase32x + offs * DrawLineDestIncrement32x;
+  Pico.est.DrawLineDest = DrawLineDest32x;
   Pico.est.DrawLineDestIncr = DrawLineDestIncrement32x;
   dram = Pico32xMem->dram[Pico32x.vdp_regs[0x0a/2] & P32XV_FS];
 
@@ -318,55 +432,68 @@ void PicoDraw32xLayer(int offs, int lines, int md_bg)
   }
 
 do_it:
+  lines_sft_offs = (Pico32x.sync_line << 24) | (lines << 16) | offs;
+  if ((Pico32x.vdp_regs[2 / 2] & P32XV_SFT))
+    lines_sft_offs |= 1 << 8;
+  if (!(Pico.video.reg[12] & 1)) // H32, mind layer offset bit
+    lines_sft_offs |= 2 << 8;
+  if (PicoIn.opt & POPT_H32_LAYER_32X) // H32 centering
+    lines_sft_offs |= 4 << 8;
+
   // In 8bit modes MD+32X layers are merged together in 32X rendering, while in
   // 16bit mode the MD layer is directly created in the target buffer and the
   // 32X layer is overlaid onto that.
-  if (Pico32xDrawMode == PDM32X_BOTH)
+  if (Pico32xDrawMode == PDM32X_BOTH) // 8bit
     which_func = have_scan ? DO_LOOP_MD_SCAN : DO_LOOP_MD;
-  else if (!(Pico.video.reg[12] & 1)) // H32, mind 4 px offset
-    which_func = have_scan ? DO_LOOP_H32_SCAN : DO_LOOP_H32;
+  else if ((lines_sft_offs & ((2|4)<<8)) == (2|4)<<8) // H32, 32X centered
+    which_func = have_scan ? DO_LOOP_H32_SCAN : DO_LOOP_H32; // mind H32 offset
   else
     which_func = have_scan ? DO_LOOP_SCAN : DO_LOOP;
-  lines_sft_offs = (Pico32x.sync_line << 24) | (lines << 16) | offs;
-  if (Pico32x.vdp_regs[2 / 2] & P32XV_SFT)
-    lines_sft_offs |= 1 << 8;
-  if (!(Pico.video.reg[12] & 1)) // offset flag for H32
-    lines_sft_offs |= 2 << 8;
 
   do_loop[which_func](Pico.est.DrawLineDest, dram, lines_sft_offs, md_bg);
+
+  if (DrawLineDest32x == Pico.est.DrawLineDest)
+    Pico.est.DrawLineDest = (char *)Pico.est.DrawLineDest + lines * DrawLineDestIncrement32x;
+  DrawLineDest32x = Pico.est.DrawLineDest;
 }
 
 // mostly unused, games tend to keep 32X layer on
 void PicoDraw32xLayerMdOnly(int offs, int lines)
 {
   int have_scan = PicoScan32xBegin != NULL && PicoScan32xEnd != NULL;
-  unsigned short *dst = (void *)((char *)DrawLineDestBase32x + offs * DrawLineDestIncrement32x);
+  unsigned short *dst = DrawLineDest32x;
   unsigned char  *pmd = Pico.est.Draw2FB + 328 * offs + 8;
   unsigned short *pal = Pico.est.HighPal;
   int plen = 320;
   int l, p;
 
-  PicoDrawUpdateHighPal();
-
   offs += Pico32x.sync_line;
-  dst += Pico32x.sync_line * DrawLineDestIncrement32x;
+
+  Pico.est.DrawLineDest = DrawLineDest32x;
+  Pico.est.DrawLineDestIncr = DrawLineDestIncrement32x;
+
+  PicoDrawUpdateHighPal();
 
   for (l = 0; l < lines; l++) {
     if (have_scan) {
       PicoScan32xBegin(l + offs);
       dst = (unsigned short *)Pico.est.DrawLineDest;
     }
-    for (p = 0; p < plen; p += 4) {
-      dst[p + 0] = pal[*pmd++];
-      dst[p + 1] = pal[*pmd++];
-      dst[p + 2] = pal[*pmd++];
-      dst[p + 3] = pal[*pmd++];
-    }
+   // in accurate mode (PDM32X_32X_ONLY) data is already in place
+   if (Pico32xDrawMode == PDM32X_BOTH)
+     for (p = 0; p < plen; p += 4) {
+        dst[p + 0] = pal[*pmd++];
+        dst[p + 1] = pal[*pmd++];
+        dst[p + 2] = pal[*pmd++];
+        dst[p + 3] = pal[*pmd++];
+      }
     dst = Pico.est.DrawLineDest = (char *)dst + DrawLineDestIncrement32x;
     pmd += 328 - plen;
     if (have_scan)
       PicoScan32xEnd(l + offs);
   }
+
+  DrawLineDest32x = Pico.est.DrawLineDest;
 }
 
 void PicoDrawSetOutFormat32x(pdso_t which, int use_32x_line_mode)

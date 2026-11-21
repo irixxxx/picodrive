@@ -179,8 +179,22 @@ extern struct DrZ80 drZ80;
 #elif defined(_USE_CZ80)
 #include <cpu/cz80/cz80.h>
 
-#define z80_run(cycles)    Cz80_Exec(&CZ80, cycles)
-#define z80_run_nr(cycles) Cz80_Exec(&CZ80, cycles)
+// cz80 stops at ei and charges the whole slice, so run the owed cycles here
+// to keep the caller's cycle count honest like drz80 does
+static inline int z80_run_cz80(int cycles)
+{
+  int done = Cz80_Exec(&CZ80, cycles), over;
+
+  while (CZ80.ExtraCycles < 0) {
+    over = Cz80_Exec(&CZ80, 0);
+    if (over > 0)
+      done += over;
+  }
+  return done;
+}
+
+#define z80_run(cycles)    z80_run_cz80(cycles)
+#define z80_run_nr(cycles) z80_run_cz80(cycles)
 #define z80_int()          Cz80_Set_IRQ(&CZ80, 0, HOLD_LINE)
 #define z80_int_assert(a)  Cz80_Set_IRQ(&CZ80, 0, (a) ? ASSERT_LINE : CLEAR_LINE)
 #define z80_nmi()          Cz80_Set_IRQ(&CZ80, IRQ_LINE_NMI, ASSERT_LINE)
@@ -209,9 +223,11 @@ extern struct DrZ80 drZ80;
 #define z80_cyclesDone() \
   (Pico.t.z80c_aim - z80_cyclesLeft)
 
-// 68k clock = OSC/7, z80 clock = OSC/15, 68k:z80 ratio = 7/15 = 3822.9/8192
-#define cycles_68k_to_z80(x) ((x) * 3823 >> 13)
-#define cycles_z80_to_68k(x) ((x) * 8777 >> 12)
+// 68k clock = OSC/7, z80 clock = OSC/15, so 68k:z80 = 15:7.
+// 32-bit mantissa fixed point, rounded to nearest:
+// the pair is exactly invertible for the (per-frame) counts used here.
+#define cycles_68k_to_z80(x) SHR_ROUND((x) * ((7LL<<32)/15), 32)
+#define cycles_z80_to_68k(x) SHR_ROUND((x) * ((15LL<<32)/7), 32)
 
 // ----------------------- SH2 CPU -----------------------
 
@@ -379,11 +395,14 @@ struct PicoMS
   unsigned char mapper;
   unsigned char fm_ctl;
   unsigned char vdp_buffer;
-  unsigned char vdp_hlatch;
+  unsigned char vdp_hlatch; // h pos for phaser
   unsigned char io_gg[0x08];
   unsigned char mapcnt;
   unsigned char io_sg;
-  unsigned char pad[0x40];
+  unsigned char vdp_scrlatch; // h scroll latch
+  unsigned char vdp_spzlatch; // sprite zoom latch
+  unsigned char vdp_statlatch; // status
+  unsigned char pad[0x3d];
 };
 
 // emu state and data for the asm code
@@ -507,7 +526,10 @@ struct Pico
 };
 
 // MCD
-#define PCM_MIXBUF_LEN ((12500000 / 384) / 50 + 1)
+// PCM steps in one PAL frame: 313 lines * 488.5 m68k cycles, scaled to S68k
+// cycles and 384-cycle steps => 654.86, i.e. 655 steps, plus one for the
+// sub-step remainder carried into the next call => 656.
+#define PCM_MIXBUF_LEN ((int)(12500000ull * 313 * 489 / (OSC_PAL / 7) / 384) + 1)
 
 struct mcd_pcm
 {
@@ -827,6 +849,7 @@ extern void (*PicoLineHook)(void);
 PICO_INTERNAL int  CheckDMA(int cycles);
 PICO_INTERNAL void PicoDetectRegion(void);
 PICO_INTERNAL void PicoSyncZ80(unsigned int m68k_cycles_done);
+PICO_INTERNAL void PicoSyncVideo(int to, int off, int on);
 
 // cd/mcd.c
 #define PCDS_IEN1     (1<<1)
@@ -919,6 +942,7 @@ void cdda_stop_play(void);
 #define YM2612_NATIVE_RATE() (((Pico.m.pal?OSC_PAL:OSC_NTSC)/7 + 3*24) / (6*24))
 
 void ym2612_sync_timers(int z80_cycles, int mode_old, int mode_new);
+void ym2612_pack_timer_vals(int *tat, int *tbt, int *busy);
 int  ym2612_pack_timers(void *buf_, size_t size);
 void ym2612_unpack_timers(const void *buf_, size_t size);
 void ym2612_pack_state_old(void);
@@ -1104,6 +1128,7 @@ void Pico32xSwapDRAM(int b);
 void Pico32xMemStateLoaded(void);
 void p32x_update_banks(void);
 void p32x_m68k_poll_event(u32 a, u32 flags);
+void p32x_clear_poll_state(void);
 u32 REGPARM(3) p32x_sh2_poll_memory8(u32 a, u32 d, SH2 *sh2);
 u32 REGPARM(3) p32x_sh2_poll_memory16(u32 a, u32 d, SH2 *sh2);
 u32 REGPARM(3) p32x_sh2_poll_memory32(u32 a, u32 d, SH2 *sh2);
@@ -1127,6 +1152,9 @@ enum {
   PDM32X_BOTH,
 };
 extern int Pico32xDrawMode;
+extern void *DrawLineDestBase32x;
+extern int DrawLineDestIncrement32x;
+extern void *DrawLineDest32x;
 
 // 32x/pwm.c
 unsigned int p32x_pwm_read16(u32 a, SH2 *sh2, unsigned int m68k_cycles);

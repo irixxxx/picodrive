@@ -21,12 +21,6 @@
 #include <pico/pico_int.h>
 #include <pico/patch.h>
 
-#if defined(PANDORA) || defined(__PS2__)
-#define MENU_X2 1
-#else
-#define MENU_X2 0
-#endif
-
 #define COL_ROM PXMAKE(0xbf, 0xbf, 0xff)
 #define COL_OTH PXMAKE(0xaf, 0xff, 0xaf)
 
@@ -155,13 +149,72 @@ static void copy_bg(int dir)
 	}
 }
 
+// menu text/skin scaling, so menus stay readable on big windows
+
+#if defined(PANDORA) || defined(__PS2__)
+#define MENU_SCALE_DEF 2
+#else
+#define MENU_SCALE_DEF 1
+#endif
+
+static int menu_scale_opt = MENU_SCALE_DEF - 1;	// 0..2 -> 1x..3x
+static int menu_scale_cur;	// scale currently used by libpicofe
+static int menu_mouse_opt = 1;	// allow the mouse to drive menus
+
+// assumed menu size in characters; 40x24 is the full text grid at
+// 320x240 (1x) and at 640x480 (2x)
+#define MENU_FIT_COLS 40
+#define MENU_FIT_ROWS 24
+
+static int menu_scale_get(void)
+{
+	int s;
+
+	// menu scaling is for windowed systems; handhelds keep the traditional
+	// fixed scale and ignore the option
+	if (!plat_has_wm())
+		return MENU_SCALE_DEF;
+
+	// start from the selected scale, then shrink it if a 40x24 character
+	// menu wouldn't fit the current resolution. the setting itself is left
+	// alone, so it comes back when the window is big enough again.
+	s = menu_scale_opt + 1;
+	if (s * MENU_FIT_COLS * 8 > g_menuscreen_w)
+		s = g_menuscreen_w / (MENU_FIT_COLS * 8);
+	if (s * MENU_FIT_ROWS * 10 > g_menuscreen_h)
+		s = g_menuscreen_h / (MENU_FIT_ROWS * 10);
+	if (s < 1)
+		s = 1;
+
+	return s;
+}
+
+static void menu_update_scale(void)
+{
+	int s = menu_scale_get();
+
+	if (s == menu_scale_cur)
+		return;
+	lprintf("menu: %dx scale, screen %dx%d\n", s, g_menuscreen_w, g_menuscreen_h);
+	menu_scale_cur = s;
+	menu_init_base_scale(s);
+	me_mouse_inited = 0;
+}
+
 static void menu_draw_prep(void)
 {
 	plat_video_menu_update();
 
+	menu_set_mouse_enabled(menu_mouse_opt && plat_has_wm());
+	menu_update_scale();
+
 	if (menu_w == g_menuscreen_w && menu_h == g_menuscreen_h)
 		return;
 	menu_w = g_menuscreen_w, menu_h = g_menuscreen_h;
+
+	/* the cursor now maps to a different place; don't let a stationary
+	 * mouse move the selection until it is actually moved */
+	me_mouse_inited = 0;
 
 	if (PicoGameLoaded)
 	{
@@ -349,14 +402,58 @@ me_bind_action me_ctrl_actions[] =
 	{ "A      ", 0x0040 },
 	{ "B      ", 0x0010 },
 	{ "C      ", 0x0020 },
-	{ "A turbo", 0x4000 },
-	{ "B turbo", 0x1000 },
+	{ "A turbo", 0x4000 }, // also A' on XE-1AP
+	{ "B turbo", 0x1000 }, // also B' on XE-1AP
 	{ "C turbo", 0x2000 },
 	{ "START  ", 0x0080 },
 	{ "MODE   ", 0x0800 },
 	{ "X      ", 0x0400 },
 	{ "Y      ", 0x0200 },
 	{ "Z      ", 0x0100 },
+	{ NULL,      0 },
+};
+
+me_bind_action me_mouse_actions[] =
+{
+	{ "Left   ", 0x0040 },
+	{ "Right  ", 0x0010 },
+	{ "Middle ", 0x0020 },
+	{ "START  ", 0x0080 },
+	{ NULL,      0 },
+};
+
+me_bind_action me_menacer_actions[] =
+{
+	{ "Trigger", 0x0040 },
+	{ "B      ", 0x0010 },
+	{ "C      ", 0x0020 },
+	{ "START  ", 0x0080 },
+	{ NULL,      0 },
+};
+
+me_bind_action me_justifier_actions[] =
+{
+	{ "Trigger", 0x0040 },
+	{ "START  ", 0x0080 },
+	{ NULL,      0 },
+};
+
+me_bind_action me_xe1ap_actions[] =
+{
+	{ "UP     ", 0x0001 },
+	{ "DOWN   ", 0x0002 },
+	{ "LEFT   ", 0x0004 },
+	{ "RIGHT  ", 0x0008 },
+	{ "A      ", 0x0040 },
+	{ "B      ", 0x0010 },
+	{ "C      ", 0x0020 },
+	{ "D      ", 0x0100 },
+	{ "E1     ", 0x0400 },
+	{ "E2     ", 0x0200 },
+	{ "A'     ", 0x4000 },
+	{ "B'     ", 0x1000 },
+	{ "START  ", 0x0080 },
+	{ "SELECT ", 0x0800 },
 	{ NULL,      0 },
 };
 
@@ -381,30 +478,11 @@ me_bind_action emuctrl_actions[] =
 	{ NULL,                0 }
 };
 
-static int key_config_loop_wrap(int id, int keys)
+static int key_config_loop_emu(int id, int keys)
 {
-	int n;
+	int n = (plat_has_wm() ? 1 : 2);
 
-	switch (id) {
-		case MA_CTRL_PLAYER1:
-			key_config_loop(me_ctrl_actions, array_size(me_ctrl_actions) - 1, 0);
-			break;
-		case MA_CTRL_PLAYER2:
-			key_config_loop(me_ctrl_actions, array_size(me_ctrl_actions) - 1, 1);
-			break;
-		case MA_CTRL_PLAYER3:
-			key_config_loop(me_ctrl_actions, array_size(me_ctrl_actions) - 1, 2);
-			break;
-		case MA_CTRL_PLAYER4:
-			key_config_loop(me_ctrl_actions, array_size(me_ctrl_actions) - 1, 3);
-			break;
-		case MA_CTRL_EMU:
-			n = (plat_has_wm() ? 1 : 2);
-			key_config_loop(emuctrl_actions, array_size(emuctrl_actions) - n, -1);
-			break;
-		default:
-			break;
-	}
+	key_config_loop(emuctrl_actions, array_size(emuctrl_actions) - n, -1);
 	return 0;
 }
 
@@ -431,14 +509,14 @@ static void kbd_draw(struct key *desc[], int shift, int xoffs, int yoffs, struct
 	int i, j;
 	struct key *key;
 
-	if (g_menuscreen_w >= (MENU_X2 ? 960 : 480))
+	if (g_menuscreen_w >= 60 * me_mfont_w)
 		xoffs -= 50;
 	for (i = 0; desc[i]; i++) {
 		for (j = 0, key = &desc[i][j]; key->lower; j++, key++) {
 			int color = (key != hi ? PXMAKE(0xa0, 0xa0, 0xa0) :
 						 PXMAKE(0xff, 0xff, 0xff));
 			char *text = (shift ? key->upper : key->lower);
-			if (g_menuscreen_w >= (MENU_X2 ? 960 : 480))
+			if (g_menuscreen_w >= 60 * me_mfont_w)
 			text_out16_(xoffs + key->xpos*me_mfont_w, yoffs + i*me_mfont_h, text, color);
 			else
 			smalltext_out16(xoffs + key->xpos*me_sfont_w, yoffs + i*me_sfont_h, text, color);
@@ -545,15 +623,30 @@ int key_config_kbd_loop(int id, int keys)
 }
 
 
-const char *indev_names[] = { "none", "3 button pad", "6 button pad", "Mouse", "Light gun", "Justifier", "Team player", "4 way play", NULL };
+const char *indev_names[] = { "none", "3 button pad", "6 button pad", "XE-1AP", "Mouse", "Light gun", "Justifier", "Team player", "4 way play", NULL };
 
-static char h_play12[55];
+static char h_play12[99];
 static char h_play34[] = "Works only for Mega Drive/CD/32X games having\n"
 				"support for Team player, 4 way play, or J-cart";
 static char h_gun[]    = "Light Phaser for SMS, Menacer for Mega Drive\n"
 				"note: Justifier can only be selected on input 2";
 
-static char player[] = "Player 1";
+static char player[] = "Player 1 mapping"; // NB changing this requires code changes
+
+static void key_update_player_help(void)
+{
+	int x = me_id2offset(e_menu_keyconfig, MA_CTRL_PLAYER1);
+	int pid = player[strlen("Player ")] - '0';
+	int dev = currentConfig.input_dev[pid == 2];
+	char l[20], r[20];
+
+	e_menu_keyconfig[x].help = (pid >= 3 ? h_play34 : h_play12);
+
+	snprintf(l,sizeof(l),"%s", in_get_key_name(-1, -PBTN_LEFT));
+	snprintf(r,sizeof(r),"%s", in_get_key_name(-1, -PBTN_RIGHT));
+	snprintf(h_play12, sizeof(h_play12), "%s/%s - change player\n"
+		"%s - configure %s" , l, r, in_get_key_name(-1, -PBTN_MOK), indev_names[dev]);
+}
 
 static const char *mgn_nothing(int id, int *offs)
 {
@@ -562,19 +655,32 @@ static const char *mgn_nothing(int id, int *offs)
 
 static int key_config_players(int id, int keys)
 {
-	int x = me_id2offset(e_menu_keyconfig, MA_CTRL_PLAYER1);
-	int pid = player[strlen(player)-1] - '0';
+	int pid = player[strlen("Player ")] - '0';
 
 	if (keys & PBTN_LEFT)
 		if (--pid < 1) pid = 4;
 	if (keys & PBTN_RIGHT)
 		if (++pid > 4) pid = 1;
 
-	player[strlen(player)-1] = pid + '0';
-	e_menu_keyconfig[x].help = (pid >= 3 ? h_play34 : h_play12);
+	player[strlen("Player ")] = pid + '0';
+	key_update_player_help();
 
-	if (keys & PBTN_MOK)
-		key_config_loop(me_ctrl_actions, array_size(me_ctrl_actions) - 1, pid-1);
+	if (keys & PBTN_MOK) {
+		int dev = currentConfig.input_dev[pid == 2];
+		const me_bind_action *actions = me_ctrl_actions;
+		int size = array_size(me_ctrl_actions);
+		switch (dev) {
+		case PICO_INPUT_XE_1AP: actions = me_xe1ap_actions;
+				size = array_size(me_xe1ap_actions); break;
+		case PICO_INPUT_MOUSE: actions = me_mouse_actions;
+				size = array_size(me_mouse_actions); break;
+		case PICO_INPUT_LIGHT_GUN: actions = me_menacer_actions;
+				size = array_size(me_menacer_actions); break;
+		case PICO_INPUT_JUSTIFIER: actions = me_justifier_actions;
+				size = array_size(me_justifier_actions); break;
+		}
+		key_config_loop(actions, size - 1, pid-1);
+	}
 
 	return 0;
 }
@@ -592,11 +698,7 @@ static const char *mgn_keyboard(int id, int *offs)
 static int key_config_keyboard(int id, int keys)
 {
 	int kid = currentConfig.keyboard;
-#ifdef USE_SDL	// TODO this info should come from platform!
-	int k = 2;
-#else
-	int k = 1;
-#endif
+	int k = (plat_has_wm() ? 2 : 1);
 
 	if (keys & PBTN_LEFT)
 		if (--kid < 0) kid = k;
@@ -612,10 +714,8 @@ static int key_config_keyboard(int id, int keys)
 
 static const char *mgn_indev(int id, int *offs)
 {
-	const char *dev;
-	if (id == MA_OPT_INPUT_DEV0)
-		dev = indev_names[currentConfig.input_dev0];
-	else	dev = indev_names[currentConfig.input_dev1];
+	const char *dev =
+		indev_names[currentConfig.input_dev[id != MA_OPT_INPUT_DEV0]];
 	*offs = 3-strlen(dev);
 	return dev;
 }
@@ -623,37 +723,37 @@ static const char *mgn_indev(int id, int *offs)
 static int mh_indev(int id, int keys)
 {
 	int is0 = id == MA_OPT_INPUT_DEV0;
-	int *indev = is0 ? &currentConfig.input_dev0 : &currentConfig.input_dev1;
-	int x = me_id2offset(e_menu_keyconfig, MA_OPT_INPUT_DEV0);
+	int *indev = currentConfig.input_dev + !is0;
+	int x = me_id2offset(e_menu_keyconfig, MA_OPT_INPUT_DEV0), y;
 
 	if (keys & PBTN_RIGHT) {
 		(*indev) ++;
-#ifdef USE_SDL	// TODO this info should come from platform!
-		// Justifier only in pad port 2
-		if (is0 && *indev == PICO_INPUT_JUSTIFIER)
-			(*indev) ++;
-		// Team/4way only in pad port 1
-		if (!is0 && *indev > PICO_INPUT_JUSTIFIER)
-			(*indev) --;
-#else
-		while (*indev >= PICO_INPUT_MOUSE && *indev <= PICO_INPUT_JUSTIFIER)
-			(*indev) ++;
-		// Team/4way only in pad port 1
-		while (!is0 && *indev >= PICO_INPUT_MOUSE)
-			(*indev) --;
-#endif
+		if (plat_has_wm()) {
+			// Justifier only in pad port 2
+			if (is0 && *indev == PICO_INPUT_JUSTIFIER)
+				(*indev) ++;
+			// Team/4way only in pad port 1
+			if (!is0 && *indev > PICO_INPUT_JUSTIFIER)
+				(*indev) --;
+		} else {
+			while (*indev >= PICO_INPUT_XE_1AP && *indev <= PICO_INPUT_JUSTIFIER)
+				(*indev) ++;
+			// Team/4way only in pad port 1
+			while (!is0 && *indev >= PICO_INPUT_XE_1AP)
+				(*indev) --;
+		}
 		if (*indev >= PICO_INPUT_COUNT)
 			(*indev) --;
 	}
 	if (keys & PBTN_LEFT) {
 		(*indev) --;
-#ifdef USE_SDL	// TODO this info should come from platform!
-		if (is0 && *indev == PICO_INPUT_JUSTIFIER)
-			(*indev) --;
-#else
-		while (*indev >= PICO_INPUT_MOUSE && *indev <= PICO_INPUT_JUSTIFIER)
-			(*indev) --;
-#endif
+		if (plat_has_wm()) {
+			if (is0 && *indev == PICO_INPUT_JUSTIFIER)
+				(*indev) --;
+		} else {
+			while (*indev >= PICO_INPUT_XE_1AP && *indev <= PICO_INPUT_JUSTIFIER)
+				(*indev) --;
+		}
 		if (*indev < 0)
 			(*indev) ++;
 	}
@@ -661,18 +761,59 @@ static int mh_indev(int id, int keys)
 		e_menu_keyconfig[x + !is0].help = h_gun;
 	else	e_menu_keyconfig[x + !is0].help = NULL;
 
-	x = currentConfig.input_dev0 == PICO_INPUT_LIGHT_GUN ||
-		currentConfig.input_dev1 == PICO_INPUT_LIGHT_GUN ||
-		currentConfig.input_dev1 == PICO_INPUT_JUSTIFIER;
+	key_update_player_help();
+
+	x = currentConfig.input_dev[0] == PICO_INPUT_LIGHT_GUN ||
+		currentConfig.input_dev[1] == PICO_INPUT_LIGHT_GUN ||
+		currentConfig.input_dev[1] == PICO_INPUT_JUSTIFIER;
 	me_enable(e_menu_keyconfig, MA_CTRL_LIGHTGUN, x);
+	y = currentConfig.input_dev[0] == PICO_INPUT_XE_1AP ||
+		currentConfig.input_dev[1] == PICO_INPUT_XE_1AP;
+	me_enable(e_menu_keyconfig, MA_CTRL_STICK, y);
+	y |= currentConfig.input_dev[0] == PICO_INPUT_MOUSE ||
+		currentConfig.input_dev[1] == PICO_INPUT_MOUSE;
+	me_enable(e_menu_keyconfig, MA_CTRL_MOUSE, x|y);
+
+	return 0;
+}
+
+static const char *mgn_mouse_speed(int id, int *offs)
+{
+	sprintf(static_buff, "%1.2f", currentConfig.mouse_speed / 4.);
+	return static_buff;
+}
+
+static const char *mgn_mouse_wheel(int id, int *offs)
+{
+	int i = currentConfig.mouse_wheel;
+	if (i)
+		i *= 4;
+	else	i = 1;
+	sprintf(static_buff, "%d", i);
+	return static_buff;
+}
+
+static menu_entry e_menu_mouseconfig[] =
+{
+	mee_range_cust("Mouse sensitivity", MA_CTRL_MOUSE, currentConfig.mouse_speed, 1, 12, mgn_mouse_speed),
+	mee_range_cust("Mouse wheel step",  MA_CTRL_WHEEL, currentConfig.mouse_wheel, 0, 8, mgn_mouse_wheel),
+	mee_end,
+};
+
+static int mouse_config_loop(int id, int keys)
+{
+	static int sel = 0;
+
+	me_loop_d(e_menu_mouseconfig, &sel, menu_draw_prep, NULL);
+
 	return 0;
 }
 
 static menu_entry e_menu_gunconfig[] =
 {
-	mee_onoff     ("Gun crosshair",     MA_CTRL_GUN_CURSOR, currentConfig.EmuOpt, EOPT_GUN_CURSOR),
-	mee_range     ("Gun x offset",      MA_CTRL_GUN_XOFFS,currentConfig.gunx, -50, 50),
-	mee_range     ("Gun y offset",      MA_CTRL_GUN_YOFFS,currentConfig.guny, -50, 50),
+	mee_onoff     ("Crosshair",         MA_CTRL_CROSSHAIR, currentConfig.EmuOpt, EOPT_CROSSHAIR),
+	mee_range     ("Gun x offset",      MA_CTRL_GUN_XOFFS, currentConfig.gunx, -50, 50),
+	mee_range     ("Gun y offset",      MA_CTRL_GUN_YOFFS, currentConfig.guny, -50, 50),
 	mee_end,
 };
 
@@ -688,19 +829,59 @@ static int gun_config_loop(int id, int keys)
 	return 0;
 }
 
+static const char *stick_centering[] = { "OFF", "x axis", "y axis", "both", NULL };
+
+static const char *mgn_stk_timeout(int id, int *offs)
+{
+	sprintf(static_buff, "%i.%01is", currentConfig.stick_timeout / 10, currentConfig.stick_timeout % 10);
+	return static_buff;
+}
+
+static const char *mgn_stk_rate(int id, int *offs)
+{
+	sprintf(static_buff, "%i%%", currentConfig.stick_rate);
+	return static_buff;
+}
+
+static menu_entry e_menu_stickconfig[] =
+{
+	mee_onoff     ("Crosshair",         MA_CTRL_CROSSHAIR, currentConfig.EmuOpt, EOPT_CROSSHAIR),
+	mee_enum      ("Stick centering",   MA_CTRL_STICK_CENTER, currentConfig.stick_centering, stick_centering),
+	mee_range_cust("Centering timeout", MA_CTRL_STICK_TIME, currentConfig.stick_timeout, 1, 10, mgn_stk_timeout),
+	mee_range_cust("Centering rate",    MA_CTRL_STICK_RATE, currentConfig.stick_rate, 1, 10, mgn_stk_rate),
+	mee_end,
+};
+
+static int stick_config_loop(int id, int keys)
+{
+	static int sel = 0;
+
+	me_loop_d(e_menu_stickconfig, &sel, menu_draw_prep, NULL);
+
+	PicoIn.stkTime = currentConfig.stick_timeout;
+	PicoIn.stkRate = currentConfig.stick_rate;
+	PicoIn.stkCenter = currentConfig.stick_centering;
+
+	return 0;
+}
+
 static menu_entry e_menu_keyconfig[] =
 {
+	mee_cust_h    ("Controller 1",      MA_OPT_INPUT_DEV0,  mh_indev, mgn_indev, NULL),
+	mee_cust_h    ("Controller 2",      MA_OPT_INPUT_DEV1,  mh_indev, mgn_indev, NULL),
+	mee_handler_id("Gun configuration", MA_CTRL_LIGHTGUN,   gun_config_loop),
+	mee_handler_id("Stick configuration",MA_CTRL_STICK,     stick_config_loop),
+	mee_handler_id("Mouse configuration",MA_CTRL_MOUSE,     mouse_config_loop),
+	mee_label     (""),
+	mee_handler_id("Emulator hotkeys",  MA_CTRL_EMU,        key_config_loop_emu),
 	mee_cust_nosave(player,             MA_CTRL_PLAYER1,    key_config_players, mgn_nothing),
-	mee_handler_id("Emulator hotkeys",  MA_CTRL_EMU,        key_config_loop_wrap),
-	mee_cust_h    ("Keyboard",          MA_OPT_KEYBOARD,    key_config_keyboard, mgn_keyboard, NULL),
-	mee_handler_id("Keys configuration",MA_CTRL_KEYBOARD,   key_config_kbd_loop),
-	mee_cust_h    ("Input device 1",    MA_OPT_INPUT_DEV0,  mh_indev, mgn_indev, NULL),
-	mee_cust_h    ("Input device 2",    MA_OPT_INPUT_DEV1,  mh_indev, mgn_indev, NULL),
 	mee_range     ("Turbo rate",        MA_CTRL_TURBO_RATE, currentConfig.turbo_rate, 1, 30),
 	mee_range     ("Analog deadzone",   MA_CTRL_DEADZONE,   currentConfig.analog_deadzone, 1, 99),
-	mee_handler_id("Gun configuration", MA_CTRL_LIGHTGUN,   gun_config_loop),
 	mee_label     (""),
-	mee_label     ("Input devices:"),
+	mee_cust_h    ("Keyboard",          MA_OPT_KEYBOARD,    key_config_keyboard, mgn_keyboard, NULL),
+	mee_handler_id("Keyboard mapping",  MA_CTRL_KEYBOARD,   key_config_kbd_loop),
+	mee_label     (""),
+	mee_label     ("Detected host devices:"),
 	mee_label_mk  (MA_CTRL_DEV_FIRST, mgn_dev_name),
 	mee_label_mk  (MA_CTRL_DEV_NEXT,  mgn_dev_name),
 	mee_label_mk  (MA_CTRL_DEV_NEXT,  mgn_dev_name),
@@ -714,33 +895,33 @@ static menu_entry e_menu_keyconfig[] =
 static int menu_loop_keyconfig(int id, int keys)
 {
 	static int sel = 0;
-	int it = 0, x = me_id2offset(e_menu_keyconfig, MA_CTRL_DEV_FIRST);
+	int it = 0, x = me_id2offset(e_menu_keyconfig, MA_CTRL_DEV_FIRST), y;
 
 	while (in_get_dev_name(it, 1, 1))
 		it++;
 	for (it += x; x && e_menu_keyconfig[x].name; x++)
 		e_menu_keyconfig[x].enabled = x < it;
 
-	char l[20], r[20];
-	snprintf(l,sizeof(l),"%s", in_get_key_name(-1, -PBTN_LEFT));
-	snprintf(r,sizeof(r),"%s", in_get_key_name(-1, -PBTN_RIGHT));
-	snprintf(h_play12, sizeof(h_play12), "%s/%s - select, %s - configure", l, r, in_get_key_name(-1, -PBTN_MOK));
-
-	player[strlen(player)-1] = '1';
-	x = me_id2offset(e_menu_keyconfig, MA_CTRL_PLAYER1);
-	e_menu_keyconfig[x].help = h_play12;
+	player[strlen("Player ")] = '1';
+	key_update_player_help();
 
 	me_enable(e_menu_keyconfig, MA_CTRL_KEYBOARD, currentConfig.keyboard == 2);
 
-	x = currentConfig.input_dev0 == PICO_INPUT_LIGHT_GUN ||
-		currentConfig.input_dev1 == PICO_INPUT_LIGHT_GUN ||
-		currentConfig.input_dev1 == PICO_INPUT_JUSTIFIER;
+	x = currentConfig.input_dev[0] == PICO_INPUT_LIGHT_GUN ||
+		currentConfig.input_dev[1] == PICO_INPUT_LIGHT_GUN ||
+		currentConfig.input_dev[1] == PICO_INPUT_JUSTIFIER;
 	me_enable(e_menu_keyconfig, MA_CTRL_LIGHTGUN, x);
+	y = currentConfig.input_dev[0] == PICO_INPUT_XE_1AP ||
+		currentConfig.input_dev[1] == PICO_INPUT_XE_1AP;
+	me_enable(e_menu_keyconfig, MA_CTRL_STICK, y);
+	y |= currentConfig.input_dev[0] == PICO_INPUT_MOUSE ||
+		currentConfig.input_dev[1] == PICO_INPUT_MOUSE;
+	me_enable(e_menu_keyconfig, MA_CTRL_MOUSE, x|y);
 
 	me_loop_d(e_menu_keyconfig, &sel, menu_draw_prep, NULL);
 
-	PicoSetInputDevice(0, currentConfig.input_dev0);
-	PicoSetInputDevice(1, currentConfig.input_dev1);
+	PicoSetInputDevice(0, currentConfig.input_dev[0]);
+	PicoSetInputDevice(1, currentConfig.input_dev[1]);
 
 	return 0;
 }
@@ -916,6 +1097,7 @@ static const char h_dynarec[] = "Disabling dynarecs massively slows down 32X";
 static const char h_sh2cycles[]  = "Cycles/millisecond (similar to DOSBox)\n"
 				   "lower values speed up emulation but break games\n"
 				   "at least 11000 recommended for compatibility";
+static const char h_h32layer[]   = "In 32X H32 mode, ON centers on 32X instead of MD";
 
 static menu_entry e_menu_adv_options[] =
 {
@@ -923,7 +1105,8 @@ static menu_entry e_menu_adv_options[] =
 	mee_onoff     ("Disable sprite limit",     MA_OPT2_NO_SPRITE_LIM, PicoIn.opt, POPT_DIS_SPRITE_LIM),
 	mee_onoff     ("Disable idle loop patching",MA_OPT2_NO_IDLE_LOOPS,PicoIn.opt, POPT_DIS_IDLE_DET),
 	mee_onoff_h   ("Emulate Game Gear LCD",    MA_OPT2_ENABLE_GGLCD  ,PicoIn.opt, POPT_EN_GG_LCD, h_gglcd),
-	mee_range_h   ("M68k clock speed (%)",     MA_OPT2_OVERCLOCK_M68K,currentConfig.overclock_68k, 0, 1000, h_ovrclk),
+	mee_onoff_h   ("32X H32 centering",        MA_32XOPT_H32_LAYER, PicoIn.opt, POPT_H32_LAYER_32X, h_h32layer),
+  mee_range_h   ("M68k clock speed (%)",     MA_OPT2_OVERCLOCK_M68K,currentConfig.overclock_68k, 0, 1000, h_ovrclk),
 	mee_onoff_h   ("Enable dynarecs",          MA_OPT2_DYNARECS,      PicoIn.opt, POPT_EN_DRC, h_dynarec),
 	mee_cust_h    ("Master SH2 cycles",        MA_32XOPT_MSH2_CYCLES, mh_opt_sh2cycles, mgn_opt_sh2cycles, h_sh2cycles),
 	mee_cust_h    ("Slave SH2 cycles",         MA_32XOPT_SSH2_CYCLES, mh_opt_sh2cycles, mgn_opt_sh2cycles, h_sh2cycles),
@@ -1077,18 +1260,35 @@ static int menu_loop_gfx_options(int id, int keys)
 static const char *men_confirm_save[] = { "OFF", "writes", "loads", "both", NULL };
 static const char h_confirm_save[]    = "Ask for confirmation when overwriting save,\n"
 					"loading state or both";
+static const char *men_sort_order[] = { "ignore case", "mind case", NULL };
+static const char *men_menu_size[] = { "1x", "2x", "3x", NULL };
+static const char h_menu_size[]    = "Preferred size of menu text and icons,\n"
+					"reduced automatically on small windows";
+static const char h_menu_mouse[]   = "Allow mouse control of the menu; the mouse\n"
+					"takes over after a click or wheel";
 
 static menu_entry e_menu_ui_options[] =
 {
 	mee_onoff     ("Show FPS",                 MA_OPT_SHOW_FPS,       currentConfig.EmuOpt, EOPT_SHOW_FPS),
 	mee_enum_h    ("Confirm save/load",        MA_OPT_CONFIRM_STATES, currentConfig.confirm_save, men_confirm_save, h_confirm_save),
-	mee_onoff     ("Don't save last used game", MA_OPT2_NO_LAST_ROM,  currentConfig.EmuOpt, EOPT_NO_AUTOSVCFG),
+	mee_onoff     ("Autoload newest savestate",MA_OPT_AUTOLOAD_SAVE,  g_autostateld_opt, 1),
+	mee_onoff     ("Don't save last used game",MA_OPT2_NO_LAST_ROM,   currentConfig.EmuOpt, EOPT_NO_AUTOSVCFG),
+	mee_enum      ("File selector sort order", MA_OPT_SORT_ORDER,     g_alphasort_opt, men_sort_order),
+	mee_enum_h    ("Menu size",                MA_OPT_MENU_SIZE,      menu_scale_opt, men_menu_size, h_menu_size),
+	mee_onoff_h   ("Menu mouse mode",          MA_OPT_MENU_MOUSE,     menu_mouse_opt, 1, h_menu_mouse),
 	mee_end,
 };
 
 static int menu_loop_ui_options(int id, int keys)
 {
 	static int sel = 0;
+
+	// these options only make sense in windowed mode; disabled entries
+	// are not drawn by libpicofe, so this also hides them
+	me_enable(e_menu_ui_options, MA_OPT_MENU_SIZE, plat_has_wm());
+	me_enable(e_menu_ui_options, MA_OPT_MENU_MOUSE, plat_has_wm());
+	if (!e_menu_ui_options[sel].enabled)
+		sel = 0;
 
 	me_loop_d(e_menu_ui_options, &sel, menu_draw_prep, NULL);
 
@@ -1829,6 +2029,8 @@ void menu_update_msg(const char *msg)
 /* hidden options for config engine only */
 static menu_entry e_menu_hidden[] =
 {
+	mee_cust_h("Input device 1",          MA_OPT_INPUT_DEV0,     mh_indev, mgn_indev, NULL),
+	mee_cust_h("Input device 2",          MA_OPT_INPUT_DEV1,     mh_indev, mgn_indev, NULL),
 	mee_onoff("Accurate sprites",         MA_OPT_ACC_SPRITES,    PicoIn.opt, POPT_ACC_SPRITES),
 //	mee_range("Save slot",                MA_OPT_SAVE_SLOT,      state_slot, 0, 9),
 
@@ -1861,7 +2063,9 @@ static menu_entry *e_menu_table[] =
 	e_menu_sms_options,
 #endif
 	e_menu_keyconfig,
+	e_menu_mouseconfig,
 	e_menu_gunconfig,
+	e_menu_stickconfig,
 	e_menu_hidden,
 };
 
@@ -1898,7 +2102,8 @@ void menu_init(void)
 {
 	int i;
 
-	menu_init_base();
+	menu_scale_cur = 0;
+	menu_update_scale();
 
 	i = 0;
 #if defined(_SVP_DRC) || defined(DRC_SH2)
@@ -1925,6 +2130,10 @@ void menu_init(void)
 		e_menu_options[i].name = "CPU clock";
 		e_menu_options[i].enabled = 1;
 	}
+
+	i = me_id2offset(e_menu_stickconfig, MA_CTRL_CROSSHAIR);
+	e_menu_stickconfig[i].need_to_save = 0; // shadow of gun crosshair
+
 	// suppress warnings about unused libpicofe funcs
 	(void)me_loop;
 	(void)menu_loop_romsel;

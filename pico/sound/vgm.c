@@ -45,16 +45,18 @@ struct vgm
   int dacout_nonstream;
   struct vgm_block {
     u32 start, end, pos;
-  } blocks[0x40];
+  } blocks[256];
   struct vgm_stream {
     u8 chip_type, ioport, reg, block_i;
     u32 pos_inc, pos_fraction; // Q24
     u32 pos;
+    u32 end;
     u32 playing:1;
     u32 new_sample:1;
     //u32 looping:1;
     u32 flags_warned:1;
     u32 bad_start_warned:1;
+    u32 bad_length_warned:1;
   } *streams;
   union {
     struct vgm_header hdr;
@@ -110,13 +112,15 @@ static int vgm_reset_p(struct vgm *vgm, const char *fname)
     size_t data_offset = (size_t)0x34 + CPU_LE4(vgm->hdr.data_offset);
     if (data_offset > vgm->data_size) {
       elprintf(EL_VGM | EL_STATUS | EL_ANOMALY, "%s: broken data_offset %x",
-          fname, CPU_LE4(vgm->hdr.data_offset));
+          fname ? fname : "", CPU_LE4(vgm->hdr.data_offset));
       return 0;
     }
     vgm->data_pos = data_offset;
   }
+  vgm->sample_pos = vgm->block_count = 0;
 
   Pico.m.pal = CPU_LE4(vgm->hdr.rate) == 50;
+  PsndReset();
   // pcd_soft_reset() ?
   if (Pico_mcd)
     Pico_mcd->pcm.bank = 0;
@@ -170,8 +174,7 @@ int vgm_load(const char *fname)
     elprintf(EL_VGM | EL_STATUS | EL_ANOMALY, "%s: wrong ident", fname);
     goto fail;
   }
-  if (!vgm_reset_p(vgm, fname))
-    goto fail;
+  Pico.m.pal = CPU_LE4(vgm->hdr.rate) == 50;
   elprintf(EL_VGM | EL_STATUS, "vgm v%x.%02x pal=%d",
       CPU_LE4(vgm->hdr.version) >> 8, CPU_LE4(vgm->hdr.version) & 0xff, Pico.m.pal);
   // all supported chips may be used anytime, so partially initialize
@@ -186,7 +189,8 @@ int vgm_load(const char *fname)
     }
   }
   PicoCartInsert(Pico.rom, Pico.romsize, NULL);
-  Pico.m.hardware = 0;
+  if (!vgm_reset_p(vgm, fname))
+    goto fail;
   g_vgm = vgm;
   return 0;
 
@@ -199,7 +203,7 @@ fail:
 }
 
 static int try_start_stream(struct vgm *vgm, struct vgm_stream *stream,
-    size_t cmd_pos, u32 block_i, u8 flags)
+    size_t cmd_pos, u32 block_i, u32 offset, u32 length, u8 len_mode, u8 flags)
 {
   if (block_i >= ARRAY_SIZE(vgm->blocks) ||
       vgm->blocks[block_i].start >= vgm->blocks[block_i].end) {
@@ -235,7 +239,28 @@ static int try_start_stream(struct vgm *vgm, struct vgm_stream *stream,
   }
   stream->block_i = block_i;
   stream->pos_fraction = 0;
-  stream->pos = vgm->blocks[block_i].start;
+  stream->pos = vgm->blocks[block_i].start + offset;
+  stream->end = vgm->blocks[block_i].end;
+  switch (len_mode) {
+  case 0:
+    break;
+  case 1:
+    if (length <= stream->end - stream->pos)
+      stream->end = stream->pos + length;
+    else if (!stream->bad_length_warned) {
+      elprintf(EL_VGM | EL_ANOMALY,
+          "vgm: %06zx: stream start: bad length @%d %d/%d", cmd_pos,
+          stream->pos, length, stream->end - stream->pos);
+      stream->bad_length_warned = 1;
+    }
+    break;
+  default:
+    if (!stream->flags_warned) {
+      elprintf(EL_VGM | EL_ANOMALY,
+          "vgm: %06zx: stream start: length mode %02x", cmd_pos, len_mode);
+      stream->flags_warned = 1;
+    }
+  }
   stream->new_sample = 1;
   return 1;
 }
@@ -275,10 +300,19 @@ static u32 get32(const u8 **p)
   return d_;
 }
 
-void vgm_frame(void)
+static void set_cycles(u32 s68k_base, int samples44k)
 {
   u32 osc_cyc_per_smp = Pico.m.pal ? 256ull*OSC_PAL/44100+1 : 256ull*OSC_NTSC/44100+1;
+  u32 samples_per_frame = Pico.m.pal ? 44100/50 : 44100/60;
   u32 scd_cyc_per_smp = 256ull*12500000/44100+1; // Q8
+  int samples = min(samples44k, samples_per_frame);
+
+  Pico.t.z80c_aim = samples * osc_cyc_per_smp / (15 * 256u);
+  SekCycleCntS68k = s68k_base + (samples * scd_cyc_per_smp >> 8);
+}
+
+void vgm_frame(void)
+{
   u32 samples_per_frame = Pico.m.pal ? 44100/50 : 44100/60;
   u32 sample_pos_stream = 0;
   u32 s68k_base = SekCycleCntS68k;
@@ -290,8 +324,8 @@ void vgm_frame(void)
 
   if (!vgm)
     return;
-  Pico.t.z80c_aim = 0;
   PsndStartFrame();
+  set_cycles(s68k_base, vgm->sample_pos);
 
   for (i = 0; i < vgm->stream_count; i++) {
     stream = &vgm->streams[i];
@@ -310,7 +344,7 @@ void vgm_frame(void)
       u8 id, type, addr, data, flags, param[3];
       u32 offset32, data32, data16;
       u32 doffset, length;
-      int samples, wait_samples;
+      int wait_samples;
       u8 cmd = *fdata++;
       switch (cmd)
       {
@@ -424,9 +458,7 @@ void vgm_frame(void)
           wait_samples = (cmd & 0x0f) + 1;
         wait:
           vgm->sample_pos += wait_samples;
-          samples = min(vgm->sample_pos, samples_per_frame);
-          Pico.t.z80c_aim = samples * osc_cyc_per_smp / (15 * 256u);
-          SekCycleCntS68k = s68k_base + (samples * scd_cyc_per_smp >> 8);
+          set_cycles(s68k_base, vgm->sample_pos);
           break;
         case 0x80 ... 0x8f: // ym2612 dac write
           data = 0x80;
@@ -463,15 +495,9 @@ void vgm_frame(void)
           param[2] = *fdata++;
           if (!(stream = stream_get(vgm, cmd_pos, id)))
             break;
-          if (param[0] >= ARRAY_SIZE(vgm->blocks)) {
-            elprintf(EL_VGM | EL_ANOMALY, "vgm: %06zx: bad block id %02x",
-                cmd_pos, param[0]);
-            break;
-          }
           if (param[1] != 1 || param[2] != 0)
             elprintf(EL_VGM | EL_ANOMALY, "vgm: %06zx: unhandled step %02x,%02x",
                 cmd_pos, param[1], param[2]);
-          stream->block_i = param[0];
           break;
         case 0x92: // Stream Frequency
           id = *fdata++;
@@ -487,21 +513,21 @@ void vgm_frame(void)
           length = get32(&fdata);
           if (!(stream = stream_get(vgm, cmd_pos, id)))
             break;
-          if (!try_start_stream(vgm, stream, cmd_pos, stream->block_i, flags))
-            break;
+          stream->playing = 0;
           if (offset32 != ~0) {
-            struct vgm_block *block = &vgm->blocks[stream->block_i];
+            struct vgm_block *block = &vgm->blocks[0];
             if (offset32 >= block->end - block->start) {
               if (!stream->bad_start_warned) {
                 elprintf(EL_VGM | EL_ANOMALY,
                     "vgm: %06zx: stream start: bad offset %x", cmd_pos, offset32);
                 stream->bad_start_warned = 1;
               }
-              stream->playing = 0;
               break;
             }
-            stream->pos = block->start + offset32;
           }
+          if (!try_start_stream(vgm, stream, cmd_pos, 0, offset32, length,
+                flags & 0x0f, flags & ~0x0f))
+            break;
           stream->playing = 1;
           streams_playing = 1;
           break;
@@ -532,7 +558,7 @@ void vgm_frame(void)
           flags = *fdata++;
           if (!(stream = stream_get(vgm, cmd_pos, id)))
             break;
-          if (!try_start_stream(vgm, stream, cmd_pos, data16, flags))
+          if (!try_start_stream(vgm, stream, cmd_pos, data16, 0, 0, 0, flags))
             break;
           stream->playing = 1;
           streams_playing = 1;
@@ -565,11 +591,8 @@ void vgm_frame(void)
       }
       vgm->data_pos = fdata - vgm->data;
     }
-    if (!streams_playing) {
-      sample_pos_stream = vgm->sample_pos;
-      continue;
-    }
     // stream to cmd catch-up
+    if (streams_playing)
     {
       u32 stream_sample_to = min(vgm->sample_pos, samples_per_frame);
       int check_for_new_sample = 1;
@@ -587,7 +610,7 @@ void vgm_frame(void)
             dacout_stream += ((int)vgm->data[stream->pos] - 0x80) << DAC_SHIFT;
           }
           if (do_dac_write) {
-            Pico.t.z80c_aim = sample_pos_stream * osc_cyc_per_smp / (15 * 256u);
+            set_cycles(s68k_base, sample_pos_stream);
             ym2612.OPN.ST.address = 0x2a;
             ym2612.addr_A1 = 0;
             PsndDoDAC(z80_cyclesDone());
@@ -607,7 +630,7 @@ void vgm_frame(void)
           if (inc) {
             stream->pos_fraction &= 0xffffff;
             stream->pos += inc;
-            if (stream->pos >= vgm->blocks[stream->block_i].end)
+            if (stream->pos >= stream->end)
               stream->playing = 0;
             else
               check_for_new_sample = stream->new_sample = 1;
@@ -615,11 +638,15 @@ void vgm_frame(void)
           streams_playing |= stream->playing;
         }
       } // for sample_pos_stream
+      set_cycles(s68k_base, sample_pos_stream);
+    }
+    else {
+      // no streams playing
+      sample_pos_stream = min(vgm->sample_pos, samples_per_frame);
     }
   }
   // for a long wait, do only the current frame's worth of samples
-  Pico.t.z80c_aim = samples_per_frame * osc_cyc_per_smp / (15 * 256u);
-  SekCycleCntS68k = s68k_base + (samples_per_frame * scd_cyc_per_smp >> 8);
+  set_cycles(s68k_base, vgm->sample_pos);
   vgm->sample_pos -= samples_per_frame;
   PsndDoSMSFM(Pico.t.z80c_aim);
   PsndGetSamples(0);

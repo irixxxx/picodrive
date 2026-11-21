@@ -58,6 +58,19 @@ const struct menu_keymap _in_sdl_joy_map[] = {
 const int in_sdl_joy_map_sz = sizeof(_in_sdl_joy_map) / sizeof(_in_sdl_joy_map[0]);
 const struct menu_keymap *in_sdl_joy_map = _in_sdl_joy_map;
 
+/* mouse buttons/wheel as menu keys (SDL mouse button numbers + 80) */
+const struct menu_keymap _in_sdl_mouse_map[] = {
+	{ SDLK_WORLD_81, PBTN_MOK   },	/* left button */
+	{ SDLK_WORLD_82, PBTN_MA2   },	/* middle button */
+	{ SDLK_WORLD_83, PBTN_MBACK },	/* right button */
+	{ SDLK_WORLD_84, PBTN_UP    },	/* wheel up */
+	{ SDLK_WORLD_85, PBTN_DOWN  },	/* wheel down */
+	{ SDLK_WORLD_86, PBTN_MA3   },	/* x1 button */
+	{ SDLK_WORLD_87, PBTN_MA3   },	/* x2 button */
+};
+const int in_sdl_mouse_map_sz = sizeof(_in_sdl_mouse_map) / sizeof(_in_sdl_mouse_map[0]);
+const struct menu_keymap *in_sdl_mouse_map = _in_sdl_mouse_map;
+
 const char * _in_sdl_key_names[SDLK_LAST] = {
 	/* common */
 	[SDLK_UP] = "UP",

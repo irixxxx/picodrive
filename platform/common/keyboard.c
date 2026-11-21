@@ -198,9 +198,18 @@ int vkbd_find_xpos(struct key *keys, int xpos)
 
 void vkbd_draw(struct vkbd *vkbd)
 {
-	int i, j, k;
+	int i, j, k, mfw, mfh, sfw, sfh;
 	struct key *key;
-	int ypos = (vkbd->top ? 0 : g_screen_height - KBD_ROWS*me_sfont_h);
+	int ypos;
+
+	// this keyboard is drawn on the game screen and laid out for it,
+	// so it must not follow the menu font scaling
+	mfw = me_mfont_w, mfh = me_mfont_h;
+	sfw = me_sfont_w, sfh = me_sfont_h;
+	me_mfont_w = 8, me_mfont_h = 10;
+	me_sfont_w = 6, me_sfont_h = 10;
+
+	ypos = (vkbd->top ? 0 : g_screen_height - KBD_ROWS*me_sfont_h);
 
 // HACK: smalltext_out is only available on menuscreen :-/
 int w = g_menuscreen_w, h = g_menuscreen_h;
@@ -239,6 +248,9 @@ if (g_screen_width >= 320) {
 	}
 
 g_menuscreen_w = w, g_menuscreen_h = h;
+
+me_mfont_w = mfw, me_mfont_h = mfh;
+me_sfont_w = sfw, me_sfont_h = sfh;
 }
 
 int vkbd_update(struct vkbd *vkbd, int input, int *actions)

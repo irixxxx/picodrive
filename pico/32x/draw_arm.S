@@ -1,7 +1,7 @@
 @*
 @* PicoDrive
 @* (C) notaz, 2010
-@* (C) irixxxx, 2019-2023
+@* (C) irixxxx, 2019-2026
 @*
 @* This work is licensed under the terms of MAME license.
 @* See COPYING file in the top-level directory.
@@ -14,6 +14,7 @@
 .extern Pico
 
 .equiv P32XV_PRI,  (1<< 7)
+.equiv H32_OFFS, 3
 
 .text
 .align 2
@@ -83,8 +84,9 @@
     mov     r5, #328
     mov     r3, r3, lsl #26  @ mdbg << 26
     mla     r11,r4,r5,r11    @ r11 = pmd = PicoDraw2FB + offs*328: md data
-    tst     r2, #(2<<8)
-    addne   r11,r11,#4       @ H32 offset
+    tst     r2, #(2<<8)      @ H32 mode?
+    tstne   r2, #(4<<8)      @ H32 layer selection
+    addne   r11,r11,#3       @ 32x layer centered
     tst     r10,#P32XV_PRI
     movne   r10,#0
     moveq   r10,#0x8000      @ r10 = !inv_bit
@@ -112,6 +114,14 @@
     add     r11,r11,#8
     mov     r6, #320/2
     add     r5, r1, r12, lsl #1 @ p32x = dram + dram[l]
+    add     r12,r12,#1          @ shift, only if line offset != 0xff (hw bug)
+    tst     r12,#0xff
+    andne   r12,r2, #0x100      @ shift
+    addne   r5, r5, r12,lsr #7
+
+    and     lr, r2, #(2|4)<<8
+    cmp     lr, #2<<8        @ H32 mode, MD layer centered?
+    subeq   r5, r5, #3*2     @ MD layer centered
 
 2: @ loop_inner:
 @ r4,r6 - counters; r5 - 32x data; r9 - md pal; r10 - inv_prio; r11 - md data
@@ -158,12 +168,12 @@
 .if \do_h32
     cmp     r3, r12, lsl #26 @ replace MD bg info into prio bit
     tstne   r7, #0x20<<16
-    ldrneh  r7, [r0, #8]
+    ldrneh  r7, [r0, #2*H32_OFFS]
     moveq   r7, r7, lsr #16
 
     cmp     r3, lr,  lsl #26
     tstne   r8, #0x20<<16
-    ldrneh  r8, [r0, #10]
+    ldrneh  r8, [r0, #2*H32_OFFS+2]
     moveq   r8, r8, lsr #16
 
     orr     r7, r7, r8, lsl #16 @ combine 2 pixels to optimize memory bandwidth
@@ -255,11 +265,11 @@
 .if \do_h32
     add     r0, r0, #4
     cmp     r3, r12,lsl #26  @ MD pixel 0 has bg?
-    ldrneh  lr, [r0, #4]
+    ldrneh  lr, [r0, #2*H32_OFFS-4]
     streqh  r7, [r0, #-4]
     strneh  lr, [r0, #-4]
     cmp     r3, lr, lsl #26  @ MD pixel 1 has bg?
-    ldrneh  lr, [r0, #6]
+    ldrneh  lr, [r0, #2*H32_OFFS-2]
     streqh  r7, [r0, #-2]
     strneh  lr, [r0, #-2]
 .else
@@ -297,8 +307,9 @@
     mov     r5, #328
     mov     r3, r3, lsl #26  @ mdbg << 26
     mla     r11,r4,r5,r11    @ r11 = pmd = PicoDraw2FB + offs*328: md data
-    tst     r2, #(2<<8)
-    addne   r11,r11,#4       @ H32 offset
+    tst     r2, #(2<<8)      @ H32 mode?
+    tstne   r2, #(4<<8)      @ H32 layer selection
+    addne   r11,r11,#3       @ 32x layer centered
     call_scan_prep \call_scan lr
 
     mov     r4, #0           @ line
@@ -323,8 +334,14 @@
     add     r11,r11,#8
     mov     r6, #320/2
     add     r5, r1, r12, lsl #1 @ p32x = dram + dram[l]
-    and     r12,r2, #0x100      @ shift
-    add     r5, r5, r12,lsr #8
+    add     r12,r12,#1          @ shift, only if line offset != 0xff (hw bug)
+    tst     r12,#0xff
+    andne   r12,r2, #0x100      @ shift
+    addne   r5, r5, r12,lsr #8
+
+    and     lr, r2, #(2|4)<<8
+    cmp     lr, #2<<8        @ H32 mode, MD layer centered?
+    subeq   r5, r5, #3       @ MD layer centered
 
 2: @ loop_inner:
 @ r4,r6 - counters; r5 - 32x data; r9,r10 - md,32x pal; r11 - md data
@@ -371,9 +388,9 @@
     orreq   r8, r8, #0x20
 
     tst     r7, #0x20
-    ldreqh  r7, [r0, #8]
+    ldreqh  r7, [r0, #2*H32_OFFS]
     tst     r8, #0x20
-    ldreqh  r8, [r0, #10]
+    ldreqh  r8, [r0, #2*H32_OFFS+2]
 
     orr     r7, r7, r8, lsl #16 @ combine 2 pixels to optimize memory bandwidth
     str     r7, [r0], #4     @ (no write combining on ARM9)
@@ -465,11 +482,11 @@
 .if \do_h32
     add     r0, r0, #4
     cmp     r3, r12,lsl #26  @ MD pixel 0 has bg?
-    ldrneh  lr, [r0, #4]
+    ldrneh  lr, [r0, #2*H32_OFFS-4]
     streqh  r7, [r0, #-4]
     strneh  lr, [r0, #-4]
     cmp     r3, lr, lsl #26  @ MD pixel 1 has bg?
-    ldrneh  lr, [r0, #6]
+    ldrneh  lr, [r0, #2*H32_OFFS-2]
     streqh  r7, [r0, #-2]
     strneh  lr, [r0, #-2]
 .else
@@ -505,8 +522,9 @@
     mov     r5, #328
     mov     r3, r3, lsl #26  @ mdbg << 26
     mla     r11,r4,r5,r11    @ r11 = pmd = PicoDraw2FB + offs*328: md data
-    tst     r2, #(2<<8)
-    addne   r11,r11,#4       @ H32 offset
+    tst     r2, #(2<<8)      @ H32 mode?
+    tstne   r2, #(4<<8)      @ H32 layer selection
+    addne   r11,r11,#3       @ 32x layer centered
     call_scan_prep \call_scan lr
 
     mov     r4, #0           @ line
@@ -532,9 +550,22 @@
     mov     r6, #320
     add     r5, r1, r12, lsl #1 @ p32x = dram + dram[l]
 
+    add     r12,r12,#1       @ shift, only if line offset != 0xff (hw bug)
+    tst     r12,#0xff
+    mov     r8, #0
+    andne   r12,r2, #0x100   @ shift
+    subne   r8, r8, r12, lsr #8
+
+    and     lr, r2, #(2|4)<<8
+    cmp     lr, #2<<8        @ H32 mode, MD layer centered?
+    addeq   r8, r8, #3       @ MD layer centered
+
 2: @ loop_inner:
-    ldrh    r8, [r5], #2     @ control word
-    and     r12,r8, #0xff
+    ldrh    r12, [r5], #2    @ control word
+    add     r8, r8, r12, lsr #8
+    adds    r8, r8, #1
+    ble     2b
+    and     r12,r12, #0xff
     mov     r12,r12,lsl #1
     ldrh    lr, [r10,r12]    @ t = 32x pixel
     eor     lr, lr, #0x20
@@ -552,15 +583,15 @@
     strneh  r12,[r0], #2     @ *dst++ = t
 .else
 .if \do_h32
-    ldrneh  lr, [r0, #8]
+    ldrneh  lr, [r0, #2*H32_OFFS]
     strh    lr, [r0], #2
 .else
     streqh  lr, [r0]
     add     r0, r0, #2
 .endif
 .endif
-    subs    r8, r8, #0x100
-    bge     3b @ loop_innermost
+    subs    r8, r8, #1
+    bgt     3b @ loop_innermost
     b       2b @ loop_inner
 .endm
 

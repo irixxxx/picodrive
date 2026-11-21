@@ -323,36 +323,26 @@ struct retro_core_option_v2_definition option_defs_us[] = {
       "60"
    },
    {
-      "picodrive_input1",
-      "Input Device 1",
+      "picodrive_mouse_speed",
+      "Mouse Speed",
       NULL,
-      "Choose which type of controller is plugged into slot 1. Note that a multiplayer adaptor uses both slots.",
-      NULL,
-      "input",
-      {
-         { "3 button pad", "3 Button Pad" },
-         { "6 button pad", "6 Button Pad" },
-         { "team player", "Sega 4 Player Adaptor" },
-         { "4way play", "EA 4way Play Adaptor" },
-         { "None", NULL },
-         { NULL, NULL },
-      },
-      "3 button pad"
-   },
-   {
-      "picodrive_input2",
-      "Input Device 2",
-      NULL,
-      "Choose which type of controller is plugged into slot 2. This setting is ignored when a multiplayer adaptor is plugged into slot 1.",
+      "Select the mouse sensivity. This setting is used by both the Sega Mouse and the Pico Pen. Higher values increase the mouse speed.",
       NULL,
       "input",
       {
-         { "3 button pad", "3 Button Pad" },
-         { "6 button pad", "6 Button Pad" },
-         { "None", NULL },
+         { "0.1",          NULL },
+         { "0.2",          NULL },
+         { "0.3",          NULL },
+         { "0.5",          NULL },
+         { "0.7",          NULL },
+         { "1.0",          NULL },
+         { "1.3",          NULL },
+         { "1.6",          NULL },
+         { "2.0",          NULL },
+         { "2.5",          NULL },
          { NULL, NULL },
       },
-      "3 button pad"
+      "1.0"
    },
 #ifdef DRC_SH2
    {

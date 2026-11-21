@@ -282,6 +282,16 @@ PICO_INTERNAL void PicoSyncZ80(unsigned int m68k_cycles_done)
   pprof_end(z80);
 }
 
+// not to be called while SH2 CPUs are running to prevent recursion
+void PicoSyncVideo(int to, int off, int on)
+{
+  // in case of 32X, sync that first to catch 32X mid-frame changes
+  // NB that may sync the MD VDP as well, up to the last line
+  if (PicoIn.AHW & PAHW_32X)
+    p32x_sync_sh2s(Pico.t.m68c_frame_start + (int)(488.5*2)*to/2 - 1);
+
+  PicoDrawSync(to, off, on);
+}
 
 void PicoFrame(void)
 {

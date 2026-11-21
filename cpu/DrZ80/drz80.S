@@ -9,6 +9,9 @@
 ;@ version 0.002:
 ;@ modified for support of undefined F register bits by irixxxx, passes ZEXALL with a hack for
 ;@ BIT n,(HL), which is the only instruction needing support for the internal WZ register.
+;@ version 0.003:
+;@ modified for support of R register and missing DDCB opcodes by irixxxx, added some missing
+;@ obscure undocumented instructions and fixed some cycle accounting.
 
 #include <pico/arm_features.h>
 
@@ -34,23 +37,23 @@
       .extern Interrupt
 .endif
 
-DrZ80Ver: .long 0x0002
+DrZ80Ver: .long 0x0003
 
 ;@ --------------------------- Defines ----------------------------
 ;@ Make sure that regs/pointers for z80pc to z80sp match up!
 
-	eabi_align .req r2	@ pushed for EABI alignment all over the place
-	z80_icount .req r3
-	opcodes    .req r4
-	cpucontext .req r5
-	z80pc      .req r6
-	z80a       .req r7
-	z80f       .req r8
-	z80bc      .req r9
-	z80de      .req r10
-	z80hl      .req r11
-	z80sp      .req r12	
-	z80xx      .req lr
+	eabi_align .req r2  @ pushed for EABI alignment all over the place
+	z80_icount .req r3  @ T-states left in this run
+	opcodes    .req r4  @ main opcode table
+	cpucontext .req r5  @ struct DrZ80
+	z80pc      .req r6  @ pc, host address
+	z80a       .req r7  @ a, top byte
+	z80f       .req r8  @ f in the low byte, arm flag order, r in the top byte
+	z80bc      .req r9  @ b top byte, c next
+	z80de      .req r10 @ d top byte, e next
+	z80hl      .req r11 @ h top byte, l next
+	z80sp      .req r12 @ sp, host address
+	z80xx      .req lr  @ ix or iy while dd/fd is active
 
 	.equ z80pc_pointer,           0                  ;@  0
 	.equ z80a_pointer,            z80pc_pointer+4    ;@  4
@@ -85,6 +88,7 @@ DrZ80Ver: .long 0x0002
 	.equ z80_read16,              z80_read8+4
 	.equ z80_rebaseSP,            z80_read16+4
 	.equ z80_rebasePC,            z80_rebaseSP+4
+	.equ tables,                  z80_rebasePC+4
 
 	.equ VFlag, 0
 	.equ CFlag, 1
@@ -134,13 +138,29 @@ DrZ80Ver: .long 0x0002
 	orr z80f,z80f,r1,lsr#24-(Flag3-Z80_Flag3)
 .endm
 
+;@ The undocumented X/Y of a repeating block op come from bits 11/13 of the
+;@ real PC after the two-byte rewind (Ares/SST).  Clobbers r1.
+.macro copyFlag35_PC
+	ldr r1,[cpucontext,#z80pc_base]
+	sub r1,z80pc,r1
+	and r1,r1,#((1<<Z80_Flag3)|(1<<Z80_Flag5))<<8
+	orr z80f,z80f,r1,lsr#8-(Flag3-Z80_Flag3)
+.endm
+
+	.equ R_INC, (2<<24)				;@ R lives in the top byte of z80f
+
+;@ R is (count << 1) | bit7 in the top byte of z80f, so adding 2 per
+;@ increment wraps the count and leaves the bit 7 latch alone
+.macro inc_r n
+	add z80f,z80f,#(R_INC*\n)
+.endm
+
 ;@---------------------------------------
 
-	.equ OFFS_PZS, MAIN_opcodes-PZSTable_data
-	.equ OFFS_ZS,  MAIN_opcodes-ZSTable_data
-	.equ OFFS_ZF,  MAIN_opcodes-DrZ80_ARM
-	.equ OFFS_AF,  MAIN_opcodes-DrARM_Z80
-	.equ OFFS_DAA, MAIN_opcodes-DAATable
+	.equ OFFS_ZS,  PZSTable_data-ZSTable_data
+	.equ OFFS_ZF,  PZSTable_data-DrZ80_ARM
+	.equ OFFS_AF,  PZSTable_data-DrARM_Z80
+	.equ OFFS_DAA, PZSTable_data-DAATable
 
 ;@---------------------------------------
 
@@ -289,6 +309,7 @@ z80_xmap_rebase_sp:
 	sub r2,z80pc,r1
 	str r2,[cpucontext,#previouspc]
 .endif
+	addgt z80f,z80f,#R_INC
 	ldrgtb r0,[z80pc],#1
 	ldrgt pc,[opcodes,r0, lsl #2]
 	ble z80_execute_end
@@ -402,7 +423,7 @@ z80_xmap_rebase_sp:
 	mov lr,pc
 	ldr pc,[cpucontext,#z80_read8]			;@ r0 = addr - data returned in r0
 .endif
-	orr z80f,z80f,r0,lsl#24				;@ save I/O value
+	orr z80f,z80f,r0,lsl#8				;@ save I/O value
 	mov r1,z80de, lsr #16
 .if DRZ80_XMAP
     bl z80_xmap_write8
@@ -446,7 +467,8 @@ z80_xmap_rebase_sp:
 ;@----------------------------------------------------------------------------
 
 .macro opADC
-	movs z80f,z80f,lsr#2					;@ get C
+	and r2,z80f,#0xff000000				;@ keep R, the flags are rebuilt below
+	movs z80f,z80f,lsr#(CFlag+1)				;@ get C
 	subcs r0,r0,#0x100
 	eor z80f,r0,z80a,lsr#24					;@ prepare for check of half carry
 	adcs z80a,z80a,r0,ror#8
@@ -454,17 +476,20 @@ z80_xmap_rebase_sp:
 	eor z80f,z80f,z80a,lsr#24
 	and z80f,z80f,#1<<HFlag					;@ H, correct
 	orr z80f,z80f,r0,lsr#28
+	orr z80f,z80f,r2					;@ put R back
 	copyFlag35 z80a
 .endm
 
 .macro opADCA
-	movs z80f,z80f,lsr#2					;@ get C
+	and r2,z80f,#0xff000000				;@ keep R, the flags are rebuilt below
+	movs z80f,z80f,lsr#(CFlag+1)				;@ get C
 	orrcs z80a,z80a,#0x00800000
 	adds z80a,z80a,z80a
 	mrs z80f,cpsr							;@ S,Z,V&C
 	mov z80f,z80f,lsr#28
 	tst z80a,#0x10000000					;@ H, correct
 	orrne z80f,z80f,#1<<HFlag
+	orr z80f,z80f,r2					;@ put R back
 	copyFlag35 z80a
 	fetch 4
 .endm
@@ -476,7 +501,8 @@ z80_xmap_rebase_sp:
 .endm
 
 .macro opADCL reg
-	movs z80f,z80f,lsr#2					;@ get C
+	and r2,z80f,#0xff000000				;@ keep R, the flags are rebuilt below
+	movs z80f,z80f,lsr#(CFlag+1)				;@ get C
 	adc r0,\reg,\reg,lsr#15
 	orrcs z80a,z80a,#0x00800000
 	mov r1,z80a,lsl#4						;@ Prepare for check of half carry
@@ -485,6 +511,7 @@ z80_xmap_rebase_sp:
 	mov z80f,z80f,lsr#28
 	cmn r1,r0,lsl#27
 	orrcs z80f,z80f,#1<<HFlag				;@ H, correct
+	orr z80f,z80f,r2					;@ put R back
 	copyFlag35 z80a
 	fetch 4
 .endm
@@ -497,8 +524,9 @@ z80_xmap_rebase_sp:
 .macro opADD reg shift
 	mov r1,z80a,lsl#4						;@ Prepare for check of half carry
 	adds z80a,z80a,\reg,lsl#\shift
-	mrs z80f,cpsr							;@ S,Z,V&C
-	mov z80f,z80f,lsr#28
+	mrs r2,cpsr
+	bic z80f,z80f,#0xff
+	orr z80f,z80f,r2,lsr#28				;@ NZCV, R kept
 	cmn r1,\reg,lsl#\shift+4
 	orrcs z80f,z80f,#1<<HFlag
 	copyFlag35 z80a
@@ -506,8 +534,9 @@ z80_xmap_rebase_sp:
 
 .macro opADDA
 	adds z80a,z80a,z80a
-	mrs z80f,cpsr							;@ S,Z,V&C
-	mov z80f,z80f,lsr#28
+	mrs r0,cpsr
+	bic z80f,z80f,#0xff
+	orr z80f,z80f,r0,lsr#28				;@ NZCV, R kept
 	tst z80a,#0x10000000					;@ H, correct
 	orrne z80f,z80f,#1<<HFlag
 	copyFlag35 z80a
@@ -531,7 +560,8 @@ z80_xmap_rebase_sp:
 ;@---------------------------------------
 
 .macro opADC16 reg
-	movs z80f,z80f,lsr#2					;@ get C
+	and r2,z80f,#0xff000000				;@ keep R, the flags are rebuilt below
+	movs z80f,z80f,lsr#(CFlag+1)				;@ get C
 	adc r0,z80a,\reg,lsr#15
 	orrcs z80hl,z80hl,#0x00008000
 	mov r1,z80hl,lsl#4
@@ -540,18 +570,21 @@ z80_xmap_rebase_sp:
 	mov z80f,z80f,lsr#28
 	cmn r1,r0,lsl#19
 	orrcs z80f,z80f,#1<<HFlag
+	orr z80f,z80f,r2					;@ put R back
 	copyFlag35 z80hl
 	fetch 15
 .endm
 
 .macro opADC16HL
-	movs z80f,z80f,lsr#2					;@ get C
+	and r2,z80f,#0xff000000				;@ keep R, the flags are rebuilt below
+	movs z80f,z80f,lsr#(CFlag+1)				;@ get C
 	orrcs z80hl,z80hl,#0x00008000
 	adds z80hl,z80hl,z80hl
 	mrs z80f,cpsr							;@ S, Z, V & C
 	mov z80f,z80f,lsr#28
 	tst z80hl,#0x10000000					;@ H, correct.
 	orrne z80f,z80f,#1<<HFlag
+	orr z80f,z80f,r2					;@ put R back
 	copyFlag35 z80hl
 	fetch 15
 .endm
@@ -559,7 +592,7 @@ z80_xmap_rebase_sp:
 .macro opADD16 reg1 reg2
 	mov r1,\reg1,lsl#4						;@ Prepare for check of half carry
 	adds \reg1,\reg1,\reg2
-	and z80f,z80f,#(1<<SFlag)|(1<<ZFlag)|(1<<VFlag)
+	bic z80f,z80f,#0xf2
 	orrcs z80f,z80f,#1<<CFlag
 	cmn r1,\reg2,lsl#4
 	orrcs z80f,z80f,#1<<HFlag
@@ -569,7 +602,7 @@ z80_xmap_rebase_sp:
 .macro opADD16s reg1 reg2 shift
 	mov r1,\reg1,lsl#4						;@ Prepare for check of half carry
 	adds \reg1,\reg1,\reg2,lsl#\shift
-	and z80f,z80f,#(1<<SFlag)|(1<<ZFlag)|(1<<VFlag)
+	bic z80f,z80f,#0xf2
 	orrcs z80f,z80f,#1<<CFlag
 	cmn r1,\reg2,lsl#4+\shift
 	orrcs z80f,z80f,#1<<HFlag
@@ -578,7 +611,7 @@ z80_xmap_rebase_sp:
 
 .macro opADD16_2 reg
 	adds \reg,\reg,\reg
-	and z80f,z80f,#(1<<SFlag)|(1<<ZFlag)|(1<<VFlag)
+	bic z80f,z80f,#0xf2
 	orrcs z80f,z80f,#1<<CFlag
 	tst \reg,#0x10000000					;@ H, correct.
 	orrne z80f,z80f,#1<<HFlag
@@ -588,14 +621,18 @@ z80_xmap_rebase_sp:
 
 .macro opAND reg shift
 	and z80a,z80a,\reg,lsl#\shift
-	sub r0,opcodes,#OFFS_PZS
-	ldrb z80f,[r0,z80a, lsr #24]
+	ldr r0,[cpucontext,#tables]
+	ldrb r2,[r0,z80a, lsr #24]
+	bic z80f,z80f,#0xff
+	orr z80f,z80f,r2
 	orr z80f,z80f,#1<<HFlag
 .endm
 
 .macro opANDA
-	sub r0,opcodes,#OFFS_PZS
-	ldrb z80f,[r0,z80a, lsr #24]
+	ldr r0,[cpucontext,#tables]
+	ldrb r2,[r0,z80a, lsr #24]
+	bic z80f,z80f,#0xff
+	orr z80f,z80f,r2
 	orr z80f,z80f,#1<<HFlag
 	fetch 4
 .endm
@@ -616,7 +653,7 @@ z80_xmap_rebase_sp:
 ;@---------------------------------------
 
 .macro opBITH reg bit
-	and z80f,z80f,#1<<CFlag
+	bic z80f,z80f,#0xfd
 	tst \reg,#1<<(24+\bit)
 	orreq z80f,z80f,#(1<<HFlag)|(1<<ZFlag)|(1<<VFlag)
 	orrne z80f,z80f,#(1<<HFlag)
@@ -625,7 +662,7 @@ z80_xmap_rebase_sp:
 .endm
 
 .macro opBIT7H reg
-	and z80f,z80f,#1<<CFlag
+	bic z80f,z80f,#0xfd
 	tst \reg,#1<<(24+7)
 	orreq z80f,z80f,#(1<<HFlag)|(1<<ZFlag)|(1<<VFlag)
 	orrne z80f,z80f,#(1<<HFlag)|(1<<SFlag)
@@ -634,7 +671,7 @@ z80_xmap_rebase_sp:
 .endm
 
 .macro opBITL reg bit
-	and z80f,z80f,#1<<CFlag
+	bic z80f,z80f,#0xfd
 	tst \reg,#1<<(16+\bit)
 	orreq z80f,z80f,#(1<<HFlag)|(1<<ZFlag)|(1<<VFlag)
 	orrne z80f,z80f,#(1<<HFlag)
@@ -644,7 +681,7 @@ z80_xmap_rebase_sp:
 .endm
 
 .macro opBIT7L reg
-	and z80f,z80f,#1<<CFlag
+	bic z80f,z80f,#0xfd
 	tst \reg,#1<<(16+7)
 	orreq z80f,z80f,#(1<<HFlag)|(1<<ZFlag)|(1<<VFlag)
 	orrne z80f,z80f,#(1<<HFlag)|(1<<SFlag)
@@ -654,29 +691,34 @@ z80_xmap_rebase_sp:
 .endm
 
 .macro opBITb bit
-	mov r1,z80f				;@ memory address in upper flags
-	and z80f,z80f,#1<<CFlag
+	mov r1,z80f,lsl#8			;@ WZ high byte, kept clear of R
+	and r2,z80f,#0xff000000		;@ R
+	and z80f,z80f,#1<<CFlag		;@ C, drops the WZ stash
 	tst r0,#1<<\bit
 	orreq z80f,z80f,#(1<<HFlag)|(1<<ZFlag)|(1<<VFlag)
 	orrne z80f,z80f,#(1<<HFlag)
 	copyFlag35 r1
+	orr z80f,z80f,r2			;@ put R back
 .endm
 
 .macro opBIT7b
-	mov r1,z80f
-	and z80f,z80f,#1<<CFlag
+	mov r1,z80f,lsl#8			;@ WZ high byte, kept clear of R
+	and r2,z80f,#0xff000000		;@ R
+	and z80f,z80f,#1<<CFlag		;@ C, drops the WZ stash
 	tst r0,#1<<7
 	orreq z80f,z80f,#(1<<HFlag)|(1<<ZFlag)|(1<<VFlag)
 	orrne z80f,z80f,#(1<<HFlag)|(1<<SFlag)
 	copyFlag35 r1
+	orr z80f,z80f,r2			;@ put R back
 .endm
 ;@---------------------------------------
 
 .macro opCP reg shift
 	mov r1,z80a,lsl#4						;@ prepare for check of half carry
 	cmp z80a,\reg,lsl#\shift
-	mrs z80f,cpsr
-	mov z80f,z80f,lsr#28					;@ S,Z,V&C
+	mrs r2,cpsr
+	bic z80f,z80f,#0xff
+	orr z80f,z80f,r2,lsr#28				;@ NZCV, R kept
 	eor z80f,z80f,#(1<<CFlag)|(1<<NFlag)	;@ invert C and set n
 	cmp r1,\reg,lsl#\shift+4
 	orrcc z80f,z80f,#1<<HFlag
@@ -685,7 +727,8 @@ z80_xmap_rebase_sp:
 .endm
 
 .macro opCPA
-	mov z80f,#(1<<ZFlag)|(1<<NFlag)			;@ set Z & n
+	bic z80f,z80f,#0xff
+	orr z80f,z80f,#(1<<ZFlag)|(1<<NFlag)			;@ set Z & n
 	copyFlag35 z80a
 	fetch 4
 .endm
@@ -707,11 +750,12 @@ z80_xmap_rebase_sp:
 ;@---------------------------------------
 
 .macro opDEC8 reg							;@for A and memory
-	and z80f,z80f,#1<<CFlag					;@save carry
+	bic z80f,z80f,#0xfd					;@save carry
 	tst \reg,#0x0f000000
 	orreq z80f,z80f,#1<<HFlag
 	subs \reg,\reg,#0x01000000
-	sub r1,opcodes,#OFFS_ZS
+	ldr r1,[cpucontext,#tables]
+	sub r1,r1,#OFFS_ZS
 	ldrb r1,[r1,\reg,lsr#24]
 	orrvs z80f,z80f,#1<<VFlag
 	orr z80f,z80f,#1<<NFlag					;@set n
@@ -751,9 +795,10 @@ z80_xmap_rebase_sp:
 ;@---------------------------------------
 
 .macro opINC8 reg							;@for A and memory
-	and z80f,z80f,#1<<CFlag					;@save carry, clear n
+	bic z80f,z80f,#0xfd					;@save carry, clear n
 	adds \reg,\reg,#0x01000000
-	sub r1,opcodes,#OFFS_ZS
+	ldr r1,[cpucontext,#tables]
+	sub r1,r1,#OFFS_ZS
 	ldrb r1,[r1,\reg,lsr#24]
 	orrvs z80f,z80f,#1<<VFlag
 	tst \reg,#0x0f000000
@@ -780,13 +825,17 @@ z80_xmap_rebase_sp:
 
 .macro opOR reg shift
 	orr z80a,z80a,\reg,lsl#\shift
-	sub r0,opcodes,#OFFS_PZS
-	ldrb z80f,[r0,z80a, lsr #24]
+	ldr r0,[cpucontext,#tables]
+	ldrb r2,[r0,z80a, lsr #24]
+	bic z80f,z80f,#0xff
+	orr z80f,z80f,r2
 .endm
 
 .macro opORA
-	sub r0,opcodes,#OFFS_PZS
-	ldrb z80f,[r0,z80a, lsr #24]
+	ldr r0,[cpucontext,#tables]
+	ldrb r2,[r0,z80a, lsr #24]
+	bic z80f,z80f,#0xff
+	orr z80f,z80f,r2
 	fetch 4
 .endm
 
@@ -924,7 +973,7 @@ z80_xmap_rebase_sp:
 	ldr pc,[cpucontext,#z80_write8]			;@ r0=data r1=addr
 	ldmfd sp!,{r3,r12}
 .endif
-	fetch 23
+	fetch 19
 .endm
 ;@---------------------------------------
 
@@ -934,8 +983,10 @@ z80_xmap_rebase_sp:
 	orrne \reg1,\reg1,#0x01000000
 ;@	and r2,z80f,#1<<CFlag
 ;@	orr $x,$x,r2,lsl#23
-	sub r1,opcodes,#OFFS_PZS
-	ldrb z80f,[r1,\reg1,lsr#24]				;@get PZS
+	ldr r1,[cpucontext,#tables]
+	ldrb r2,[r1,\reg1,lsr#24]				;@get PZS
+	bic z80f,z80f,#0xff
+	orr z80f,z80f,r2
 	orrcs z80f,z80f,#1<<CFlag
 .endm
 
@@ -949,8 +1000,10 @@ z80_xmap_rebase_sp:
 	adds \reg,\reg,r0
 	tst z80f,#1<<CFlag						;@doesn't affect ARM carry, as long as the imidiate value is < 0x100. Watch out!
 	orrne \reg,\reg,#0x01000000
-	sub r1,opcodes,#OFFS_PZS
-	ldrb z80f,[r1,\reg,lsr#24]				;@get PZS
+	ldr r1,[cpucontext,#tables]
+	ldrb r2,[r1,\reg,lsr#24]				;@get PZS
+	bic z80f,z80f,#0xff
+	orr z80f,z80f,r2
 	orrcs z80f,z80f,#1<<CFlag
 	fetch 8
 .endm
@@ -971,8 +1024,10 @@ z80_xmap_rebase_sp:
 .macro opRLC reg1 reg2 shift
 	movs \reg1,\reg2,lsl#\shift
 	orrcs \reg1,\reg1,#0x01000000
-	sub r1,opcodes,#OFFS_PZS
-	ldrb z80f,[r1,\reg1,lsr#24]
+	ldr r1,[cpucontext,#tables]
+	ldrb r2,[r1,\reg1,lsr#24]
+	bic z80f,z80f,#0xff
+	orr z80f,z80f,r2
 	orrcs z80f,z80f,#1<<CFlag
 .endm
 
@@ -985,8 +1040,10 @@ z80_xmap_rebase_sp:
 	and r0,\reg,#0xFF000000					;@mask high to r0
 	adds \reg,\reg,r0
 	orrcs \reg,\reg,#0x01000000
-	sub r1,opcodes,#OFFS_PZS
-	ldrb z80f,[r1,\reg,lsr#24]
+	ldr r1,[cpucontext,#tables]
+	ldrb r2,[r1,\reg,lsr#24]
+	bic z80f,z80f,#0xff
+	orr z80f,z80f,r2
 	orrcs z80f,z80f,#1<<CFlag
 	fetch 8
 .endm
@@ -1010,28 +1067,36 @@ z80_xmap_rebase_sp:
 	orrne \reg1,\reg1,#0x00000080
 ;@	and r2,z80_f,#PSR_C
 ;@	orr \reg1,\reg1,r2,lsl#6
-	sub r1,opcodes,#OFFS_PZS
-	ldrb z80f,[r1,\reg1]
+	ldr r1,[cpucontext,#tables]
+	ldrb r2,[r1,\reg1]
+	bic z80f,z80f,#0xff
+	orr z80f,z80f,r2
 	orrcs z80f,z80f,#1<<CFlag
 .endm
 
 .macro opRRA
-	orr z80a,z80a,z80f,lsr#1				;@get C
+	and r0,z80f,#0xff
+	orr z80a,z80a,r0,lsr#1				;@get C
 	movs z80a,z80a,ror#25
 	mov z80a,z80a,lsl#24
-	sub r1,opcodes,#OFFS_PZS
-	ldrb z80f,[r1,z80a,lsr#24]
+	ldr r1,[cpucontext,#tables]
+	ldrb r2,[r1,z80a,lsr#24]
+	bic z80f,z80f,#0xff
+	orr z80f,z80f,r2
 	orrcs z80f,z80f,#1<<CFlag
 	fetch 8
 .endm
 
 .macro opRRH reg
-	orr r0,\reg,z80f,lsr#1					;@get C
+	and r2,z80f,#0xff
+	orr r0,\reg,r2,lsr#CFlag				;@get C
 	movs r0,r0,ror#25
 	and \reg,\reg,#0x00FF0000				;@mask out low
 	orr \reg,\reg,r0,lsl#24
-	sub r1,opcodes,#OFFS_PZS
-	ldrb z80f,[r1,\reg,lsr#24]
+	ldr r1,[cpucontext,#tables]
+	ldrb r2,[r1,\reg,lsr#24]
+	bic z80f,z80f,#0xff
+	orr z80f,z80f,r2
 	orrcs z80f,z80f,#1<<CFlag
 	fetch 8
 .endm
@@ -1052,8 +1117,10 @@ z80_xmap_rebase_sp:
 .macro opRRC reg1 reg2 shift
 	movs \reg1,\reg2,lsr#\shift
 	orrcs \reg1,\reg1,#0x00000080
-	sub r1,opcodes,#OFFS_PZS
-	ldrb z80f,[r1,\reg1]
+	ldr r1,[cpucontext,#tables]
+	ldrb r2,[r1,\reg1]
+	bic z80f,z80f,#0xff
+	orr z80f,z80f,r2
 	orrcs z80f,z80f,#1<<CFlag
 .endm
 
@@ -1094,8 +1161,9 @@ z80_xmap_rebase_sp:
 ;@---------------------------------------
 
 .macro opSBC
+	and r2,z80f,#0xff000000				;@ keep R, the flags are rebuilt below
 	eor z80f,z80f,#1<<CFlag					;@ invert C
-	movs z80f,z80f,lsr#2					;@ get C
+	movs z80f,z80f,lsr#(CFlag+1)				;@ get C
 	subcc r0,r0,#0x100
 	eor z80f,r0,z80a,lsr#24					;@ prepare for check of H
 	sbcs z80a,z80a,r0,ror#8
@@ -1104,15 +1172,18 @@ z80_xmap_rebase_sp:
 	and z80f,z80f,#1<<HFlag					;@ H, correct
 	orr z80f,z80f,r0,lsr#28					;@ S,Z,V&C
 	eor z80f,z80f,#(1<<CFlag)|(1<<NFlag)	;@ invert C and set n.
+	orr z80f,z80f,r2					;@ put R back
 	copyFlag35 z80a
 .endm
 
 .macro opSBCA
-	movs z80f,z80f,lsr#2					;@ get C
+	and r2,z80f,#0xff000000				;@ keep R, the flags are rebuilt below
+	movs z80f,z80f,lsr#(CFlag+1)				;@ get C
 	movcc z80a,#0x00000000
 	movcs z80a,#0xFF000000
 	movcc z80f,#(1<<NFlag)|(1<<ZFlag)
 	movcs z80f,#(1<<NFlag)|(1<<SFlag)|(1<<CFlag)|(1<<HFlag)|(1<<Flag3)|(1<<Flag5)
+	orr z80f,z80f,r2					;@ put R back
 	fetch 4
 .endm
 
@@ -1123,9 +1194,10 @@ z80_xmap_rebase_sp:
 .endm
 
 .macro opSBCL reg
+	and r2,z80f,#0xff000000				;@ keep R, the flags are rebuilt below
 	mov r0,\reg,lsl#8
 	eor z80f,z80f,#1<<CFlag					;@ invert C
-	movs z80f,z80f,lsr#2					;@ get C
+	movs z80f,z80f,lsr#(CFlag+1)				;@ get C
 	sbccc r0,r0,#0xFF000000
 	mov r1,z80a,lsl#4						;@ prepare for check of H
 	sbcs z80a,z80a,r0
@@ -1134,6 +1206,7 @@ z80_xmap_rebase_sp:
 	eor z80f,z80f,#(1<<CFlag)|(1<<NFlag)	;@ invert C and set n.
 	cmp r1,r0,lsl#4
 	orrcc z80f,z80f,#1<<HFlag				;@ H, correct
+	orr z80f,z80f,r2					;@ put R back
 	copyFlag35 z80a
 	fetch 4
 .endm
@@ -1144,8 +1217,9 @@ z80_xmap_rebase_sp:
 ;@---------------------------------------
 
 .macro opSBC16 reg
+	and r2,z80f,#0xff000000				;@ keep R, the flags are rebuilt below
 	eor z80f,z80f,#1<<CFlag					;@ invert C
-	movs z80f,z80f,lsr#2					;@ get C
+	movs z80f,z80f,lsr#(CFlag+1)				;@ get C
 	sbc r1,r1,r1							;@ set r1 to -1 or 0.
 	orr r0,\reg,r1,lsr#16
 	mov r1,z80hl,lsl#4						;@ prepare for check of H
@@ -1155,16 +1229,19 @@ z80_xmap_rebase_sp:
 	eor z80f,z80f,#(1<<CFlag)|(1<<NFlag)	;@ invert C and set n.
 	cmp r1,r0,lsl#4
 	orrcc z80f,z80f,#1<<HFlag				;@ H, correct
+	orr z80f,z80f,r2					;@ put R back
 	copyFlag35 z80hl
 	fetch 15
 .endm
 
 .macro opSBC16HL
-	movs z80f,z80f,lsr#2					;@ get C
+	and r2,z80f,#0xff000000				;@ keep R, the flags are rebuilt below
+	movs z80f,z80f,lsr#(CFlag+1)				;@ get C
 	mov z80hl,#0x00000000
 	subcs z80hl,z80hl,#0x00010000
 	movcc z80f,#(1<<NFlag)|(1<<ZFlag)
 	movcs z80f,#(1<<NFlag)|(1<<SFlag)|(1<<CFlag)|(1<<HFlag)|(1<<Flag3)|(1<<Flag5)
+	orr z80f,z80f,r2					;@ put R back
 	fetch 15
 .endm
 ;@---------------------------------------
@@ -1208,14 +1285,16 @@ z80_xmap_rebase_sp:
 	ldr pc,[cpucontext,#z80_write8]			;@ r0=data r1=addr
 	ldmfd sp!,{r3,r12}
 .endif
-	fetch 23
+	fetch 19
 .endm
 ;@---------------------------------------
 
 .macro opSLA reg1 reg2 shift
 	movs \reg1,\reg2,lsl#\shift
-	sub r1,opcodes,#OFFS_PZS
-	ldrb z80f,[r1,\reg1,lsr#24]
+	ldr r1,[cpucontext,#tables]
+	ldrb r2,[r1,\reg1,lsr#24]
+	bic z80f,z80f,#0xff
+	orr z80f,z80f,r2
 	orrcs z80f,z80f,#1<<CFlag
 .endm
 
@@ -1227,8 +1306,10 @@ z80_xmap_rebase_sp:
 .macro opSLAH reg
 	and r0,\reg,#0xFF000000					;@mask high to r0
 	adds \reg,\reg,r0
-	sub r1,opcodes,#OFFS_PZS
-	ldrb z80f,[r1,\reg,lsr#24]
+	ldr r1,[cpucontext,#tables]
+	ldrb r2,[r1,\reg,lsr#24]
+	bic z80f,z80f,#0xff
+	orr z80f,z80f,r2
 	orrcs z80f,z80f,#1<<CFlag
 	fetch 8
 .endm
@@ -1249,8 +1330,10 @@ z80_xmap_rebase_sp:
 .macro opSLL reg1 reg2 shift
 	movs \reg1,\reg2,lsl#\shift
 	orr \reg1,\reg1,#0x01000000
-	sub r1,opcodes,#OFFS_PZS
-	ldrb z80f,[r1,\reg1,lsr#24]
+	ldr r1,[cpucontext,#tables]
+	ldrb r2,[r1,\reg1,lsr#24]
+	bic z80f,z80f,#0xff
+	orr z80f,z80f,r2
 	orrcs z80f,z80f,#1<<CFlag
 .endm
 
@@ -1263,8 +1346,10 @@ z80_xmap_rebase_sp:
 	and r0,\reg,#0xFF000000					;@mask high to r0
 	adds \reg,\reg,r0
 	orr \reg,\reg,#0x01000000
-	sub r1,opcodes,#OFFS_PZS
-	ldrb z80f,[r1,\reg,lsr#24]
+	ldr r1,[cpucontext,#tables]
+	ldrb r2,[r1,\reg,lsr#24]
+	bic z80f,z80f,#0xff
+	orr z80f,z80f,r2
 	orrcs z80f,z80f,#1<<CFlag
 	fetch 8
 .endm
@@ -1285,16 +1370,20 @@ z80_xmap_rebase_sp:
 .macro opSRA reg1 reg2
 	movs \reg1,\reg2,asr#25
 	and \reg1,\reg1,#0xFF
-	sub r1,opcodes,#OFFS_PZS
-	ldrb z80f,[r1,\reg1]
+	ldr r1,[cpucontext,#tables]
+	ldrb r2,[r1,\reg1]
+	bic z80f,z80f,#0xff
+	orr z80f,z80f,r2
 	orrcs z80f,z80f,#1<<CFlag
 .endm
 
 .macro opSRAA
 	movs r0,z80a,asr#25
 	mov z80a,r0,lsl#24
-	sub r1,opcodes,#OFFS_PZS
-	ldrb z80f,[r1,z80a,lsr#24]
+	ldr r1,[cpucontext,#tables]
+	ldrb r2,[r1,z80a,lsr#24]
+	bic z80f,z80f,#0xff
+	orr z80f,z80f,r2
 	orrcs z80f,z80f,#1<<CFlag
 	fetch 8
 .endm
@@ -1303,8 +1392,10 @@ z80_xmap_rebase_sp:
 	movs r0,\reg,asr#25
 	and \reg,\reg,#0x00FF0000				;@mask out low
 	orr \reg,\reg,r0,lsl#24
-	sub r1,opcodes,#OFFS_PZS
-	ldrb z80f,[r1,\reg,lsr#24]
+	ldr r1,[cpucontext,#tables]
+	ldrb r2,[r1,\reg,lsr#24]
+	bic z80f,z80f,#0xff
+	orr z80f,z80f,r2
 	orrcs z80f,z80f,#1<<CFlag
 	fetch 8
 .endm
@@ -1325,8 +1416,10 @@ z80_xmap_rebase_sp:
 
 .macro opSRL reg1 reg2 shift
 	movs \reg1,\reg2,lsr#\shift
-	sub r1,opcodes,#OFFS_PZS
-	ldrb z80f,[r1,\reg1]
+	ldr r1,[cpucontext,#tables]
+	ldrb r2,[r1,\reg1]
+	bic z80f,z80f,#0xff
+	orr z80f,z80f,r2
 	orrcs z80f,z80f,#1<<CFlag
 .endm
 
@@ -1359,8 +1452,9 @@ z80_xmap_rebase_sp:
 .macro opSUB reg shift
 	mov r1,z80a,lsl#4						;@ Prepare for check of half carry
 	subs z80a,z80a,\reg,lsl#\shift
-	mrs z80f,cpsr
-	mov z80f,z80f,lsr#28					;@ S,Z,V&C
+	mrs r2,cpsr
+	bic z80f,z80f,#0xff
+	orr z80f,z80f,r2,lsr#28				;@ NZCV, R kept
 	eor z80f,z80f,#(1<<CFlag)|(1<<NFlag)	;@ invert C and set n
 	cmp r1,\reg,lsl#\shift+4
 	orrcc z80f,z80f,#1<<HFlag
@@ -1369,7 +1463,8 @@ z80_xmap_rebase_sp:
 
 .macro opSUBA
 	mov z80a,#0
-	mov z80f,#(1<<ZFlag)|(1<<NFlag)			;@ set Z & n
+	bic z80f,z80f,#0xff
+	orr z80f,z80f,#(1<<ZFlag)|(1<<NFlag)			;@ set Z & n
 	fetch 4
 .endm
 
@@ -1391,13 +1486,16 @@ z80_xmap_rebase_sp:
 
 .macro opXOR reg shift
 	eor z80a,z80a,\reg,lsl#\shift
-	sub r0,opcodes,#OFFS_PZS
-	ldrb z80f,[r0,z80a, lsr #24]
+	ldr r0,[cpucontext,#tables]
+	ldrb r2,[r0,z80a, lsr #24]
+	bic z80f,z80f,#0xff
+	orr z80f,z80f,r2
 .endm
 
 .macro opXORA
 	mov z80a,#0
-	mov z80f,#(1<<ZFlag)|(1<<VFlag)
+	bic z80f,z80f,#0xff
+	orr z80f,z80f,#(1<<ZFlag)|(1<<VFlag)
 	fetch 4
 .endm
 
@@ -1434,6 +1532,8 @@ DrZ80Run:
 	ldrh r0,[cpucontext,#z80irq] @ 0x4C, irq and IFF bits
 .endif
 	ldmia cpucontext,{z80pc-z80sp}			;@ load Z80 registers
+	ldrb r1,[cpucontext,#z80r]
+	orr z80f,z80f,r1,lsl#24				;@ R rides in the top byte of F
 
 .if INTERRUPT_MODE == 0
 	;@ check ints
@@ -1445,19 +1545,34 @@ DrZ80Run:
 	blne DoInterrupt
 .endif
 
+	ldrb r1,[cpucontext,#z80if]
 	PIC_LDR(opcodes, r0, MAIN_opcodes)
 
+	;@ halted and no irq: burn the slice without fetching
+	tst r1,#Z80_HALT
+	bne z80_halt_idle
+
+	sub r0,opcodes,#MAIN_opcodes-PZSTable_data
+	str r0,[cpucontext,#tables]
+
 	cmp z80_icount,#0     ;@ irq might have used all cycles
+	addgt z80f,z80f,#R_INC
 	ldrgtb r0,[z80pc],#1
 	ldrgt pc,[opcodes,r0, lsl #2]
 
-
 z80_execute_end:
 	;@ save registers in CPU context
+	mov r1,z80f,lsr#24
+	strb r1,[cpucontext,#z80r]
+	bic z80f,z80f,#0xff000000
 	stmia cpucontext,{z80pc-z80sp}			;@ save Z80 registers
 	mov r0,z80_icount
 	ldmia sp!,{r4-r12,pc}					;@ restore registers from stack and return to C code
 .pool
+
+z80_halt_idle:
+	mov z80_icount,#0
+	b z80_execute_end
 
 DoInterrupt:
 .if INTERRUPT_MODE
@@ -1465,11 +1580,11 @@ DoInterrupt:
 
 	;@ save everything back into DrZ80 context
 	stmia cpucontext,{z80pc-z80sp}			;@ save Z80 registers
-	stmfd sp!,{r3,r4,r5,lr}					;@ save rest of regs on stack
+	stmfd sp!,{r2,r3,r4,r5,lr}			;@ save rest of regs on stack
 	PIC_LDR(r2, r3, Interrupt)
 	mov lr,pc
 	bx r2
-	ldmfd sp!,{r3,r4,r5,lr}					;@ load regs from stack
+	ldmfd sp!,{r2,r3,r4,r5,lr}			;@ load regs from stack
 	;@ reload regs from DrZ80 context
 	ldmia cpucontext,{z80pc-z80sp}			;@ load Z80 registers
 	mov pc,lr ;@ return
@@ -1477,9 +1592,7 @@ DoInterrupt:
 
 	;@ r0 == z80if
 	stmfd sp!,{r2,lr}
-
-	tst r0,#Z80_HALT ;@ check halt
-	addne z80pc,z80pc,#1
+	inc_r 2			;@ acknowledge is two M1 cycles
 
 	ldrb r1,[cpucontext,#z80im]
 
@@ -1597,6 +1710,7 @@ DoInterrupt_end:
 
 DoNMI:
 	stmfd sp!,{r2,lr}
+	inc_r 2			;@ acknowledge is two M1 cycles
 
 	bic r0,r0,#((Z80_NMI|Z80_HALT|Z80_IF1)<<8)
 	strh r0,[cpucontext,#z80irq] @ 0x4C, irq and IFF bits
@@ -4459,7 +4573,7 @@ opcode_0_6:
 	fetch 7
 ;@RLCA
 opcode_0_7:
-	and z80f,z80f,#(1<<SFlag)|(1<<ZFlag)|(1<<VFlag)
+	bic z80f,z80f,#0xf2
 	movs z80a,z80a, lsl #1
 	orrcs z80a,z80a,#1<<24
 	orrcs z80f,z80f,#1<<CFlag
@@ -4470,9 +4584,11 @@ opcode_0_8:
 	ldr r0,[cpucontext,#z80a2]
 	ldr r1,[cpucontext,#z80f2]
 	str z80a,[cpucontext,#z80a2]
-	str z80f,[cpucontext,#z80f2]
+	and r2,z80f,#0xff
+	str r2,[cpucontext,#z80f2]
 	mov z80a,r0
-	mov z80f,r1
+	bic z80f,z80f,#0xff
+	orr z80f,z80f,r1
 	fetch 4
 ;@ADD HL,BC
 opcode_0_9:
@@ -4504,7 +4620,7 @@ opcode_0_E:
 	fetch 7
 ;@RRCA
 opcode_0_F:
-	and z80f,z80f,#(1<<SFlag)|(1<<ZFlag)|(1<<VFlag)
+	bic z80f,z80f,#0xf2
 	movs z80a,z80a, lsr #25
 	orrcs z80a,z80a,#1<<7
 	orrcs z80f,z80f,#1<<CFlag
@@ -4554,7 +4670,7 @@ opcode_1_6:
 opcode_1_7:
 	tst z80f,#1<<CFlag
 	orrne z80a,z80a,#1<<23
-	and z80f,z80f,#(1<<SFlag)|(1<<ZFlag)|(1<<VFlag)
+	bic z80f,z80f,#0xf2
 	movs z80a,z80a, lsl #1
 	orrcs z80f,z80f,#1<<CFlag
 	copyFlag35 z80a
@@ -4594,8 +4710,9 @@ opcode_1_E:
 	fetch 7
 ;@RRA
 opcode_1_F:
-	orr z80a,z80a,z80f,lsr#1		;@get C
-	and z80f,z80f,#(1<<SFlag)|(1<<ZFlag)|(1<<VFlag)
+	and r2,z80f,#0xff
+	orr z80a,z80a,r2,lsr#CFlag		;@get C
+	bic z80f,z80f,#0xf2
 	movs z80a,z80a,ror#25
 	orrcs z80f,z80f,#1<<CFlag
 	mov z80a,z80a,lsl#24
@@ -4652,11 +4769,14 @@ opcode_2_7:
 	orrne r1,r1,#512
 	tst z80f,#1<<NFlag
 	orrne r1,r1,#1024
-	sub r2,opcodes,#OFFS_DAA
+	ldr r2,[cpucontext,#tables]
+	sub r2,r2,#OFFS_DAA
 ;@	PIC_LDR(r2, r0, DAATable)
 	add r2,r2,r1, lsl #1
 	ldrh r1,[r2]
-	and z80f,r1,#0xFF
+	bic z80f,z80f,#0xff
+	and r2,r1,#0xFF
+	orr z80f,z80f,r2
 	and r2,r1,#0xFF<<8
 	mov z80a,r2, lsl #16
 	fetch 4
@@ -4703,7 +4823,7 @@ opcode_2_E:
 ;@CPL
 opcode_2_F:
 	eor z80a,z80a,#0xFF<<24
-	and z80f,z80f,#(1<<SFlag)|(1<<ZFlag)|(1<<VFlag)|(1<<CFlag)
+	bic z80f,z80f,#0xf0
 	orr z80f,z80f,#(1<<NFlag)|(1<<HFlag)
 	copyFlag35 z80a
 	fetch 4
@@ -4759,7 +4879,7 @@ opcode_3_6:
 	fetch 10
 ;@SCF
 opcode_3_7:
-	and z80f,z80f,#(1<<SFlag)|(1<<ZFlag)|(1<<VFlag)|(1<<CFlag)
+	bic z80f,z80f,#0xf0
 	orr z80f,z80f,#1<<CFlag
 	copyFlag35 z80a
 	fetch 4
@@ -4809,7 +4929,7 @@ opcode_3_E:
 	fetch 7
 ;@CCF
 opcode_3_F:
-	and z80f,z80f,#(1<<SFlag)|(1<<ZFlag)|(1<<VFlag)|(1<<CFlag)
+	bic z80f,z80f,#0xf0
 	tst z80f,#1<<CFlag
 	orrne z80f,z80f,#1<<HFlag
 	eor z80f,z80f,#1<<CFlag
@@ -5090,11 +5210,12 @@ opcode_7_5:
 	fetch 7
 ;@HALT
 opcode_7_6:
-	sub z80pc,z80pc,#1
 	ldrb r0,[cpucontext,#z80if]
 	orr r0,r0,#Z80_HALT
 	strb r0,[cpucontext,#z80if]
-	mov z80_icount,#0
+	eatcycles 4
+	cmp z80_icount,#0
+	movgt z80_icount,#0
 	b z80_execute_end
 ;@LD (HL),A
 opcode_7_7:
@@ -5414,6 +5535,7 @@ opcode_C_A:
 ;@This reads this opcodes_CB lookup table to find the location of
 ;@the CB sub for the intruction and then branches to that location
 opcode_C_B:
+	inc_r 1
 	ldrb r0,[z80pc],#1
 	PIC_XB(,r0, lsl #2)
 opcodes_CB:	.word 0x00000000
@@ -5562,6 +5684,8 @@ opcode_D_D:
 opcode_F_D:
 	add z80xx,cpucontext,#z80iy
 opcode_D_D_F_D:
+	eatcycles 4
+	inc_r 1
 	ldrb r0,[z80pc],#1
 	PIC_XB(,r0, lsl #2)
 opcodes_DD:	.word 0x00000000
@@ -5693,6 +5817,7 @@ opcode_E_C:
 
 ;@This should be caught at start
 opcode_E_D:
+	inc_r 1
 	ldrb r1,[z80pc],#1
 	PIC_XB(,r1, lsl #2)
 opcodes_ED:	.word 0x00000000
@@ -5746,9 +5871,15 @@ opcode_F_0:
 ;@POP AF
 opcode_F_1:
 .if FAST_Z80SP
-	ldrb z80f,[z80sp],#1
-	sub r0,opcodes,#OFFS_ZF
-	ldrb z80f,[r0,z80f]
+	ldrb r2,[z80sp],#1
+	bic z80f,z80f,#0xff
+	orr z80f,z80f,r2
+	ldr r0,[cpucontext,#tables]
+	sub r0,r0,#OFFS_ZF
+	and r1,z80f,#0xff
+	ldrb r2,[r0,r1]
+	bic z80f,z80f,#0xff
+	orr z80f,z80f,r2
 	ldrb z80a,[z80sp],#1
 	mov z80a,z80a, lsl #24
 .else
@@ -5758,9 +5889,12 @@ opcode_F_1:
 	bic z80sp,z80sp,#1<<16
 	and z80a,r0,#0xFF00
 	mov z80a,z80a,lsl#16
-	and z80f,r0,#0xFF
-	sub r0,opcodes,#OFFS_ZF
-	ldrb z80f,[r0,z80f]
+	and r1,r0,#0xFF
+	ldr r0,[cpucontext,#tables]
+	sub r0,r0,#OFFS_ZF
+	ldrb r1,[r0,r1]
+	bic z80f,z80f,#0xff
+	orr z80f,z80f,r1
 .endif
 	fetch 10
 ;@JP P,$+3
@@ -5774,10 +5908,7 @@ opcode_F_3:
 	ldrb r1,[cpucontext,#z80if]
 	bic r1,r1,#(Z80_IF1)|(Z80_IF2)
 	strb r1,[cpucontext,#z80if]
-
-	ldrb r0,[z80pc],#1
-	eatcycles 4
-	ldr pc,[opcodes, r0, lsl #2]
+	fetch 4
 ;@CALL P,NN
 opcode_F_4:
 	tst z80f,#1<<SFlag
@@ -5786,8 +5917,10 @@ opcode_F_4:
 	fetch 10
 ;@PUSH AF
 opcode_F_5:
-	sub r0,opcodes,#OFFS_AF
-	ldrb r0,[r0,z80f]
+	ldr r0,[cpucontext,#tables]
+	sub r0,r0,#OFFS_AF
+	and r1,z80f,#0xff
+	ldrb r0,[r0,r1]
 	orr r2,r0,z80a,lsr#16
     opPUSHareg r2
 	fetch 11
@@ -5823,10 +5956,10 @@ opcode_F_A:
 ;@EI
 opcode_F_B:
 	ldrb r1,[cpucontext,#z80if]
-	mov r2,opcodes
 	orr r1,r1,#(Z80_IF1)|(Z80_IF2)
 	strb r1,[cpucontext,#z80if]
 
+	PIC_LDR(r2, r1, MAIN_opcodes)
 	ldrb r0,[z80pc],#1
 	eatcycles 4
 	PIC_LDR(opcodes, r1, EI_DUMMY_opcodes)
@@ -6121,7 +6254,7 @@ opcode_CB_45:
 	opBITL z80hl 0
 ;@BIT 0,(HL)
 opcode_CB_46:
-	orr z80f,z80f,#0xc000<<16		;@ hack for ZEXALL
+	orr z80f,z80f,z80hl,lsr#8		;@ X/Y from the address high byte, as cz80
 	readmem8HL
 	opBITb 0
 	fetch 12
@@ -6149,7 +6282,7 @@ opcode_CB_4D:
 	opBITL z80hl 1
 ;@BIT 1,(HL)
 opcode_CB_4E:
-	orr z80f,z80f,#0xc000<<16		;@ hack for ZEXALL
+	orr z80f,z80f,z80hl,lsr#8		;@ X/Y from the address high byte, as cz80
 	readmem8HL
 	opBITb 1
 	fetch 12
@@ -6177,7 +6310,7 @@ opcode_CB_55:
 	opBITL z80hl 2
 ;@BIT 2,(HL)
 opcode_CB_56:
-	orr z80f,z80f,#0xc000<<16		;@ hack for ZEXALL
+	orr z80f,z80f,z80hl,lsr#8		;@ X/Y from the address high byte, as cz80
 	readmem8HL
 	opBITb 2
 	fetch 12
@@ -6205,7 +6338,7 @@ opcode_CB_5D:
 	opBITL z80hl 3
 ;@BIT 3,(HL)
 opcode_CB_5E:
-	orr z80f,z80f,#0xc000<<16		;@ hack for ZEXALL
+	orr z80f,z80f,z80hl,lsr#8		;@ X/Y from the address high byte, as cz80
 	readmem8HL
 	opBITb 3
 	fetch 12
@@ -6233,7 +6366,7 @@ opcode_CB_65:
 	opBITL z80hl 4
 ;@BIT 4,(HL)
 opcode_CB_66:
-	orr z80f,z80f,#0xc000<<16		;@ hack for ZEXALL
+	orr z80f,z80f,z80hl,lsr#8		;@ X/Y from the address high byte, as cz80
 	readmem8HL
 	opBITb 4
 	fetch 12
@@ -6261,7 +6394,7 @@ opcode_CB_6D:
 	opBITL z80hl 5
 ;@BIT 5,(HL)
 opcode_CB_6E:
-	orr z80f,z80f,#0xc000<<16		;@ hack for ZEXALL
+	orr z80f,z80f,z80hl,lsr#8		;@ X/Y from the address high byte, as cz80
 	readmem8HL
 	opBITb 5
 	fetch 12
@@ -6289,7 +6422,7 @@ opcode_CB_75:
 	opBITL z80hl 6
 ;@BIT 6,(HL)
 opcode_CB_76:
-	orr z80f,z80f,#0xc000<<16		;@ hack for ZEXALL
+	orr z80f,z80f,z80hl,lsr#8		;@ X/Y from the address high byte, as cz80
 	readmem8HL
 	opBITb 6
 	fetch 12
@@ -6317,7 +6450,7 @@ opcode_CB_7D:
 	opBIT7L z80hl
 ;@BIT 7,(HL)
 opcode_CB_7E:
-	orr z80f,z80f,#0xc000<<16		;@ hack for ZEXALL
+	orr z80f,z80f,z80hl,lsr#8		;@ X/Y from the address high byte, as cz80
 	readmem8HL
 	opBIT7b
 	fetch 12
@@ -6851,21 +6984,20 @@ opcode_CB_FF:
 opcode_DD_NF:
 	eatcycles 4
 	ldr pc,[opcodes,r0, lsl #2]
-;@	mov r2,#0x10*4
-;@	cmp r2,z80xx
-;@	bne opcode_FD_NF
-;@	mov r0,#0xDD00
-;@	orr r0,r0,r1
-;@	b end_loop
-;@opcode_FD_NF:
-;@	mov r0,#0xFD00
+;@	sub r2,z80xx,cpucontext
+;@	cmp r2,#z80ix
+;@	moveq r0,#0xDD00
+;@	movne r0,#0xFD00
 ;@	orr r0,r0,r1
 ;@	b end_loop
 
 opcode_DD_NF2:
-	fetch 23
+	fetch 19
 ;@ notaz: we don't want to deadlock here
-;@	mov r0,#0xDD0000
+;@	sub r2,z80xx,cpucontext
+;@	cmp r2,#z80ix
+;@	moveq r0,#0xDD0000
+;@	movne r0,#0xFD0000
 ;@	orr r0,r0,#0xCB00
 ;@	orr r0,r0,r1
 ;@	b end_loop
@@ -6875,20 +7007,20 @@ opcode_DD_09:
 	ldr r0,[z80xx]
 	opADD16 r0 z80bc
 	str r0,[z80xx]
-	fetch 15
+	fetch 11
 ;@ADD IX,DE
 opcode_DD_19:
 	ldr r0,[z80xx]
 	opADD16 r0 z80de
 	str r0,[z80xx]
-	fetch 15
+	fetch 11
 ;@LD IX,NN
 opcode_DD_21:
 	ldrb r0,[z80pc],#1
 	ldrb r1,[z80pc],#1
 	orr r0,r0,r1, lsl #8
 	strh r0,[z80xx,#2]
-	fetch 14
+	fetch 10
 ;@LD (NN),IX
 opcode_DD_22:
 	ldrb r0,[z80pc],#1
@@ -6896,36 +7028,36 @@ opcode_DD_22:
 	orr r1,r0,r1, lsl #8
 	ldrh r0,[z80xx,#2]
 	writemem16
-	fetch 20
+	fetch 16
 ;@INC IX
 opcode_DD_23:
 	ldr r0,[z80xx]
 	add r0,r0,#1<<16
 	str r0,[z80xx]
-	fetch 10
+	fetch 6
 ;@INC I  (IX)
 opcode_DD_24:
 	ldr r0,[z80xx]
 	opINC8H r0
 	str r0,[z80xx]
-	fetch 8
+	fetch 4
 ;@DEC I  (IX)
 opcode_DD_25:
 	ldr r0,[z80xx]
 	opDEC8H r0
 	str r0,[z80xx]
-	fetch 8
+	fetch 4
 ;@LD I,N  (IX)
 opcode_DD_26:
 	ldrb r0,[z80pc],#1
 	strb r0,[z80xx,#3]
-	fetch 11
+	fetch 7
 ;@ADD IX,IX
 opcode_DD_29:
 	ldr r0,[z80xx]
 	opADD16_2 r0
 	str r0,[z80xx]
-	fetch 15
+	fetch 11
 ;@LD IX,(NN)
 opcode_DD_2A:
 	ldrb r0,[z80pc],#1
@@ -6935,30 +7067,30 @@ opcode_DD_2A:
 	readmem16
 	ldmfd sp!,{r2,z80xx}
 	strh r0,[z80xx,#2]
-	fetch 20
+	fetch 16
 ;@DEC IX
 opcode_DD_2B:
 	ldr r0,[z80xx]
 	sub r0,r0,#1<<16
 	str r0,[z80xx]
-	fetch 10
+	fetch 6
 ;@INC X  (IX)
 opcode_DD_2C:
 	ldr r0,[z80xx]
 	opINC8L r0
 	str r0,[z80xx]
-	fetch 8
+	fetch 4
 ;@DEC X  (IX)
 opcode_DD_2D:
 	ldr r0,[z80xx]
 	opDEC8L r0
 	str r0,[z80xx]
-	fetch 8
+	fetch 4
 ;@LD X,N  (IX)
 opcode_DD_2E:
 	ldrb r0,[z80pc],#1
 	strb r0,[z80xx,#2]
-	fetch 11
+	fetch 7
 ;@INC (IX+N)
 opcode_DD_34:
 	ldrsb r0,[z80pc],#1
@@ -6970,7 +7102,7 @@ opcode_DD_34:
 	opINC8b
 	ldmfd sp!,{r1,r2}	;@ restore addr into r1
 	writemem8
-	fetch 23
+	fetch 19
 ;@DEC (IX+N)
 opcode_DD_35:
 	ldrsb r0,[z80pc],#1
@@ -6982,7 +7114,7 @@ opcode_DD_35:
 	opDEC8b
 	ldmfd sp!,{r1,r2}	;@ restore addr into r1
 	writemem8
-	fetch 23
+	fetch 19
 ;@LD (IX+N),N
 opcode_DD_36:
 	ldrsb r2,[z80pc],#1
@@ -6991,7 +7123,7 @@ opcode_DD_36:
 	add r1,r1,r2, lsl #16
 	mov r1,r1,lsr #16
 	writemem8
-	fetch 19
+	fetch 15
 ;@ADD IX,SP
 opcode_DD_39:
 	ldr r0,[z80xx]
@@ -7003,19 +7135,19 @@ opcode_DD_39:
 	opADD16s r0 z80sp 16
 .endif
 	str r0,[z80xx]
-	fetch 15
+	fetch 11
 ;@LD B,I ( IX )
 opcode_DD_44:
 	ldrb r0,[z80xx,#3]
 	and z80bc,z80bc,#0xFF<<16
 	orr z80bc,z80bc,r0, lsl #24
-	fetch 8
+	fetch 4
 ;@LD B,X ( IX )
 opcode_DD_45:
 	ldrb r0,[z80xx,#2]
 	and z80bc,z80bc,#0xFF<<16
 	orr z80bc,z80bc,r0, lsl #24
-	fetch 8
+	fetch 4
 ;@LD B,(IX,N)
 opcode_DD_46:
 	ldrsb r0,[z80pc],#1
@@ -7025,19 +7157,19 @@ opcode_DD_46:
 	readmem8
 	and z80bc,z80bc,#0xFF<<16
 	orr z80bc,z80bc,r0, lsl #24
-	fetch 19
+	fetch 15
 ;@LD C,I  (IX)
 opcode_DD_4C:
 	ldrb r0,[z80xx,#3]
 	and z80bc,z80bc,#0xFF<<24
 	orr z80bc,z80bc,r0, lsl #16
-	fetch 8
+	fetch 4
 ;@LD C,X  (IX)
 opcode_DD_4D:
 	ldrb r0,[z80xx,#2]
 	and z80bc,z80bc,#0xFF<<24
 	orr z80bc,z80bc,r0, lsl #16
-	fetch 8
+	fetch 4
 ;@LD C,(IX,N)
 opcode_DD_4E:
 	ldrsb r0,[z80pc],#1
@@ -7047,20 +7179,20 @@ opcode_DD_4E:
 	readmem8
 	and z80bc,z80bc,#0xFF<<24
 	orr z80bc,z80bc,r0, lsl #16
-	fetch 19
+	fetch 15
 
 ;@LD D,I  (IX)
 opcode_DD_54:
 	ldrb r0,[z80xx,#3]
 	and z80de,z80de,#0xFF<<16
 	orr z80de,z80de,r0, lsl #24
-	fetch 8
+	fetch 4
 ;@LD D,X  (IX)
 opcode_DD_55:
 	ldrb r0,[z80xx,#2]
 	and z80de,z80de,#0xFF<<16
 	orr z80de,z80de,r0, lsl #24
-	fetch 8
+	fetch 4
 ;@LD D,(IX,N)
 opcode_DD_56:
 	ldrsb r0,[z80pc],#1
@@ -7070,19 +7202,19 @@ opcode_DD_56:
 	readmem8
 	and z80de,z80de,#0xFF<<16
 	orr z80de,z80de,r0, lsl #24
-	fetch 19
+	fetch 15
 ;@LD E,I  (IX)
 opcode_DD_5C:
 	ldrb r0,[z80xx,#3]
 	and z80de,z80de,#0xFF<<24
 	orr z80de,z80de,r0, lsl #16
-	fetch 8
+	fetch 4
 ;@LD E,X  (IX)
 opcode_DD_5D:
 	ldrb r0,[z80xx,#2]
 	and z80de,z80de,#0xFF<<24
 	orr z80de,z80de,r0, lsl #16
-	fetch 8
+	fetch 4
 ;@LD E,(IX,N)
 opcode_DD_5E:
 	ldrsb r0,[z80pc],#1
@@ -7092,35 +7224,35 @@ opcode_DD_5E:
 	readmem8
 	and z80de,z80de,#0xFF<<24
 	orr z80de,z80de,r0, lsl #16
-	fetch 19
+	fetch 15
 ;@LD I,B  (IX)
 opcode_DD_60:
 	mov r0,z80bc,lsr#24
 	strb r0,[z80xx,#3]
-	fetch 8
+	fetch 4
 ;@LD I,C  (IX)
 opcode_DD_61:
 	mov r0,z80bc,lsr#16
 	strb r0,[z80xx,#3]
-	fetch 8
+	fetch 4
 ;@LD I,D  (IX)
 opcode_DD_62:
 	mov r0,z80de,lsr#24
 	strb r0,[z80xx,#3]
-	fetch 8
+	fetch 4
 ;@LD I,E  (IX)
 opcode_DD_63:
 	mov r0,z80de,lsr#16
 	strb r0,[z80xx,#3]
-	fetch 8
+	fetch 4
 ;@LD I,I  (IX)
 opcode_DD_64:
-	fetch 8
+	fetch 4
 ;@LD I,X  (IX)
 opcode_DD_65:
 	ldrb r0,[z80xx,#2]
 	strb r0,[z80xx,#3]
-	fetch 8
+	fetch 4
 ;@LD H,(IX,N)
 opcode_DD_66:
 	ldrsb r0,[z80pc],#1
@@ -7130,40 +7262,40 @@ opcode_DD_66:
 	readmem8
 	and z80hl,z80hl,#0xFF<<16
 	orr z80hl,z80hl,r0, lsl #24
-	fetch 19
+	fetch 15
 ;@LD I,A  (IX)
 opcode_DD_67:
 	mov r0,z80a,lsr#24
 	strb r0,[z80xx,#3]
-	fetch 8
+	fetch 4
 ;@LD X,B  (IX)
 opcode_DD_68:
 	mov r0,z80bc,lsr#24
 	strb r0,[z80xx,#2]
-	fetch 8
+	fetch 4
 ;@LD X,C  (IX)
 opcode_DD_69:
 	mov r0,z80bc,lsr#16
 	strb r0,[z80xx,#2]
-	fetch 8
+	fetch 4
 ;@LD X,D  (IX)
 opcode_DD_6A:
 	mov r0,z80de,lsr#24
 	strb r0,[z80xx,#2]
-	fetch 8
+	fetch 4
 ;@LD X,E  (IX)
 opcode_DD_6B:
 	mov r0,z80de,lsr#16
 	strb r0,[z80xx,#2]
-	fetch 8
+	fetch 4
 ;@LD X,I  (IX)
 opcode_DD_6C:
 	ldrb r0,[z80xx,#3]
 	strb r0,[z80xx,#2]
-	fetch 8
+	fetch 4
 ;@LD X,X  (IX)
 opcode_DD_6D:
-	fetch 8
+	fetch 4
 ;@LD L,(IX,N)
 opcode_DD_6E:
 	ldrsb r0,[z80pc],#1
@@ -7173,12 +7305,12 @@ opcode_DD_6E:
 	readmem8
 	and z80hl,z80hl,#0xFF<<24
 	orr z80hl,z80hl,r0, lsl #16
-	fetch 19
+	fetch 15
 ;@LD X,A  (IX)
 opcode_DD_6F:
 	mov r0,z80a,lsr#24
 	strb r0,[z80xx,#2]
-	fetch 8
+	fetch 4
 
 ;@LD (IX,N),B
 opcode_DD_70:
@@ -7188,7 +7320,7 @@ opcode_DD_70:
 	mov r1,r1,lsr #16
 	mov r0,z80bc, lsr #24
 	writemem8
-	fetch 19
+	fetch 15
 ;@LD (IX,N),C
 opcode_DD_71:
 	ldrsb r0,[z80pc],#1
@@ -7198,7 +7330,7 @@ opcode_DD_71:
 	mov r0,z80bc, lsr #16
 	and r0,r0,#0xFF
 	writemem8
-	fetch 19
+	fetch 15
 ;@LD (IX,N),D
 opcode_DD_72:
 	ldrsb r0,[z80pc],#1
@@ -7207,7 +7339,7 @@ opcode_DD_72:
 	mov r1,r1,lsr #16
 	mov r0,z80de, lsr #24
 	writemem8
-	fetch 19
+	fetch 15
 ;@LD (IX,N),E
 opcode_DD_73:
 	ldrsb r0,[z80pc],#1
@@ -7217,7 +7349,7 @@ opcode_DD_73:
 	mov r0,z80de, lsr #16
 	and r0,r0,#0xFF
 	writemem8
-	fetch 19
+	fetch 15
 ;@LD (IX,N),H
 opcode_DD_74:
 	ldrsb r0,[z80pc],#1
@@ -7226,7 +7358,7 @@ opcode_DD_74:
 	mov r1,r1,lsr #16
 	mov r0,z80hl, lsr #24
 	writemem8
-	fetch 19
+	fetch 15
 ;@LD (IX,N),L
 opcode_DD_75:
 	ldrsb r0,[z80pc],#1
@@ -7236,7 +7368,7 @@ opcode_DD_75:
 	mov r0,z80hl, lsr #16
 	and r0,r0,#0xFF
 	writemem8
-	fetch 19
+	fetch 15
 ;@LD (IX,N),A
 opcode_DD_77:
 	ldrsb r0,[z80pc],#1
@@ -7245,18 +7377,18 @@ opcode_DD_77:
 	mov r1,r1,lsr #16
 	mov r0,z80a, lsr #24
 	writemem8
-	fetch 19
+	fetch 15
 
 ;@LD A,I  from (IX)
 opcode_DD_7C:
 	ldrb r0,[z80xx,#3]
 	mov z80a,r0, lsl #24
-	fetch 8
+	fetch 4
 ;@LD A,X  from (IX)
 opcode_DD_7D:
 	ldrb r0,[z80xx,#2]
 	mov z80a,r0, lsl #24
-	fetch 8
+	fetch 4
 ;@LD A,(IX,N)
 opcode_DD_7E:
 	ldrsb r0,[z80pc],#1
@@ -7265,18 +7397,18 @@ opcode_DD_7E:
 	mov r0,r0,lsr #16
 	readmem8
 	mov z80a,r0, lsl #24
-	fetch 19
+	fetch 15
 
 ;@ADD A,I  ( IX)
 opcode_DD_84:
 	ldrb r0,[z80xx,#3]
 	opADDb
-	fetch 8
+	fetch 4
 ;@ADD A,X  ( IX)
 opcode_DD_85:
 	ldrb r0,[z80xx,#2]
 	opADDb
-	fetch 8
+	fetch 4
 ;@ADD A,(IX+N)
 opcode_DD_86:
 	ldrsb r0,[z80pc],#1
@@ -7285,18 +7417,18 @@ opcode_DD_86:
 	mov r0,r0,lsr #16
 	readmem8
 	opADDb
-	fetch 19
+	fetch 15
 
 ;@ADC A,I  (IX)
 opcode_DD_8C:
 	ldrb r0,[z80xx,#3]
 	opADCb
-	fetch 8
+	fetch 4
 ;@ADC A,X  (IX)
 opcode_DD_8D:
 	ldrb r0,[z80xx,#2]
 	opADCb
-	fetch 8
+	fetch 4
 ;@ADC A,(IX+N)
 opcode_DD_8E:
 	ldrsb r0,[z80pc],#1
@@ -7305,18 +7437,18 @@ opcode_DD_8E:
 	mov r0,r0,lsr #16
 	readmem8
 	opADCb
-	fetch 19
+	fetch 15
 
 ;@SUB A,I  (IX)
 opcode_DD_94:
 	ldrb r0,[z80xx,#3]
 	opSUBb
-	fetch 8
+	fetch 4
 ;@SUB A,X  (IX)
 opcode_DD_95:
 	ldrb r0,[z80xx,#2]
 	opSUBb
-	fetch 8
+	fetch 4
 ;@SUB A,(IX+N)
 opcode_DD_96:
 	ldrsb r0,[z80pc],#1
@@ -7325,18 +7457,18 @@ opcode_DD_96:
 	mov r0,r0,lsr #16
 	readmem8
 	opSUBb
-	fetch 19
+	fetch 15
 
 ;@SBC A,I  (IX)
 opcode_DD_9C:
 	ldrb r0,[z80xx,#3]
 	opSBCb
-	fetch 8
+	fetch 4
 ;@SBC A,X  (IX)
 opcode_DD_9D:
 	ldrb r0,[z80xx,#2]
 	opSBCb
-	fetch 8
+	fetch 4
 ;@SBC A,(IX+N)
 opcode_DD_9E:
 	ldrsb r0,[z80pc],#1
@@ -7345,18 +7477,18 @@ opcode_DD_9E:
 	mov r0,r0,lsr #16
 	readmem8
 	opSBCb
-	fetch 19
+	fetch 15
 
 ;@AND I  (IX)
 opcode_DD_A4:
 	ldrb r0,[z80xx,#3]
 	opANDb
-	fetch 8
+	fetch 4
 ;@AND X  (IX)
 opcode_DD_A5:
 	ldrb r0,[z80xx,#2]
 	opANDb
-	fetch 8
+	fetch 4
 ;@AND (IX+N)
 opcode_DD_A6:
 	ldrsb r0,[z80pc],#1
@@ -7365,18 +7497,18 @@ opcode_DD_A6:
 	mov r0,r0,lsr #16
 	readmem8
 	opANDb
-	fetch 19
+	fetch 15
 
 ;@XOR I  (IX)
 opcode_DD_AC:
 	ldrb r0,[z80xx,#3]
 	opXORb
-	fetch 8
+	fetch 4
 ;@XOR X  (IX)
 opcode_DD_AD:
 	ldrb r0,[z80xx,#2]
 	opXORb
-	fetch 8
+	fetch 4
 ;@XOR (IX+N)
 opcode_DD_AE:
 	ldrsb r0,[z80pc],#1
@@ -7385,18 +7517,18 @@ opcode_DD_AE:
 	mov r0,r0,lsr #16
 	readmem8
 	opXORb
-	fetch 19
+	fetch 15
 
 ;@OR I  (IX)
 opcode_DD_B4:
 	ldrb r0,[z80xx,#3]
 	opORb
-	fetch 8
+	fetch 4
 ;@OR X  (IX)
 opcode_DD_B5:
 	ldrb r0,[z80xx,#2]
 	opORb
-	fetch 8
+	fetch 4
 ;@OR (IX+N)
 opcode_DD_B6:
 	ldrsb r0,[z80pc],#1
@@ -7405,18 +7537,18 @@ opcode_DD_B6:
 	mov r0,r0,lsr #16
 	readmem8
 	opORb
-	fetch 19
+	fetch 15
 
 ;@CP I  (IX)
 opcode_DD_BC:
 	ldrb r0,[z80xx,#3]
 	opCPb
-	fetch 8
+	fetch 4
 ;@CP X  (IX)
 opcode_DD_BD:
 	ldrb r0,[z80xx,#2]
 	opCPb
-	fetch 8
+	fetch 4
 ;@CP (IX+N)
 opcode_DD_BE:
 	ldrsb r0,[z80pc],#1
@@ -7425,7 +7557,7 @@ opcode_DD_BE:
 	mov r0,r0,lsr #16
 	readmem8
 	opCPb
-	fetch 19
+	fetch 15
 
 
 opcode_DD_CB:
@@ -7436,43 +7568,104 @@ opcode_DD_CB:
 	add r0,r1,r0, lsl #16
 	mov r0,r0,lsr #16
 
+	;@ DD CB counts 2 refreshes, not 3, so the opcode byte below does not bump it
 	ldrb r1,[z80pc],#1
 	PIC_XB(,r1, lsl #2)
 		.word 0x00
 opcodes_DD_CB:
-	PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_CB_06);PIC_BT(opcode_DD_NF2)
-	PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_CB_0E);PIC_BT(opcode_DD_NF2)
-	PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_CB_16);PIC_BT(opcode_DD_NF2)
-	PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_CB_1E);PIC_BT(opcode_DD_NF2)
-	PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_CB_26);PIC_BT(opcode_DD_NF2)
-	PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_CB_2E);PIC_BT(opcode_DD_NF2)
-	PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_CB_36);PIC_BT(opcode_DD_NF2)
-	PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_CB_3E);PIC_BT(opcode_DD_NF2)
-	PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_CB_46);PIC_BT(opcode_DD_NF2)
-	PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_CB_4E);PIC_BT(opcode_DD_NF2)
-	PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_CB_56);PIC_BT(opcode_DD_NF2)
-	PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_CB_5E);PIC_BT(opcode_DD_NF2)
-	PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_CB_66);PIC_BT(opcode_DD_NF2)
-	PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_CB_6E);PIC_BT(opcode_DD_NF2)
-	PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_CB_76);PIC_BT(opcode_DD_NF2)
-	PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_CB_7E);PIC_BT(opcode_DD_NF2)
-	PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_CB_86);PIC_BT(opcode_DD_NF2)
-	PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_CB_8E);PIC_BT(opcode_DD_NF2)
-	PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_CB_96);PIC_BT(opcode_DD_NF2)
-	PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_CB_9E);PIC_BT(opcode_DD_NF2)
-	PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_CB_A6);PIC_BT(opcode_DD_NF2)
-	PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_CB_AE);PIC_BT(opcode_DD_NF2)
-	PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_CB_B6);PIC_BT(opcode_DD_NF2)
-	PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_CB_BE);PIC_BT(opcode_DD_NF2)
-	PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_CB_C6);PIC_BT(opcode_DD_NF2)
-	PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_CB_CE);PIC_BT(opcode_DD_NF2)
-	PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_CB_D6);PIC_BT(opcode_DD_NF2)
-	PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_CB_DE);PIC_BT(opcode_DD_NF2)
-	PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_CB_E6);PIC_BT(opcode_DD_NF2)
-	PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_CB_EE);PIC_BT(opcode_DD_NF2)
-	PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_CB_F6);PIC_BT(opcode_DD_NF2)
-	PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_NF2);PIC_BT(opcode_DD_CB_FE);PIC_BT(opcode_DD_NF2)
+	PIC_BT(opcode_DD_CB_00_B);PIC_BT(opcode_DD_CB_00_C);PIC_BT(opcode_DD_CB_00_D);PIC_BT(opcode_DD_CB_00_E);PIC_BT(opcode_DD_CB_00_H);PIC_BT(opcode_DD_CB_00_L);PIC_BT(opcode_DD_CB_06);PIC_BT(opcode_DD_CB_00_A)
+	PIC_BT(opcode_DD_CB_08_B);PIC_BT(opcode_DD_CB_08_C);PIC_BT(opcode_DD_CB_08_D);PIC_BT(opcode_DD_CB_08_E);PIC_BT(opcode_DD_CB_08_H);PIC_BT(opcode_DD_CB_08_L);PIC_BT(opcode_DD_CB_0E);PIC_BT(opcode_DD_CB_08_A)
+	PIC_BT(opcode_DD_CB_10_B);PIC_BT(opcode_DD_CB_10_C);PIC_BT(opcode_DD_CB_10_D);PIC_BT(opcode_DD_CB_10_E);PIC_BT(opcode_DD_CB_10_H);PIC_BT(opcode_DD_CB_10_L);PIC_BT(opcode_DD_CB_16);PIC_BT(opcode_DD_CB_10_A)
+	PIC_BT(opcode_DD_CB_18_B);PIC_BT(opcode_DD_CB_18_C);PIC_BT(opcode_DD_CB_18_D);PIC_BT(opcode_DD_CB_18_E);PIC_BT(opcode_DD_CB_18_H);PIC_BT(opcode_DD_CB_18_L);PIC_BT(opcode_DD_CB_1E);PIC_BT(opcode_DD_CB_18_A)
+	PIC_BT(opcode_DD_CB_20_B);PIC_BT(opcode_DD_CB_20_C);PIC_BT(opcode_DD_CB_20_D);PIC_BT(opcode_DD_CB_20_E);PIC_BT(opcode_DD_CB_20_H);PIC_BT(opcode_DD_CB_20_L);PIC_BT(opcode_DD_CB_26);PIC_BT(opcode_DD_CB_20_A)
+	PIC_BT(opcode_DD_CB_28_B);PIC_BT(opcode_DD_CB_28_C);PIC_BT(opcode_DD_CB_28_D);PIC_BT(opcode_DD_CB_28_E);PIC_BT(opcode_DD_CB_28_H);PIC_BT(opcode_DD_CB_28_L);PIC_BT(opcode_DD_CB_2E);PIC_BT(opcode_DD_CB_28_A)
+	PIC_BT(opcode_DD_CB_30_B);PIC_BT(opcode_DD_CB_30_C);PIC_BT(opcode_DD_CB_30_D);PIC_BT(opcode_DD_CB_30_E);PIC_BT(opcode_DD_CB_30_H);PIC_BT(opcode_DD_CB_30_L);PIC_BT(opcode_DD_CB_36);PIC_BT(opcode_DD_CB_30_A)
+	PIC_BT(opcode_DD_CB_38_B);PIC_BT(opcode_DD_CB_38_C);PIC_BT(opcode_DD_CB_38_D);PIC_BT(opcode_DD_CB_38_E);PIC_BT(opcode_DD_CB_38_H);PIC_BT(opcode_DD_CB_38_L);PIC_BT(opcode_DD_CB_3E);PIC_BT(opcode_DD_CB_38_A)
+	PIC_BT(opcode_DD_CB_46);PIC_BT(opcode_DD_CB_46);PIC_BT(opcode_DD_CB_46);PIC_BT(opcode_DD_CB_46);PIC_BT(opcode_DD_CB_46);PIC_BT(opcode_DD_CB_46);PIC_BT(opcode_DD_CB_46);PIC_BT(opcode_DD_CB_46)
+	PIC_BT(opcode_DD_CB_4E);PIC_BT(opcode_DD_CB_4E);PIC_BT(opcode_DD_CB_4E);PIC_BT(opcode_DD_CB_4E);PIC_BT(opcode_DD_CB_4E);PIC_BT(opcode_DD_CB_4E);PIC_BT(opcode_DD_CB_4E);PIC_BT(opcode_DD_CB_4E)
+	PIC_BT(opcode_DD_CB_56);PIC_BT(opcode_DD_CB_56);PIC_BT(opcode_DD_CB_56);PIC_BT(opcode_DD_CB_56);PIC_BT(opcode_DD_CB_56);PIC_BT(opcode_DD_CB_56);PIC_BT(opcode_DD_CB_56);PIC_BT(opcode_DD_CB_56)
+	PIC_BT(opcode_DD_CB_5E);PIC_BT(opcode_DD_CB_5E);PIC_BT(opcode_DD_CB_5E);PIC_BT(opcode_DD_CB_5E);PIC_BT(opcode_DD_CB_5E);PIC_BT(opcode_DD_CB_5E);PIC_BT(opcode_DD_CB_5E);PIC_BT(opcode_DD_CB_5E)
+	PIC_BT(opcode_DD_CB_66);PIC_BT(opcode_DD_CB_66);PIC_BT(opcode_DD_CB_66);PIC_BT(opcode_DD_CB_66);PIC_BT(opcode_DD_CB_66);PIC_BT(opcode_DD_CB_66);PIC_BT(opcode_DD_CB_66);PIC_BT(opcode_DD_CB_66)
+	PIC_BT(opcode_DD_CB_6E);PIC_BT(opcode_DD_CB_6E);PIC_BT(opcode_DD_CB_6E);PIC_BT(opcode_DD_CB_6E);PIC_BT(opcode_DD_CB_6E);PIC_BT(opcode_DD_CB_6E);PIC_BT(opcode_DD_CB_6E);PIC_BT(opcode_DD_CB_6E)
+	PIC_BT(opcode_DD_CB_76);PIC_BT(opcode_DD_CB_76);PIC_BT(opcode_DD_CB_76);PIC_BT(opcode_DD_CB_76);PIC_BT(opcode_DD_CB_76);PIC_BT(opcode_DD_CB_76);PIC_BT(opcode_DD_CB_76);PIC_BT(opcode_DD_CB_76)
+	PIC_BT(opcode_DD_CB_7E);PIC_BT(opcode_DD_CB_7E);PIC_BT(opcode_DD_CB_7E);PIC_BT(opcode_DD_CB_7E);PIC_BT(opcode_DD_CB_7E);PIC_BT(opcode_DD_CB_7E);PIC_BT(opcode_DD_CB_7E);PIC_BT(opcode_DD_CB_7E)
+	PIC_BT(opcode_DD_CB_80_B);PIC_BT(opcode_DD_CB_80_C);PIC_BT(opcode_DD_CB_80_D);PIC_BT(opcode_DD_CB_80_E);PIC_BT(opcode_DD_CB_80_H);PIC_BT(opcode_DD_CB_80_L);PIC_BT(opcode_DD_CB_86);PIC_BT(opcode_DD_CB_80_A)
+	PIC_BT(opcode_DD_CB_88_B);PIC_BT(opcode_DD_CB_88_C);PIC_BT(opcode_DD_CB_88_D);PIC_BT(opcode_DD_CB_88_E);PIC_BT(opcode_DD_CB_88_H);PIC_BT(opcode_DD_CB_88_L);PIC_BT(opcode_DD_CB_8E);PIC_BT(opcode_DD_CB_88_A)
+	PIC_BT(opcode_DD_CB_90_B);PIC_BT(opcode_DD_CB_90_C);PIC_BT(opcode_DD_CB_90_D);PIC_BT(opcode_DD_CB_90_E);PIC_BT(opcode_DD_CB_90_H);PIC_BT(opcode_DD_CB_90_L);PIC_BT(opcode_DD_CB_96);PIC_BT(opcode_DD_CB_90_A)
+	PIC_BT(opcode_DD_CB_98_B);PIC_BT(opcode_DD_CB_98_C);PIC_BT(opcode_DD_CB_98_D);PIC_BT(opcode_DD_CB_98_E);PIC_BT(opcode_DD_CB_98_H);PIC_BT(opcode_DD_CB_98_L);PIC_BT(opcode_DD_CB_9E);PIC_BT(opcode_DD_CB_98_A)
+	PIC_BT(opcode_DD_CB_A0_B);PIC_BT(opcode_DD_CB_A0_C);PIC_BT(opcode_DD_CB_A0_D);PIC_BT(opcode_DD_CB_A0_E);PIC_BT(opcode_DD_CB_A0_H);PIC_BT(opcode_DD_CB_A0_L);PIC_BT(opcode_DD_CB_A6);PIC_BT(opcode_DD_CB_A0_A)
+	PIC_BT(opcode_DD_CB_A8_B);PIC_BT(opcode_DD_CB_A8_C);PIC_BT(opcode_DD_CB_A8_D);PIC_BT(opcode_DD_CB_A8_E);PIC_BT(opcode_DD_CB_A8_H);PIC_BT(opcode_DD_CB_A8_L);PIC_BT(opcode_DD_CB_AE);PIC_BT(opcode_DD_CB_A8_A)
+	PIC_BT(opcode_DD_CB_B0_B);PIC_BT(opcode_DD_CB_B0_C);PIC_BT(opcode_DD_CB_B0_D);PIC_BT(opcode_DD_CB_B0_E);PIC_BT(opcode_DD_CB_B0_H);PIC_BT(opcode_DD_CB_B0_L);PIC_BT(opcode_DD_CB_B6);PIC_BT(opcode_DD_CB_B0_A)
+	PIC_BT(opcode_DD_CB_B8_B);PIC_BT(opcode_DD_CB_B8_C);PIC_BT(opcode_DD_CB_B8_D);PIC_BT(opcode_DD_CB_B8_E);PIC_BT(opcode_DD_CB_B8_H);PIC_BT(opcode_DD_CB_B8_L);PIC_BT(opcode_DD_CB_BE);PIC_BT(opcode_DD_CB_B8_A)
+	PIC_BT(opcode_DD_CB_C0_B);PIC_BT(opcode_DD_CB_C0_C);PIC_BT(opcode_DD_CB_C0_D);PIC_BT(opcode_DD_CB_C0_E);PIC_BT(opcode_DD_CB_C0_H);PIC_BT(opcode_DD_CB_C0_L);PIC_BT(opcode_DD_CB_C6);PIC_BT(opcode_DD_CB_C0_A)
+	PIC_BT(opcode_DD_CB_C8_B);PIC_BT(opcode_DD_CB_C8_C);PIC_BT(opcode_DD_CB_C8_D);PIC_BT(opcode_DD_CB_C8_E);PIC_BT(opcode_DD_CB_C8_H);PIC_BT(opcode_DD_CB_C8_L);PIC_BT(opcode_DD_CB_CE);PIC_BT(opcode_DD_CB_C8_A)
+	PIC_BT(opcode_DD_CB_D0_B);PIC_BT(opcode_DD_CB_D0_C);PIC_BT(opcode_DD_CB_D0_D);PIC_BT(opcode_DD_CB_D0_E);PIC_BT(opcode_DD_CB_D0_H);PIC_BT(opcode_DD_CB_D0_L);PIC_BT(opcode_DD_CB_D6);PIC_BT(opcode_DD_CB_D0_A)
+	PIC_BT(opcode_DD_CB_D8_B);PIC_BT(opcode_DD_CB_D8_C);PIC_BT(opcode_DD_CB_D8_D);PIC_BT(opcode_DD_CB_D8_E);PIC_BT(opcode_DD_CB_D8_H);PIC_BT(opcode_DD_CB_D8_L);PIC_BT(opcode_DD_CB_DE);PIC_BT(opcode_DD_CB_D8_A)
+	PIC_BT(opcode_DD_CB_E0_B);PIC_BT(opcode_DD_CB_E0_C);PIC_BT(opcode_DD_CB_E0_D);PIC_BT(opcode_DD_CB_E0_E);PIC_BT(opcode_DD_CB_E0_H);PIC_BT(opcode_DD_CB_E0_L);PIC_BT(opcode_DD_CB_E6);PIC_BT(opcode_DD_CB_E0_A)
+	PIC_BT(opcode_DD_CB_E8_B);PIC_BT(opcode_DD_CB_E8_C);PIC_BT(opcode_DD_CB_E8_D);PIC_BT(opcode_DD_CB_E8_E);PIC_BT(opcode_DD_CB_E8_H);PIC_BT(opcode_DD_CB_E8_L);PIC_BT(opcode_DD_CB_EE);PIC_BT(opcode_DD_CB_E8_A)
+	PIC_BT(opcode_DD_CB_F0_B);PIC_BT(opcode_DD_CB_F0_C);PIC_BT(opcode_DD_CB_F0_D);PIC_BT(opcode_DD_CB_F0_E);PIC_BT(opcode_DD_CB_F0_H);PIC_BT(opcode_DD_CB_F0_L);PIC_BT(opcode_DD_CB_F6);PIC_BT(opcode_DD_CB_F0_A)
+	PIC_BT(opcode_DD_CB_F8_B);PIC_BT(opcode_DD_CB_F8_C);PIC_BT(opcode_DD_CB_F8_D);PIC_BT(opcode_DD_CB_F8_E);PIC_BT(opcode_DD_CB_F8_H);PIC_BT(opcode_DD_CB_F8_L);PIC_BT(opcode_DD_CB_FE);PIC_BT(opcode_DD_CB_F8_A)
 
+;@ the undocumented dd cb forms also write the result to the register encoded
+;@ in the low 3 bits of the opcode, in addition to (ix+n)
+;@ (the bit forms ignore that field, so they reuse the (ix+n) handlers)
+.macro ddcb_rot op base mask shl
+	stmfd sp!,{r0,r2}
+	readmem8
+	\op
+	and \base,\base,#\mask
+	orr \base,\base,r0,lsl#\shl
+	ldmfd sp!,{r1,r2}
+	writemem8
+	fetch 19
+.endm
+.macro ddcb_rota op
+	stmfd sp!,{r0,r2}
+	readmem8
+	\op
+	mov z80a,r0,lsl#24
+	ldmfd sp!,{r1,r2}
+	writemem8
+	fetch 19
+.endm
+.macro ddcb_res bit base mask shl
+	stmfd sp!,{r0,r2}
+	readmem8
+	bic r0,r0,#1<<\bit
+	and \base,\base,#\mask
+	orr \base,\base,r0,lsl#\shl
+	ldmfd sp!,{r1,r2}
+	writemem8
+	fetch 19
+.endm
+.macro ddcb_resa bit
+	stmfd sp!,{r0,r2}
+	readmem8
+	bic r0,r0,#1<<\bit
+	mov z80a,r0,lsl#24
+	ldmfd sp!,{r1,r2}
+	writemem8
+	fetch 19
+.endm
+.macro ddcb_set bit base mask shl
+	stmfd sp!,{r0,r2}
+	readmem8
+	orr r0,r0,#1<<\bit
+	and \base,\base,#\mask
+	orr \base,\base,r0,lsl#\shl
+	ldmfd sp!,{r1,r2}
+	writemem8
+	fetch 19
+.endm
+.macro ddcb_seta bit
+	stmfd sp!,{r0,r2}
+	readmem8
+	orr r0,r0,#1<<\bit
+	mov z80a,r0,lsl#24
+	ldmfd sp!,{r1,r2}
+	writemem8
+	fetch 19
+.endm
 ;@RLC (IX+N) 
 opcode_DD_CB_06:
 	stmfd sp!,{r0,r2}		;@ save addr
@@ -7480,7 +7673,7 @@ opcode_DD_CB_06:
 	opRLCb
 	ldmfd sp!,{r1,r2}		;@ restore addr into r1
 	writemem8
-	fetch 23
+	fetch 19
 ;@RRC (IX+N) 
 opcode_DD_CB_0E:
 	stmfd sp!,{r0,r2}		;@ save addr
@@ -7488,7 +7681,7 @@ opcode_DD_CB_0E:
 	opRRCb
 	ldmfd sp!,{r1,r2}		;@ restore addr into r1
 	writemem8
-	fetch 23
+	fetch 19
 ;@RL (IX+N) 
 opcode_DD_CB_16:
 	stmfd sp!,{r0,r2}		;@ save addr
@@ -7496,7 +7689,7 @@ opcode_DD_CB_16:
 	opRLb
 	ldmfd sp!,{r1,r2}		;@ restore addr into r1
 	writemem8
-	fetch 23
+	fetch 19
 ;@RR (IX+N) 
 opcode_DD_CB_1E:
 	stmfd sp!,{r0,r2}		;@ save addr 
@@ -7504,7 +7697,7 @@ opcode_DD_CB_1E:
 	opRRb
 	ldmfd sp!,{r1,r2}		;@ restore addr into r1
 	writemem8
-	fetch 23
+	fetch 19
 
 ;@SLA (IX+N) 
 opcode_DD_CB_26:
@@ -7513,7 +7706,7 @@ opcode_DD_CB_26:
 	opSLAb
 	ldmfd sp!,{r1,r2}		;@ restore addr into r1
 	writemem8
-	fetch 23
+	fetch 19
 ;@SRA (IX+N) 
 opcode_DD_CB_2E:
 	stmfd sp!,{r0,r2}		;@ save addr 
@@ -7521,7 +7714,7 @@ opcode_DD_CB_2E:
 	opSRAb
 	ldmfd sp!,{r1,r2}		;@ restore addr into r1
 	writemem8
-	fetch 23
+	fetch 19
 ;@SLL (IX+N) 
 opcode_DD_CB_36:
 	stmfd sp!,{r0,r2}		;@ save addr 
@@ -7529,7 +7722,7 @@ opcode_DD_CB_36:
 	opSLLb
 	ldmfd sp!,{r1,r2}		;@ restore addr into r1
 	writemem8
-	fetch 23
+	fetch 19
 ;@SRL (IX+N)
 opcode_DD_CB_3E:
 	stmfd sp!,{r0,r2}		;@ save addr 
@@ -7537,56 +7730,56 @@ opcode_DD_CB_3E:
 	opSRLb
 	ldmfd sp!,{r1,r2}		;@ restore addr into r1
 	writemem8
-	fetch 23
+	fetch 19
 
 ;@BIT 0,(IX+N) 
 opcode_DD_CB_46:
-	orr z80f,z80f,r0,lsl#16
+	orr z80f,z80f,r0,lsl#8
 	readmem8
 	opBITb 0
-	fetch 20
+	fetch 16
 ;@BIT 1,(IX+N) 
 opcode_DD_CB_4E:
-	orr z80f,z80f,r0,lsl#16
+	orr z80f,z80f,r0,lsl#8
 	readmem8
 	opBITb 1
-	fetch 20
+	fetch 16
 ;@BIT 2,(IX+N) 
 opcode_DD_CB_56:
-	orr z80f,z80f,r0,lsl#16
+	orr z80f,z80f,r0,lsl#8
 	readmem8
 	opBITb 2
-	fetch 20
+	fetch 16
 ;@BIT 3,(IX+N) 
 opcode_DD_CB_5E:
-	orr z80f,z80f,r0,lsl#16
+	orr z80f,z80f,r0,lsl#8
 	readmem8
 	opBITb 3
-	fetch 20
+	fetch 16
 ;@BIT 4,(IX+N) 
 opcode_DD_CB_66:
-	orr z80f,z80f,r0,lsl#16
+	orr z80f,z80f,r0,lsl#8
 	readmem8
 	opBITb 4
-	fetch 20
+	fetch 16
 ;@BIT 5,(IX+N) 
 opcode_DD_CB_6E:
-	orr z80f,z80f,r0,lsl#16
+	orr z80f,z80f,r0,lsl#8
 	readmem8
 	opBITb 5
-	fetch 20
+	fetch 16
 ;@BIT 6,(IX+N) 
 opcode_DD_CB_76:
-	orr z80f,z80f,r0,lsl#16
+	orr z80f,z80f,r0,lsl#8
 	readmem8
 	opBITb 6
-	fetch 20
+	fetch 16
 ;@BIT 7,(IX+N) 
 opcode_DD_CB_7E:
-	orr z80f,z80f,r0,lsl#16
+	orr z80f,z80f,r0,lsl#8
 	readmem8
 	opBIT7b
-	fetch 20
+	fetch 16
 ;@RES 0,(IX+N) 
 opcode_DD_CB_86:
 	opRESmem 0
@@ -7639,6 +7832,367 @@ opcode_DD_CB_FE:
 
 
 
+;@register copy forms
+;@RLC (IX+N) -> reg
+opcode_DD_CB_00_B:
+	ddcb_rot opRLCb, z80bc, 0xFF<<16, 24
+opcode_DD_CB_00_C:
+	ddcb_rot opRLCb, z80bc, 0xFF<<24, 16
+opcode_DD_CB_00_D:
+	ddcb_rot opRLCb, z80de, 0xFF<<16, 24
+opcode_DD_CB_00_E:
+	ddcb_rot opRLCb, z80de, 0xFF<<24, 16
+opcode_DD_CB_00_H:
+	ddcb_rot opRLCb, z80hl, 0xFF<<16, 24
+opcode_DD_CB_00_L:
+	ddcb_rot opRLCb, z80hl, 0xFF<<24, 16
+opcode_DD_CB_00_A:
+	ddcb_rota opRLCb
+;@RRC (IX+N) -> reg
+opcode_DD_CB_08_B:
+	ddcb_rot opRRCb, z80bc, 0xFF<<16, 24
+opcode_DD_CB_08_C:
+	ddcb_rot opRRCb, z80bc, 0xFF<<24, 16
+opcode_DD_CB_08_D:
+	ddcb_rot opRRCb, z80de, 0xFF<<16, 24
+opcode_DD_CB_08_E:
+	ddcb_rot opRRCb, z80de, 0xFF<<24, 16
+opcode_DD_CB_08_H:
+	ddcb_rot opRRCb, z80hl, 0xFF<<16, 24
+opcode_DD_CB_08_L:
+	ddcb_rot opRRCb, z80hl, 0xFF<<24, 16
+opcode_DD_CB_08_A:
+	ddcb_rota opRRCb
+;@RL (IX+N) -> reg
+opcode_DD_CB_10_B:
+	ddcb_rot opRLb, z80bc, 0xFF<<16, 24
+opcode_DD_CB_10_C:
+	ddcb_rot opRLb, z80bc, 0xFF<<24, 16
+opcode_DD_CB_10_D:
+	ddcb_rot opRLb, z80de, 0xFF<<16, 24
+opcode_DD_CB_10_E:
+	ddcb_rot opRLb, z80de, 0xFF<<24, 16
+opcode_DD_CB_10_H:
+	ddcb_rot opRLb, z80hl, 0xFF<<16, 24
+opcode_DD_CB_10_L:
+	ddcb_rot opRLb, z80hl, 0xFF<<24, 16
+opcode_DD_CB_10_A:
+	ddcb_rota opRLb
+;@RR (IX+N) -> reg
+opcode_DD_CB_18_B:
+	ddcb_rot opRRb, z80bc, 0xFF<<16, 24
+opcode_DD_CB_18_C:
+	ddcb_rot opRRb, z80bc, 0xFF<<24, 16
+opcode_DD_CB_18_D:
+	ddcb_rot opRRb, z80de, 0xFF<<16, 24
+opcode_DD_CB_18_E:
+	ddcb_rot opRRb, z80de, 0xFF<<24, 16
+opcode_DD_CB_18_H:
+	ddcb_rot opRRb, z80hl, 0xFF<<16, 24
+opcode_DD_CB_18_L:
+	ddcb_rot opRRb, z80hl, 0xFF<<24, 16
+opcode_DD_CB_18_A:
+	ddcb_rota opRRb
+;@SLA (IX+N) -> reg
+opcode_DD_CB_20_B:
+	ddcb_rot opSLAb, z80bc, 0xFF<<16, 24
+opcode_DD_CB_20_C:
+	ddcb_rot opSLAb, z80bc, 0xFF<<24, 16
+opcode_DD_CB_20_D:
+	ddcb_rot opSLAb, z80de, 0xFF<<16, 24
+opcode_DD_CB_20_E:
+	ddcb_rot opSLAb, z80de, 0xFF<<24, 16
+opcode_DD_CB_20_H:
+	ddcb_rot opSLAb, z80hl, 0xFF<<16, 24
+opcode_DD_CB_20_L:
+	ddcb_rot opSLAb, z80hl, 0xFF<<24, 16
+opcode_DD_CB_20_A:
+	ddcb_rota opSLAb
+;@SRA (IX+N) -> reg
+opcode_DD_CB_28_B:
+	ddcb_rot opSRAb, z80bc, 0xFF<<16, 24
+opcode_DD_CB_28_C:
+	ddcb_rot opSRAb, z80bc, 0xFF<<24, 16
+opcode_DD_CB_28_D:
+	ddcb_rot opSRAb, z80de, 0xFF<<16, 24
+opcode_DD_CB_28_E:
+	ddcb_rot opSRAb, z80de, 0xFF<<24, 16
+opcode_DD_CB_28_H:
+	ddcb_rot opSRAb, z80hl, 0xFF<<16, 24
+opcode_DD_CB_28_L:
+	ddcb_rot opSRAb, z80hl, 0xFF<<24, 16
+opcode_DD_CB_28_A:
+	ddcb_rota opSRAb
+;@SLL (IX+N) -> reg
+opcode_DD_CB_30_B:
+	ddcb_rot opSLLb, z80bc, 0xFF<<16, 24
+opcode_DD_CB_30_C:
+	ddcb_rot opSLLb, z80bc, 0xFF<<24, 16
+opcode_DD_CB_30_D:
+	ddcb_rot opSLLb, z80de, 0xFF<<16, 24
+opcode_DD_CB_30_E:
+	ddcb_rot opSLLb, z80de, 0xFF<<24, 16
+opcode_DD_CB_30_H:
+	ddcb_rot opSLLb, z80hl, 0xFF<<16, 24
+opcode_DD_CB_30_L:
+	ddcb_rot opSLLb, z80hl, 0xFF<<24, 16
+opcode_DD_CB_30_A:
+	ddcb_rota opSLLb
+;@SRL (IX+N) -> reg
+opcode_DD_CB_38_B:
+	ddcb_rot opSRLb, z80bc, 0xFF<<16, 24
+opcode_DD_CB_38_C:
+	ddcb_rot opSRLb, z80bc, 0xFF<<24, 16
+opcode_DD_CB_38_D:
+	ddcb_rot opSRLb, z80de, 0xFF<<16, 24
+opcode_DD_CB_38_E:
+	ddcb_rot opSRLb, z80de, 0xFF<<24, 16
+opcode_DD_CB_38_H:
+	ddcb_rot opSRLb, z80hl, 0xFF<<16, 24
+opcode_DD_CB_38_L:
+	ddcb_rot opSRLb, z80hl, 0xFF<<24, 16
+opcode_DD_CB_38_A:
+	ddcb_rota opSRLb
+;@RES 0,(IX+N) -> reg
+opcode_DD_CB_80_B:
+	ddcb_res 0, z80bc, 0xFF<<16, 24
+opcode_DD_CB_80_C:
+	ddcb_res 0, z80bc, 0xFF<<24, 16
+opcode_DD_CB_80_D:
+	ddcb_res 0, z80de, 0xFF<<16, 24
+opcode_DD_CB_80_E:
+	ddcb_res 0, z80de, 0xFF<<24, 16
+opcode_DD_CB_80_H:
+	ddcb_res 0, z80hl, 0xFF<<16, 24
+opcode_DD_CB_80_L:
+	ddcb_res 0, z80hl, 0xFF<<24, 16
+opcode_DD_CB_80_A:
+	ddcb_resa 0
+;@RES 1,(IX+N) -> reg
+opcode_DD_CB_88_B:
+	ddcb_res 1, z80bc, 0xFF<<16, 24
+opcode_DD_CB_88_C:
+	ddcb_res 1, z80bc, 0xFF<<24, 16
+opcode_DD_CB_88_D:
+	ddcb_res 1, z80de, 0xFF<<16, 24
+opcode_DD_CB_88_E:
+	ddcb_res 1, z80de, 0xFF<<24, 16
+opcode_DD_CB_88_H:
+	ddcb_res 1, z80hl, 0xFF<<16, 24
+opcode_DD_CB_88_L:
+	ddcb_res 1, z80hl, 0xFF<<24, 16
+opcode_DD_CB_88_A:
+	ddcb_resa 1
+;@RES 2,(IX+N) -> reg
+opcode_DD_CB_90_B:
+	ddcb_res 2, z80bc, 0xFF<<16, 24
+opcode_DD_CB_90_C:
+	ddcb_res 2, z80bc, 0xFF<<24, 16
+opcode_DD_CB_90_D:
+	ddcb_res 2, z80de, 0xFF<<16, 24
+opcode_DD_CB_90_E:
+	ddcb_res 2, z80de, 0xFF<<24, 16
+opcode_DD_CB_90_H:
+	ddcb_res 2, z80hl, 0xFF<<16, 24
+opcode_DD_CB_90_L:
+	ddcb_res 2, z80hl, 0xFF<<24, 16
+opcode_DD_CB_90_A:
+	ddcb_resa 2
+;@RES 3,(IX+N) -> reg
+opcode_DD_CB_98_B:
+	ddcb_res 3, z80bc, 0xFF<<16, 24
+opcode_DD_CB_98_C:
+	ddcb_res 3, z80bc, 0xFF<<24, 16
+opcode_DD_CB_98_D:
+	ddcb_res 3, z80de, 0xFF<<16, 24
+opcode_DD_CB_98_E:
+	ddcb_res 3, z80de, 0xFF<<24, 16
+opcode_DD_CB_98_H:
+	ddcb_res 3, z80hl, 0xFF<<16, 24
+opcode_DD_CB_98_L:
+	ddcb_res 3, z80hl, 0xFF<<24, 16
+opcode_DD_CB_98_A:
+	ddcb_resa 3
+;@RES 4,(IX+N) -> reg
+opcode_DD_CB_A0_B:
+	ddcb_res 4, z80bc, 0xFF<<16, 24
+opcode_DD_CB_A0_C:
+	ddcb_res 4, z80bc, 0xFF<<24, 16
+opcode_DD_CB_A0_D:
+	ddcb_res 4, z80de, 0xFF<<16, 24
+opcode_DD_CB_A0_E:
+	ddcb_res 4, z80de, 0xFF<<24, 16
+opcode_DD_CB_A0_H:
+	ddcb_res 4, z80hl, 0xFF<<16, 24
+opcode_DD_CB_A0_L:
+	ddcb_res 4, z80hl, 0xFF<<24, 16
+opcode_DD_CB_A0_A:
+	ddcb_resa 4
+;@RES 5,(IX+N) -> reg
+opcode_DD_CB_A8_B:
+	ddcb_res 5, z80bc, 0xFF<<16, 24
+opcode_DD_CB_A8_C:
+	ddcb_res 5, z80bc, 0xFF<<24, 16
+opcode_DD_CB_A8_D:
+	ddcb_res 5, z80de, 0xFF<<16, 24
+opcode_DD_CB_A8_E:
+	ddcb_res 5, z80de, 0xFF<<24, 16
+opcode_DD_CB_A8_H:
+	ddcb_res 5, z80hl, 0xFF<<16, 24
+opcode_DD_CB_A8_L:
+	ddcb_res 5, z80hl, 0xFF<<24, 16
+opcode_DD_CB_A8_A:
+	ddcb_resa 5
+;@RES 6,(IX+N) -> reg
+opcode_DD_CB_B0_B:
+	ddcb_res 6, z80bc, 0xFF<<16, 24
+opcode_DD_CB_B0_C:
+	ddcb_res 6, z80bc, 0xFF<<24, 16
+opcode_DD_CB_B0_D:
+	ddcb_res 6, z80de, 0xFF<<16, 24
+opcode_DD_CB_B0_E:
+	ddcb_res 6, z80de, 0xFF<<24, 16
+opcode_DD_CB_B0_H:
+	ddcb_res 6, z80hl, 0xFF<<16, 24
+opcode_DD_CB_B0_L:
+	ddcb_res 6, z80hl, 0xFF<<24, 16
+opcode_DD_CB_B0_A:
+	ddcb_resa 6
+;@RES 7,(IX+N) -> reg
+opcode_DD_CB_B8_B:
+	ddcb_res 7, z80bc, 0xFF<<16, 24
+opcode_DD_CB_B8_C:
+	ddcb_res 7, z80bc, 0xFF<<24, 16
+opcode_DD_CB_B8_D:
+	ddcb_res 7, z80de, 0xFF<<16, 24
+opcode_DD_CB_B8_E:
+	ddcb_res 7, z80de, 0xFF<<24, 16
+opcode_DD_CB_B8_H:
+	ddcb_res 7, z80hl, 0xFF<<16, 24
+opcode_DD_CB_B8_L:
+	ddcb_res 7, z80hl, 0xFF<<24, 16
+opcode_DD_CB_B8_A:
+	ddcb_resa 7
+;@SET 0,(IX+N) -> reg
+opcode_DD_CB_C0_B:
+	ddcb_set 0, z80bc, 0xFF<<16, 24
+opcode_DD_CB_C0_C:
+	ddcb_set 0, z80bc, 0xFF<<24, 16
+opcode_DD_CB_C0_D:
+	ddcb_set 0, z80de, 0xFF<<16, 24
+opcode_DD_CB_C0_E:
+	ddcb_set 0, z80de, 0xFF<<24, 16
+opcode_DD_CB_C0_H:
+	ddcb_set 0, z80hl, 0xFF<<16, 24
+opcode_DD_CB_C0_L:
+	ddcb_set 0, z80hl, 0xFF<<24, 16
+opcode_DD_CB_C0_A:
+	ddcb_seta 0
+;@SET 1,(IX+N) -> reg
+opcode_DD_CB_C8_B:
+	ddcb_set 1, z80bc, 0xFF<<16, 24
+opcode_DD_CB_C8_C:
+	ddcb_set 1, z80bc, 0xFF<<24, 16
+opcode_DD_CB_C8_D:
+	ddcb_set 1, z80de, 0xFF<<16, 24
+opcode_DD_CB_C8_E:
+	ddcb_set 1, z80de, 0xFF<<24, 16
+opcode_DD_CB_C8_H:
+	ddcb_set 1, z80hl, 0xFF<<16, 24
+opcode_DD_CB_C8_L:
+	ddcb_set 1, z80hl, 0xFF<<24, 16
+opcode_DD_CB_C8_A:
+	ddcb_seta 1
+;@SET 2,(IX+N) -> reg
+opcode_DD_CB_D0_B:
+	ddcb_set 2, z80bc, 0xFF<<16, 24
+opcode_DD_CB_D0_C:
+	ddcb_set 2, z80bc, 0xFF<<24, 16
+opcode_DD_CB_D0_D:
+	ddcb_set 2, z80de, 0xFF<<16, 24
+opcode_DD_CB_D0_E:
+	ddcb_set 2, z80de, 0xFF<<24, 16
+opcode_DD_CB_D0_H:
+	ddcb_set 2, z80hl, 0xFF<<16, 24
+opcode_DD_CB_D0_L:
+	ddcb_set 2, z80hl, 0xFF<<24, 16
+opcode_DD_CB_D0_A:
+	ddcb_seta 2
+;@SET 3,(IX+N) -> reg
+opcode_DD_CB_D8_B:
+	ddcb_set 3, z80bc, 0xFF<<16, 24
+opcode_DD_CB_D8_C:
+	ddcb_set 3, z80bc, 0xFF<<24, 16
+opcode_DD_CB_D8_D:
+	ddcb_set 3, z80de, 0xFF<<16, 24
+opcode_DD_CB_D8_E:
+	ddcb_set 3, z80de, 0xFF<<24, 16
+opcode_DD_CB_D8_H:
+	ddcb_set 3, z80hl, 0xFF<<16, 24
+opcode_DD_CB_D8_L:
+	ddcb_set 3, z80hl, 0xFF<<24, 16
+opcode_DD_CB_D8_A:
+	ddcb_seta 3
+;@SET 4,(IX+N) -> reg
+opcode_DD_CB_E0_B:
+	ddcb_set 4, z80bc, 0xFF<<16, 24
+opcode_DD_CB_E0_C:
+	ddcb_set 4, z80bc, 0xFF<<24, 16
+opcode_DD_CB_E0_D:
+	ddcb_set 4, z80de, 0xFF<<16, 24
+opcode_DD_CB_E0_E:
+	ddcb_set 4, z80de, 0xFF<<24, 16
+opcode_DD_CB_E0_H:
+	ddcb_set 4, z80hl, 0xFF<<16, 24
+opcode_DD_CB_E0_L:
+	ddcb_set 4, z80hl, 0xFF<<24, 16
+opcode_DD_CB_E0_A:
+	ddcb_seta 4
+;@SET 5,(IX+N) -> reg
+opcode_DD_CB_E8_B:
+	ddcb_set 5, z80bc, 0xFF<<16, 24
+opcode_DD_CB_E8_C:
+	ddcb_set 5, z80bc, 0xFF<<24, 16
+opcode_DD_CB_E8_D:
+	ddcb_set 5, z80de, 0xFF<<16, 24
+opcode_DD_CB_E8_E:
+	ddcb_set 5, z80de, 0xFF<<24, 16
+opcode_DD_CB_E8_H:
+	ddcb_set 5, z80hl, 0xFF<<16, 24
+opcode_DD_CB_E8_L:
+	ddcb_set 5, z80hl, 0xFF<<24, 16
+opcode_DD_CB_E8_A:
+	ddcb_seta 5
+;@SET 6,(IX+N) -> reg
+opcode_DD_CB_F0_B:
+	ddcb_set 6, z80bc, 0xFF<<16, 24
+opcode_DD_CB_F0_C:
+	ddcb_set 6, z80bc, 0xFF<<24, 16
+opcode_DD_CB_F0_D:
+	ddcb_set 6, z80de, 0xFF<<16, 24
+opcode_DD_CB_F0_E:
+	ddcb_set 6, z80de, 0xFF<<24, 16
+opcode_DD_CB_F0_H:
+	ddcb_set 6, z80hl, 0xFF<<16, 24
+opcode_DD_CB_F0_L:
+	ddcb_set 6, z80hl, 0xFF<<24, 16
+opcode_DD_CB_F0_A:
+	ddcb_seta 6
+;@SET 7,(IX+N) -> reg
+opcode_DD_CB_F8_B:
+	ddcb_set 7, z80bc, 0xFF<<16, 24
+opcode_DD_CB_F8_C:
+	ddcb_set 7, z80bc, 0xFF<<24, 16
+opcode_DD_CB_F8_D:
+	ddcb_set 7, z80de, 0xFF<<16, 24
+opcode_DD_CB_F8_E:
+	ddcb_set 7, z80de, 0xFF<<24, 16
+opcode_DD_CB_F8_H:
+	ddcb_set 7, z80hl, 0xFF<<16, 24
+opcode_DD_CB_F8_L:
+	ddcb_set 7, z80hl, 0xFF<<24, 16
+opcode_DD_CB_F8_A:
+	ddcb_seta 7
 ;@POP IX
 opcode_DD_E1:
 .if FAST_Z80SP
@@ -7652,7 +8206,7 @@ opcode_DD_E1:
 	bic z80sp,z80sp,#1<<16
 .endif
 	strh r0,[z80xx,#2]
-	fetch 14
+	fetch 10
 ;@EX (SP),IX
 opcode_DD_E3:
 .if FAST_Z80SP
@@ -7675,17 +8229,17 @@ opcode_DD_E3:
 	mov r1,z80sp
 	writemem16
 .endif
-	fetch 23
+	fetch 19
 ;@PUSH IX
 opcode_DD_E5:
 	ldr r2,[z80xx]
 	opPUSHreg r2
-	fetch 15
+	fetch 11
 ;@JP (IX)
 opcode_DD_E9:
 	ldrh r0,[z80xx,#2]
 	rebasepc
-	fetch 8
+	fetch 4
 ;@LD SP,IX
 opcode_DD_F9:
 .if FAST_Z80SP
@@ -7694,7 +8248,7 @@ opcode_DD_F9:
 .else
 	ldrh z80sp,[z80xx,#2]
 .endif
-	fetch 10
+	fetch 6
 
 ;@##################################
 ;@##################################
@@ -7715,9 +8269,9 @@ opcode_ED_40:
 	opIN_C
 	and z80bc,z80bc,#0xFF<<16
 	orr z80bc,z80bc,r0, lsl #24
-	sub r1,opcodes,#OFFS_PZS
+	ldr r1,[cpucontext,#tables]
 	ldrb r0,[r1,r0]
-	and z80f,z80f,#1<<CFlag
+	bic z80f,z80f,#0xfd
 	orr z80f,z80f,r0
 	fetch 12
 ;@OUT (C),B
@@ -7741,8 +8295,9 @@ opcode_ED_43:
 ;@NEG
 opcode_ED_44:
 	rsbs z80a,z80a,#0
-	mrs z80f,cpsr
-	mov z80f,z80f,lsr#28					;@S,Z,V&C
+	mrs r0,cpsr
+	bic z80f,z80f,#0xff
+	orr z80f,z80f,r0,lsr#28				;@ NZCV, R kept
 	eor z80f,z80f,#(1<<CFlag)|(1<<NFlag)	;@invert C and set n.
 	tst z80a,#0x0F000000					;@H, correct
 	orrne z80f,z80f,#1<<HFlag
@@ -7765,9 +8320,9 @@ opcode_ED_48:
 	opIN_C
 	and z80bc,z80bc,#0xFF<<24
 	orr z80bc,z80bc,r0, lsl #16
-	sub r1,opcodes,#OFFS_PZS
+	ldr r1,[cpucontext,#tables]
 	ldrb r0,[r1,r0]
-	and z80f,z80f,#1<<CFlag
+	bic z80f,z80f,#0xfd
 	orr z80f,z80f,r0
 	fetch 12
 ;@OUT (C),C
@@ -7804,7 +8359,11 @@ opcode_ED_4D:
 ;@LD R,A
 opcode_ED_4F:
 	mov r0,z80a,lsr#24
-	strb r0,[cpucontext,#z80r]
+	and r1,r0,#0x7F
+	mov r1,r1,lsl#1
+	orr r1,r1,r0,lsr#7		;@ A -> (count << 1) | bit7 latch
+	bic z80f,z80f,#0xff000000
+	orr z80f,z80f,r1,lsl#24
 	fetch 9
 
 ;@IN D,(C)
@@ -7812,9 +8371,9 @@ opcode_ED_50:
 	opIN_C
 	and z80de,z80de,#0xFF<<16
 	orr z80de,z80de,r0, lsl #24
-	sub r1,opcodes,#OFFS_PZS
+	ldr r1,[cpucontext,#tables]
 	ldrb r0,[r1,r0]
-	and z80f,z80f,#1<<CFlag
+	bic z80f,z80f,#0xfd
 	orr z80f,z80f,r0
 	fetch 12
 ;@OUT (C),D
@@ -7842,21 +8401,22 @@ opcode_ED_56:
 opcode_ED_57:
 	ldr z80a,[cpucontext,#z80i]
 	tst z80a,#0xFF000000
-	and z80f,z80f,#(1<<CFlag)
+	bic z80f,z80f,#0xfd
 	orreq z80f,z80f,#(1<<ZFlag)
 	orrmi z80f,z80f,#(1<<SFlag)
 	ldrb r0,[cpucontext,#z80if]
 	tst r0,#Z80_IF2
 	orrne z80f,z80f,#(1<<VFlag)
+	copyFlag35 z80a
 	fetch 9
 ;@IN E,(C)
 opcode_ED_58:
 	opIN_C
 	and z80de,z80de,#0xFF<<24
 	orr z80de,z80de,r0, lsl #16
-	sub r1,opcodes,#OFFS_PZS
+	ldr r1,[cpucontext,#tables]
 	ldrb r0,[r1,r0]
-	and z80f,z80f,#1<<CFlag
+	bic z80f,z80f,#0xfd
 	orr z80f,z80f,r0
 	fetch 12
 ;@OUT (C),E
@@ -7883,27 +8443,27 @@ opcode_ED_5E:
 	fetch 8
 ;@LD A,R
 opcode_ED_5F:
-	ldrb r0,[cpucontext,#z80r]
-	and r0,r0,#0x80
-	rsb r1,z80_icount,#0
-	and r1,r1,#0x7F
-	orr r0,r0,r1
-	movs z80a,r0, lsl #24
-	and z80f,z80f,#1<<CFlag
+	mov r0,z80f,lsr#24
+	and r1,r0,#1
+	mov r1,r1,lsl#7
+	orr r1,r1,r0,lsr#1		;@ (count << 1) | latch -> count | latch << 7
+	movs z80a,r1, lsl #24
+	bic z80f,z80f,#0xfd
 	orrmi z80f,z80f,#(1<<SFlag)
 	orreq z80f,z80f,#(1<<ZFlag)
 	ldrb r0,[cpucontext,#z80if]
 	tst r0,#Z80_IF2
 	orrne z80f,z80f,#(1<<VFlag)
+	copyFlag35 z80a
 	fetch 9
 ;@IN H,(C)
 opcode_ED_60:
 	opIN_C
 	and z80hl,z80hl,#0xFF<<16
 	orr z80hl,z80hl,r0, lsl #24
-	sub r1,opcodes,#OFFS_PZS
+	ldr r1,[cpucontext,#tables]
 	ldrb r0,[r1,r0]
-	and z80f,z80f,#1<<CFlag
+	bic z80f,z80f,#0xfd
 	orr z80f,z80f,r0
 	fetch 12
 ;@OUT (C),H
@@ -7922,9 +8482,9 @@ opcode_ED_67:
 	bic z80a,z80a,#0x0F000000
 	orr z80a,z80a,r1,lsr#4
 	writemem8HL
-	sub r1,opcodes,#OFFS_PZS
+	ldr r1,[cpucontext,#tables]
 	ldrb r0,[r1,z80a, lsr #24]
-	and z80f,z80f,#1<<CFlag
+	bic z80f,z80f,#0xfd
 	orr z80f,z80f,r0
 	fetch 18
 ;@IN L,(C)
@@ -7932,8 +8492,8 @@ opcode_ED_68:
 	opIN_C
 	and z80hl,z80hl,#0xFF<<24
 	orr z80hl,z80hl,r0, lsl #16
-	and z80f,z80f,#1<<CFlag
-	sub r1,opcodes,#OFFS_PZS
+	bic z80f,z80f,#0xfd
+	ldr r1,[cpucontext,#tables]
 	ldrb r0,[r1,r0]
 	orr z80f,z80f,r0
 	fetch 12
@@ -7955,16 +8515,16 @@ opcode_ED_6F:
 	orr z80a,z80a,r0,lsl#16
 	and z80a,z80a,#0xFF000000
 	writemem8HL
-	sub r1,opcodes,#OFFS_PZS
+	ldr r1,[cpucontext,#tables]
 	ldrb r0,[r1,z80a, lsr #24]
-	and z80f,z80f,#1<<CFlag
+	bic z80f,z80f,#0xfd
 	orr z80f,z80f,r0
 	fetch 18
 ;@IN F,(C)
 opcode_ED_70:
 	opIN_C
-	and z80f,z80f,#1<<CFlag
-	sub r1,opcodes,#OFFS_PZS
+	bic z80f,z80f,#0xfd
+	ldr r1,[cpucontext,#tables]
 	ldrb r0,[r1,r0]
 	orr z80f,z80f,r0
 	fetch 12
@@ -8001,10 +8561,10 @@ opcode_ED_73:
 opcode_ED_78:
 	opIN_C
 	mov z80a,r0, lsl #24
-	and z80f,z80f,#1<<CFlag
-	sub r1,opcodes,#OFFS_PZS
-	ldrb r0,[r1,r0]
-	orr z80f,z80f,r0
+	bic z80f,z80f,#0xfd
+	ldr r1,[cpucontext,#tables]
+	ldrb r1,[r1,r0]
+	orr z80f,z80f,r1
 	fetch 12
 ;@OUT (C),A
 opcode_ED_79:
@@ -8038,14 +8598,15 @@ opcode_ED_A0:
 	copymem8HL_DE
 	add z80hl,z80hl,#1<<16
 	add z80de,z80de,#1<<16
-	add r0,z80f,z80a			;@ value read stored in z80f
-	and z80f,z80f,#(1<<SFlag)|(1<<ZFlag)|(1<<CFlag)
+	add r0,z80a,z80f,lsl#16		;@ value read stashed in z80f bits 8-15
+	bic z80f,z80f,#0xf1
+	bic z80f,z80f,#0xff00
 	subs z80bc,z80bc,#1<<16
 	orrne z80f,z80f,#1<<VFlag
-	tst r0,#0x8<<24
-	orrne z80f,z80f,#(1<<Flag3)
+	tst r0,#0x8<<24				;@ copies bits 3+1 instead of 3+5
+	orrne z80f,z80f,#1<<Flag3
 	tst r0,#0x2<<24
-	orrne z80f,z80f,#(1<<Flag5)
+	orrne z80f,z80f,#1<<Flag5
 	fetch 16
 ;@CPI
 opcode_ED_A1:
@@ -8053,14 +8614,14 @@ opcode_ED_A1:
 	add z80hl,z80hl,#0x00010000
 	mov r1,z80a,lsl#4
 	subs r2,z80a,r0,lsl#24
-	and z80f,z80f,#1<<CFlag
+	bic z80f,z80f,#0xfd
 	orr z80f,z80f,#1<<NFlag
 	orrmi z80f,z80f,#1<<SFlag
 	orreq z80f,z80f,#1<<ZFlag
 	cmp r1,r0,lsl#28
 	orrcc z80f,z80f,#1<<HFlag
 	subcc r2,r2,#1
-	tst r2,#0x8<<24
+	tst r2,#0x8<<24				;@ copies bits 3+1 instead of 3+5
 	orrne z80f,z80f,#1<<Flag3
 	tst r2,#0x2<<24
 	orrne z80f,z80f,#1<<Flag5
@@ -8070,31 +8631,47 @@ opcode_ED_A1:
 ;@INI
 opcode_ED_A2:
 	opIN_C
-	and z80f,r0,#0x80
-	mov z80f,z80f,lsr#2						;@NFlag set by bit 7
-;@	mov r1,z80bc,lsl#8
-;@	add r1,r1,#0x01000000
-;@	adds r1,r1,r0,lsl#24
-;@	orrcs z80f,z80f,#(1<<CFlag)|(1<<HFlag)	;@ CF & HF set if (HL) + ((C+1) & 0xFF) > 0xFF
-	writemem8HL
-	add z80hl,z80hl,#1<<16
 	sub z80bc,z80bc,#1<<24
-	tst z80bc,#0xFF<<24
+	and r2,r0,#0x80
+	bic z80f,z80f,#0xff
+	orr z80f,z80f,r2,lsr#(7-NFlag)					;@NFlag set by bit 7
+	mov r1,z80bc,lsl#8
+	add r1,r1,#0x01000000
+	adds r1,r1,r0,lsl#24
+	orrcs z80f,z80f,#(1<<CFlag)|(1<<HFlag)	;@ CF & HF set if (HL) + (C+1) & 0xFF) > 0xFF
+	and r2,r1,#0x07<<24			;@ ((HL)+(C+1))&7^B
+	ldr r1,[cpucontext,#tables]
+	eor r2,r2,z80bc
+	ldrb r2,[r1,r2,lsr #24]			;@ PZS[((HL)+(C+1))&7^B] & VF
+	copyFlag35 z80bc
+	and r2,r2,#1<<VFlag
+	orr z80f,z80f,r2
+	movs r1,z80bc,asr#24			;@ B
 	orrmi z80f,z80f,#1<<SFlag
 	orreq z80f,z80f,#1<<ZFlag
+	writemem8HL
+	add z80hl,z80hl,#1<<16
 	fetch 16
 
 ;@OUTI
 opcode_ED_A3:
 	readmem8HL
 	add z80hl,z80hl,#1<<16
-	and z80f,r0,#0x80
-	mov z80f,z80f,lsr#2						;@NFlag set by bit 7
-	mov r1,z80hl,lsl#8
+	sub z80bc,z80bc,#1<<24
+	and r2,r0,#0x80
+	bic z80f,z80f,#0xff
+	orr z80f,z80f,r2,lsr#(7-NFlag)					;@NFlag set by bit 7
+	mov r1,z80hl,lsl#8			;@ (HL)+L
 	adds r1,r1,r0,lsl#24
 	orrcs z80f,z80f,#(1<<CFlag)|(1<<HFlag)	;@ CF & HF set if (HL)+L > 0xFF
-	sub z80bc,z80bc,#1<<24
-	tst z80bc,#0xFF<<24
+	and r2,r1,#0x07<<24			;@ ((HL)+L)&7^B
+	ldr r1,[cpucontext,#tables]
+	eor r2,r2,z80bc
+	ldrb r2,[r1,r2,lsr #24]			;@ PZS[((HL)+L)&7^B] & VF
+	copyFlag35 z80bc
+	and r2,r2,#1<<VFlag
+	orr z80f,z80f,r2
+	movs r1,z80bc,asr#24			;@ B
 	orrmi z80f,z80f,#1<<SFlag
 	orreq z80f,z80f,#1<<ZFlag
 	mov r1,r0
@@ -8106,14 +8683,15 @@ opcode_ED_A8:
 	copymem8HL_DE
 	sub z80hl,z80hl,#1<<16
 	sub z80de,z80de,#1<<16
-	add r0,z80f,z80a			;@ value read stored in z80f
-	and z80f,z80f,#(1<<SFlag)|(1<<ZFlag)|(1<<CFlag)
+	add r0,z80a,z80f,lsl#16		;@ value read stashed in z80f bits 8-15
+	bic z80f,z80f,#0xf1
+	bic z80f,z80f,#0xff00
 	subs z80bc,z80bc,#1<<16
 	orrne z80f,z80f,#1<<VFlag
-	tst r0,#0x8<<24
-	orrne z80f,z80f,#(1<<Flag3)
+	tst r0,#0x8<<24				;@ copies bits 3+1 instead of 3+5
+	orrne z80f,z80f,#1<<Flag3
 	tst r0,#0x2<<24
-	orrne z80f,z80f,#(1<<Flag5)
+	orrne z80f,z80f,#1<<Flag5
 	fetch 16
 
 ;@CPD
@@ -8122,14 +8700,14 @@ opcode_ED_A9:
 	sub z80hl,z80hl,#1<<16
 	mov r1,z80a,lsl#4
 	subs r2,z80a,r0,lsl#24
-	and z80f,z80f,#1<<CFlag
+	bic z80f,z80f,#0xfd
 	orr z80f,z80f,#1<<NFlag
 	orrmi z80f,z80f,#1<<SFlag
 	orreq z80f,z80f,#1<<ZFlag
 	cmp r1,r0,lsl#28
 	orrcc z80f,z80f,#1<<HFlag
 	subcc r2,r2,#1
-	tst r2,#0x8<<24
+	tst r2,#0x8<<24				;@ copies bits 3+1 instead of 3+5
 	orrne z80f,z80f,#1<<Flag3
 	tst r2,#0x2<<24
 	orrne z80f,z80f,#1<<Flag5
@@ -8140,33 +8718,49 @@ opcode_ED_A9:
 ;@IND
 opcode_ED_AA:
 	opIN_C
-	and z80f,r0,#0x80
-	mov z80f,z80f,lsr#2						;@NFlag set by bit 7
-;@	mov r1,z80bc,lsl#8
-;@	sub r1,r1,#0x01000000
-;@	adds r1,r1,r0,lsl#24
-;@	orrcs z80f,z80f,#(1<<CFlag)|(1<<HFlag)	;@ CF & HF set if (HL) + ((C-1) & 0xFF) > 0xFF
-	writemem8HL
-	sub z80hl,z80hl,#1<<16
 	sub z80bc,z80bc,#1<<24
-	tst z80bc,#0xFF<<24
+	and r2,r0,#0x80
+	bic z80f,z80f,#0xff
+	orr z80f,z80f,r2,lsr#(7-NFlag)					;@NFlag set by bit 7
+	mov r1,z80bc,lsl#8
+	sub r1,r1,#0x01000000
+	adds r1,r1,r0,lsl#24
+	orrcs z80f,z80f,#(1<<CFlag)|(1<<HFlag)	;@ CF & HF set if (HL) + ((C-1) & 0xFF) > 0xFF
+	and r2,r1,#0x07<<24			;@ ((HL)+(C-1)&7^B
+	ldr r1,[cpucontext,#tables]
+	eor r2,r2,z80bc
+	ldrb r2,[r1,r2,lsr #24]			;@ PZS[((HL)+(C-1))&7^B] & VF
+	copyFlag35 z80bc
+	and r2,r2,#1<<VFlag
+	orr z80f,z80f,r2
+	movs r1,z80bc,asr#24			;@ B
 	orrmi z80f,z80f,#1<<SFlag
 	orreq z80f,z80f,#1<<ZFlag
+	writemem8HL
+	sub z80hl,z80hl,#1<<16
 	fetch 16
 
 ;@OUTD
 opcode_ED_AB:
 	readmem8HL
 	sub z80hl,z80hl,#1<<16
-	and z80f,r0,#0x80
-	mov z80f,z80f,lsr#2						;@NFlag set by bit 7
-	mov r1,z80hl,lsl#8
-	adds r1,r1,r0,lsl#24
-	orrcs z80f,z80f,#(1<<CFlag)|(1<<HFlag)	;@ CF & HF set if r0+HL > 0xFF
 	sub z80bc,z80bc,#1<<24
-	tst z80bc,#0xFF<<24
+	and r2,r0,#0x80
+	bic z80f,z80f,#0xff
+	orr z80f,z80f,r2,lsr#(7-NFlag)					;@NFlag set by bit 7
+	mov r1,z80hl,lsl#8			;@ (HL)+L
+	adds r1,r1,r0,lsl#24
+	orrcs z80f,z80f,#(1<<CFlag)|(1<<HFlag)	;@ CF & HF set if (HL)+L > 0xFF
+	and r2,r1,#0x07<<24			;@ ((HL)+L)&7^B
+	eor r2,r2,z80bc
+	ldr r1,[cpucontext,#tables]
+	ldrb r2,[r1,r2,lsr #24]			;@ PZS[((HL)+L)&7^B] & VF
+	and r2,r2,#1<<VFlag
+	orr z80f,z80f,r2
+	movs r1,z80bc,asr#24			;@ B
 	orrmi z80f,z80f,#1<<SFlag
 	orreq z80f,z80f,#1<<ZFlag
+	copyFlag35 z80bc
 	mov r1,r0
 	opOUT_C
 	fetch 16
@@ -8175,16 +8769,21 @@ opcode_ED_B0:
 	copymem8HL_DE
 	add z80hl,z80hl,#1<<16
 	add z80de,z80de,#1<<16
-	add r0,z80f,z80a			;@ value read stored in z80f
-	and z80f,z80f,#(1<<SFlag)|(1<<ZFlag)|(1<<CFlag)
+	add r0,z80a,z80f,lsl#16		;@ value read stashed in z80f bits 8-15
+	bic z80f,z80f,#0xf1
+	bic z80f,z80f,#0xff00
 	subs z80bc,z80bc,#1<<16
-	orrne z80f,z80f,#1<<VFlag
-	subne z80pc,z80pc,#2
-	subne z80_icount,z80_icount,#5
-	tst r0,#0x8<<24
-	orrne z80f,z80f,#(1<<Flag3)
+	beq opcode_ED_B0_done
+	orr z80f,z80f,#1<<VFlag
+	sub z80pc,z80pc,#2
+	sub z80_icount,z80_icount,#5
+	copyFlag35_PC
+	fetch 16
+opcode_ED_B0_done:
+	tst r0,#0x8<<24				;@ copies bits 3+1 instead of 3+5
+	orrne z80f,z80f,#1<<Flag3
 	tst r0,#0x2<<24
-	orrne z80f,z80f,#(1<<Flag5)
+	orrne z80f,z80f,#1<<Flag5
 	fetch 16
 
 ;@CPIR
@@ -8193,59 +8792,87 @@ opcode_ED_B1:
 	add z80hl,z80hl,#1<<16    
 	mov r1,z80a,lsl#4
 	subs r2,z80a,r0,lsl#24
-	and z80f,z80f,#1<<CFlag
+	bic z80f,z80f,#0xfd
 	orr z80f,z80f,#1<<NFlag
 	orrmi z80f,z80f,#1<<SFlag
 	orreq z80f,z80f,#1<<ZFlag
 	cmp r1,r0,lsl#28
 	orrcc z80f,z80f,#1<<HFlag
 	subcc r2,r2,#1
-	tst r2,#0x8<<24
+	tst r2,#0x8<<24				;@ copies bits 3+1 instead of 3+5
 	orrne z80f,z80f,#1<<Flag3
 	tst r2,#0x2<<24
 	orrne z80f,z80f,#1<<Flag5
 	subs z80bc,z80bc,#1<<16
-	bne opcode_ED_B1_decpc
-	fetch 16
-opcode_ED_B1_decpc:
+	beq opcode_ED_B1_done
 	orr z80f,z80f,#1<<VFlag
 	tst z80f,#1<<ZFlag
-	subeq z80pc,z80pc,#2
-	subeq z80_icount,z80_icount,#5
+	bne opcode_ED_B1_done
+	sub z80pc,z80pc,#2
+	sub z80_icount,z80_icount,#5
+	bic z80f,z80f,#(1<<Flag3)|(1<<Flag5)
+	copyFlag35_PC
+opcode_ED_B1_done:
 	fetch 16
 ;@INIR
 opcode_ED_B2:
 	opIN_C
-	and z80f,r0,#0x80
-	mov z80f,z80f,lsr#2						;@NFlag set by bit 7
-;@	mov r1,z80bc,lsl#8
-;@	add r1,r1,#0x01000000
-;@	adds r1,r1,r0,lsl#24
-;@	orrcs z80f,z80f,#(1<<CFlag)|(1<<HFlag)	;@ CF & HF set if (HL) + ((C+1) & 0xFF) > 0xFF
-	writemem8HL
-	add z80hl,z80hl,#1<<16
 	sub z80bc,z80bc,#1<<24
-	tst z80bc,#0xFF<<24
+	and r2,r0,#0x80
+	bic z80f,z80f,#0xff
+	orr z80f,z80f,r2,lsr#(7-NFlag)					;@NFlag set by bit 7
+	mov r1,z80bc,lsl#8
+	add r1,r1,#0x01000000
+	adds r1,r1,r0,lsl#24
+	orrcs z80f,z80f,#(1<<CFlag)|(1<<HFlag)	;@ CF & HF set if (HL) + ((C+1) & 0xFF) > 0xFF
+	and r2,r1,#0x07<<24			;@ ((HL)+(C+1))&7^B
+	ldr r1,[cpucontext,#tables]
+	eor r2,r2,z80bc
+	ldrb r2,[r1,r2,lsr #24]			;@ PZS[((HL)+(C+1))&7^B] & VF
+	copyFlag35 z80bc
+	and r2,r2,#1<<VFlag
+	orr z80f,z80f,r2
+	movs r1,z80bc,asr#24			;@ B
 	orrmi z80f,z80f,#1<<SFlag
 	orreq z80f,z80f,#1<<ZFlag
-	subne z80pc,z80pc,#2
-	subne z80_icount,z80_icount,#5
+	beq opcode_ED_B2_write
+	sub z80pc,z80pc,#2
+	sub z80_icount,z80_icount,#5
+	bic z80f,z80f,#(1<<Flag3)|(1<<Flag5)
+	copyFlag35_PC
+	bl ed_io_r_fix
+opcode_ED_B2_write:
+	writemem8HL
+	add z80hl,z80hl,#1<<16
 	fetch 16
 ;@OTIR
 opcode_ED_B3:
 	readmem8HL
 	add z80hl,z80hl,#1<<16
-	and z80f,r0,#0x80
-	mov z80f,z80f,lsr#2						;@NFlag set by bit 7
+	sub z80bc,z80bc,#1<<24
+	and r2,r0,#0x80
+	bic z80f,z80f,#0xff
+	orr z80f,z80f,r2,lsr#(7-NFlag)					;@NFlag set by bit 7
 	mov r1,z80hl,lsl#8
 	adds r1,r1,r0,lsl#24
-	orrcs z80f,z80f,#(1<<CFlag)|(1<<HFlag)	;@ CF & HF set if r0+HL > 0xFF
-	sub z80bc,z80bc,#1<<24
-	tst z80bc,#0xFF<<24
+	orrcs z80f,z80f,#(1<<CFlag)|(1<<HFlag)	;@ CF & HF set if (HL)+L > 0xFF
+	and r2,r1,#0x07<<24			;@ ((HL)+L)&7^B
+	ldr r1,[cpucontext,#tables]
+	eor r2,r2,z80bc
+	ldrb r2,[r1,r2,lsr #24]			;@ PZS[((HL)+L)&7^B] & VF
+	copyFlag35 z80bc
+	and r2,r2,#1<<VFlag
+	orr z80f,z80f,r2
+	movs r1,z80bc,asr#24			;@ B
 	orrmi z80f,z80f,#1<<SFlag
 	orreq z80f,z80f,#1<<ZFlag
-	subne z80pc,z80pc,#2
-	subne z80_icount,z80_icount,#5
+	beq opcode_ED_B3_write
+	sub z80pc,z80pc,#2
+	sub z80_icount,z80_icount,#5
+	bic z80f,z80f,#(1<<Flag3)|(1<<Flag5)
+	copyFlag35_PC
+	bl ed_io_r_fix
+opcode_ED_B3_write:
 	mov r1,r0
 	opOUT_C
 	fetch 16
@@ -8254,16 +8881,21 @@ opcode_ED_B8:
 	copymem8HL_DE
 	sub z80hl,z80hl,#1<<16
 	sub z80de,z80de,#1<<16
-	add r0,z80f,z80a			;@ value read stored in z80f
-	and z80f,z80f,#(1<<SFlag)|(1<<ZFlag)|(1<<CFlag)
+	add r0,z80a,z80f,lsl#16		;@ value read stashed in z80f bits 8-15
+	bic z80f,z80f,#0xf1
+	bic z80f,z80f,#0xff00
 	subs z80bc,z80bc,#1<<16
-	orrne z80f,z80f,#1<<VFlag
-	subne z80pc,z80pc,#2
-	subne z80_icount,z80_icount,#5
-	tst r0,#0x8<<24
-	orrne z80f,z80f,#(1<<Flag3)
+	beq opcode_ED_B8_done
+	orr z80f,z80f,#1<<VFlag
+	sub z80pc,z80pc,#2
+	sub z80_icount,z80_icount,#5
+	copyFlag35_PC
+	fetch 16
+opcode_ED_B8_done:
+	tst r0,#0x8<<24				;@ copies bits 3+1 instead of 3+5
+	orrne z80f,z80f,#1<<Flag3
 	tst r0,#0x2<<24
-	orrne z80f,z80f,#(1<<Flag5)
+	orrne z80f,z80f,#1<<Flag5
 	fetch 16
 
 ;@CPDR
@@ -8272,62 +8904,124 @@ opcode_ED_B9:
 	sub z80hl,z80hl,#1<<16
 	mov r1,z80a,lsl#4
 	subs r2,z80a,r0,lsl#24
-	and z80f,z80f,#1<<CFlag
+	bic z80f,z80f,#0xfd
 	orr z80f,z80f,#1<<NFlag
 	orrmi z80f,z80f,#1<<SFlag
 	orreq z80f,z80f,#1<<ZFlag
 	cmp r1,r0,lsl#28
 	orrcc z80f,z80f,#1<<HFlag
 	subcc r2,r2,#1
-	tst r2,#0x8<<24
+	tst r2,#0x8<<24				;@ copies bits 3+1 instead of 3+5
 	orrne z80f,z80f,#1<<Flag3
 	tst r2,#0x2<<24
 	orrne z80f,z80f,#1<<Flag5
 	subs z80bc,z80bc,#1<<16
-	bne opcode_ED_B9_decpc
-	fetch 16
-opcode_ED_B9_decpc:
+	beq opcode_ED_B9_done
 	orr z80f,z80f,#1<<VFlag
 	tst z80f,#1<<ZFlag
-	subeq z80pc,z80pc,#2
-	subeq z80_icount,z80_icount,#5
+	bne opcode_ED_B9_done
+	sub z80pc,z80pc,#2
+	sub z80_icount,z80_icount,#5
+	bic z80f,z80f,#(1<<Flag3)|(1<<Flag5)
+	copyFlag35_PC
+opcode_ED_B9_done:
 	fetch 16
 ;@INDR
 opcode_ED_BA:
 	opIN_C
-	and z80f,r0,#0x80
-	mov z80f,z80f,lsr#2						;@NFlag set by bit 7
-;@	mov r1,z80bc,lsl#8
-;@	sub r1,r1,#0x01000000
-;@	adds r1,r1,r0,lsl#24
-;@	orrcs z80f,z80f,#(1<<CFlag)|(1<<HFlag)	;@ CF & HF set if (HL) + ((C-1) & 0xFF) > 0xFF
-	writemem8HL
-	sub z80hl,z80hl,#1<<16
 	sub z80bc,z80bc,#1<<24
-	tst z80bc,#0xFF<<24
+	and r2,r0,#0x80
+	bic z80f,z80f,#0xff
+	orr z80f,z80f,r2,lsr#(7-NFlag)					;@NFlag set by bit 7
+	mov r1,z80bc,lsl#8
+	sub r1,r1,#0x01000000
+	adds r1,r1,r0,lsl#24
+	orrcs z80f,z80f,#(1<<CFlag)|(1<<HFlag)	;@ CF & HF set if (HL) + ((C-1) & 0xFF) > 0xFF
+	and r2,r1,#0x07<<24			;@ ((HL)+(C-1))&7^B
+	ldr r1,[cpucontext,#tables]
+	eor r2,r2,z80bc
+	ldrb r2,[r1,r2,lsr #24]			;@ PZS[((HL)+(C-1))&7^B] & VF
+	copyFlag35 z80bc
+	and r2,r2,#1<<VFlag
+	orr z80f,z80f,r2
+	movs r1,z80bc,asr#24			;@ B
 	orrmi z80f,z80f,#1<<SFlag
 	orreq z80f,z80f,#1<<ZFlag
-	subne z80pc,z80pc,#2
-	subne z80_icount,z80_icount,#5
+	beq opcode_ED_BA_write
+	sub z80pc,z80pc,#2
+	sub z80_icount,z80_icount,#5
+	bic z80f,z80f,#(1<<Flag3)|(1<<Flag5)
+	copyFlag35_PC
+	bl ed_io_r_fix
+opcode_ED_BA_write:
+	writemem8HL
+	sub z80hl,z80hl,#1<<16
 	fetch 16
 ;@OTDR
 opcode_ED_BB:
 	readmem8HL
 	sub z80hl,z80hl,#1<<16
-	and z80f,r0,#0x80
-	mov z80f,z80f,lsr#2						;@NFlag set by bit 7
+	sub z80bc,z80bc,#1<<24
+	and r2,r0,#0x80
+	bic z80f,z80f,#0xff
+	orr z80f,z80f,r2,lsr#(7-NFlag)					;@NFlag set by bit 7
 	mov r1,z80hl,lsl#8
 	adds r1,r1,r0,lsl#24
-	orrcs z80f,z80f,#(1<<CFlag)|(1<<HFlag)	;@ CF & HF set if r0+HL > 0xFF
-	sub z80bc,z80bc,#1<<24
-	tst z80bc,#0xFF<<24
+	orrcs z80f,z80f,#(1<<CFlag)|(1<<HFlag)	;@ CF & HF set if (HL)+L > 0xFF
+	and r2,r1,#0x07<<24			;@ ((HL)+L)&7^B
+	ldr r1,[cpucontext,#tables]
+	eor r2,r2,z80bc
+	ldrb r2,[r1,r2,lsr #24]			;@ PZS[((HL)+L)&7^B] & VF
+	copyFlag35 z80bc
+	and r2,r2,#1<<VFlag
+	orr z80f,z80f,r2
+	movs r1,z80bc,asr#24			;@ B
 	orrmi z80f,z80f,#1<<SFlag
 	orreq z80f,z80f,#1<<ZFlag
-	subne z80pc,z80pc,#2
-	subne z80_icount,z80_icount,#5
+	beq opcode_ED_BB_write
+	sub z80pc,z80pc,#2
+	sub z80_icount,z80_icount,#5
+	bic z80f,z80f,#(1<<Flag3)|(1<<Flag5)
+	copyFlag35_PC
+	bl ed_io_r_fix
+opcode_ED_BB_write:
 	mov r1,r0
 	opOUT_C
 	fetch 16
+
+;@ XOR the parity of the low three bits of r1 into the V flag.
+.macro parity3V r
+	eor r2,\r,\r,lsr#1
+	eor r2,r2,\r,lsr#2
+	and r2,r2,#1<<24
+	eor z80f,z80f,r2,lsr#(24-VFlag)
+.endm
+
+;@ Repeat-time undocumented-flag fix for the IN/OUT block ops.  On entry r0
+;@ holds the transferred byte (only bit 7 matters), z80bc holds B, and the
+;@ carry flag records whether the byte-plus-counter sum overflowed.  Clobbers
+;@ r1/r2/z80f and returns to the caller's write-and-fetch.
+ed_io_r_fix:
+	tst z80f,#1<<CFlag
+	beq ed_io_r_fix_noc
+	bic z80f,z80f,#1<<HFlag
+	tst r0,#0x80
+	beq ed_io_r_fix_add
+	sub r1,z80bc,#1<<24
+	parity3V r1
+	tst z80bc,#0x0F<<24
+	orreq z80f,z80f,#1<<HFlag
+	bx lr
+ed_io_r_fix_add:
+	add r1,z80bc,#1<<24
+	parity3V r1
+	and r1,z80bc,#0x0F<<24
+	cmp r1,#0x0F<<24
+	orreq z80f,z80f,#1<<HFlag
+	bx lr
+ed_io_r_fix_noc:
+	parity3V z80bc
+	bx lr
 ;@##################################
 ;@##################################
 ;@###  opcodes FD  #########################

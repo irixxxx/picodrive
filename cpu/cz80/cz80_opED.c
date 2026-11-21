@@ -508,11 +508,11 @@ OP_LDXR:
 		if ((zA + val) & 0x08) F |= XF;
 		if (zBC)
 		{
-			zF = F | VF;
 			PC -= 2;
-#if CZ80_EMULATE_R_EXACTLY
-			zR--;
-#endif
+			/* the repeating form takes the undocumented bits from PC */
+			if (zRealPC & 0x0800) F |= XF; else F &= ~XF;
+			if (zRealPC & 0x2000) F |= YF; else F &= ~YF;
+			zF = F | VF;
 			ADD_CYCLES(4)
 			goto Cz80_Exec;
 		}
@@ -580,9 +580,10 @@ OP_CPXR:
 		if (zBC && !(F & ZF))
 		{
 			PC -= 2;
-#if CZ80_EMULATE_R_EXACTLY
-			zR--;
-#endif
+			/* the repeating form takes the undocumented bits from PC */
+			if (zRealPC & 0x0800) F |= XF; else F &= ~XF;
+			if (zRealPC & 0x2000) F |= YF; else F &= ~YF;
+			zF = F;
 			ADD_CYCLES(4)
 			goto Cz80_Exec;
 		}
@@ -597,16 +598,18 @@ OP_CPXR:
 		val = IN(zBC);
 		zB--;
 		WRITE_MEM8(zHL++, val);
+		res = ((UINT32)(zC + 1) & 0xff) + (UINT32)val;
 		goto OP_INX;
 
 	OPED(0xaa): // IND
 		val = IN(zBC);
 		zB--;
 		WRITE_MEM8(zHL--, val);
+		res = ((UINT32)(zC - 1) & 0xff) + (UINT32)val;
 
 OP_INX:
 		F = SZ[zB];
-		res = ((UINT32)(zC - 1) & 0xff) + (UINT32)val;
+		/* res is the truncated (C +/- 1) + val, so res < val is the carry */
 		if (val & SF) F |= NF;
 		if (res < val) F |= HF | CF;
 		F |= SZP[(UINT8)(res & 0x07) ^ zB] & PF;
@@ -625,6 +628,7 @@ OP_INX:
 			WRITE_MEM8(zHL++, val);
 			USE_CYCLES(21)
 		} while (zB && (CPU->ICount > -4) && !CPU->Status);
+		res = ((UINT32)(zC + 1) & 0xff) + (UINT32)val;
 		goto OP_INXR;
 
 	OPED(0xba): // INDR
@@ -635,23 +639,42 @@ OP_INX:
 			WRITE_MEM8(zHL--, val);
 			USE_CYCLES(21)
 		} while (zB && (CPU->ICount > -4) && !CPU->Status);
+		res = ((UINT32)(zC - 1) & 0xff) + (UINT32)val;
 
 OP_INXR:
 		F = SZ[zB];
-		res = ((UINT32)(zC - 1) & 0xff) + (UINT32)val;
 		if (val & SF) F |= NF;
 		if (res < val) F |= HF | CF;
 		F |= SZP[(UINT8)(res & 0x07) ^ zB] & PF;
-		zF = F;
 		if (zB)
 		{
 			PC -= 2;
-#if CZ80_EMULATE_R_EXACTLY
-			zR--;
-#endif
+			/* the repeating form takes the undocumented bits from PC */
+			if (zRealPC & 0x0800) F |= XF; else F &= ~XF;
+			if (zRealPC & 0x2000) F |= YF; else F &= ~YF;
+			/* and adjusts PV/H using the input value */
+			if (F & CF)
+			{
+				if (val & SF)
+				{
+					if (!(SZP[(UINT8)((zB - 1) & 0x07)] & PF)) F ^= PF;
+					if ((zB & 0x0f) == 0) F |= HF; else F &= ~HF;
+				}
+				else
+				{
+					if (!(SZP[(UINT8)((zB + 1) & 0x07)] & PF)) F ^= PF;
+					if ((zB & 0x0f) == 0x0f) F |= HF; else F &= ~HF;
+				}
+			}
+			else
+			{
+				if (!(SZP[(UINT8)(zB & 0x07)] & PF)) F ^= PF;
+			}
+			zF = F;
 			ADD_CYCLES(4)
 			goto Cz80_Exec;
 		}
+		zF = F;
 		ADD_CYCLES(4+5);
 		goto Cz80_Exec;
 
@@ -708,16 +731,35 @@ OP_OTXR:
 		if (val & SF) F |= NF;
 		if (res < val) F |= HF | CF;
 		F |= SZP[(UINT8)(res & 0x07) ^ zB] & PF;
-		zF = F;
 		if (zB)
 		{
 			PC -= 2;
-#if CZ80_EMULATE_R_EXACTLY
-			zR--;
-#endif
+			/* the repeating form takes the undocumented bits from PC */
+			if (zRealPC & 0x0800) F |= XF; else F &= ~XF;
+			if (zRealPC & 0x2000) F |= YF; else F &= ~YF;
+			/* and adjusts PV/H using the output value */
+			if (F & CF)
+			{
+				if (val & SF)
+				{
+					if (!(SZP[(UINT8)((zB - 1) & 0x07)] & PF)) F ^= PF;
+					if ((zB & 0x0f) == 0) F |= HF; else F &= ~HF;
+				}
+				else
+				{
+					if (!(SZP[(UINT8)((zB + 1) & 0x07)] & PF)) F ^= PF;
+					if ((zB & 0x0f) == 0x0f) F |= HF; else F &= ~HF;
+				}
+			}
+			else
+			{
+				if (!(SZP[(UINT8)(zB & 0x07)] & PF)) F ^= PF;
+			}
+			zF = F;
 			ADD_CYCLES(4)
 			goto Cz80_Exec;
 		}
+		zF = F;
 		ADD_CYCLES(4+5)
 		goto Cz80_Exec;
 	}

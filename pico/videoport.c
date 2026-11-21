@@ -863,19 +863,19 @@ void PicoVideoSync(int skip)
     if (unlikely(linedisabled >= 0 && linedisabled <= last)) {
       if (Pico.est.DrawScanline <= linedisabled) {
         int sl = vf->fifo_hcounts[lineoffset/clkdiv];
-        PicoDrawSync(linedisabled, sl ? sl : 1, 0);
+        PicoSyncVideo(linedisabled, sl ? sl : 1, 0);
       }
       linedisabled = -1;
     }
     if (unlikely(lineenabled >= 0 && lineenabled <= last)) {
       if (Pico.est.DrawScanline <= lineenabled) {
         int sl = vf->fifo_hcounts[lineoffset/clkdiv];
-        PicoDrawSync(lineenabled, 0, sl ? sl : 1);
+        PicoSyncVideo(lineenabled, 0, sl ? sl : 1);
       }
       lineenabled = -1;
     }
     if (Pico.est.DrawScanline <= last)
-      PicoDrawSync(last, 0, 0);
+      PicoSyncVideo(last, 0, 0);
   }
   if (skip >= 0)
     Pico.est.rendstatus |= PDRAW_SYNC_NEEDED;
@@ -1284,8 +1284,8 @@ int PicoVideoSave(void *buf)
   int i;
 
   // FIFO stuff
-  memcpy(bp, &VdpFIFO, offsetof(struct VdpFIFO, fifo_slot));
-  bp += offsetof(struct VdpFIFO, fifo_slot);
+  memcpy(bp, &VdpFIFO, offsetof(struct VdpFIFO, fifo_maxslot));
+  bp += offsetof(struct VdpFIFO, fifo_maxslot);
 
   // SAT Cache
   for (i = 0; i < 80; i++, bp += sizeof(u32))
@@ -1305,12 +1305,21 @@ void PicoVideoLoad(void *buf, int len)
   if (pv->reg[12]&1)
     SATaddr &= ~0x200, SATmask &= ~0x200; // H40, zero lowest SAT bit
 
+  vf->fifo_maxslot = 0;
+  PicoVideoFIFOMode(pv->reg[1]&0x40, pv->reg[12]&1);
+
   if (len) {
     int i;
-    if (len >= offsetof(struct VdpFIFO, fifo_slot))
-      memcpy(&VdpFIFO, buf, offsetof(struct VdpFIFO, fifo_slot));
-    for (i = 0; i < 80; i++)
-      memcpy(VdpSATCache+2*i, buf + offsetof(struct VdpFIFO, fifo_slot) + 4*i, sizeof(u32));
+    int base = offsetof(struct VdpFIFO, fifo_slot);
+    if (len >= offsetof(struct VdpFIFO, fifo_maxslot) + 80*sizeof(u32)) {
+      // new: scanline FIFO position is part of the state too
+      base = offsetof(struct VdpFIFO, fifo_maxslot);
+    }
+    if (len >= base)
+      memcpy(&VdpFIFO, buf, base);
+    for (i = 0; i < 80 && len > base; i++, base += sizeof(u32))
+      memcpy(VdpSATCache+2*i, buf + base, sizeof(u32));
+    Pico.est.rendstatus |= PDRAW_DIRTY_SPRITES;
     return;
   }
 
@@ -1338,6 +1347,5 @@ void PicoVideoLoad(void *buf, int len)
     vf->fifo_ql ++;
   }
   PicoVideoCacheSAT(1);
-  vf->fifo_maxslot = 0;
 }
 // vim:shiftwidth=2:ts=2:expandtab

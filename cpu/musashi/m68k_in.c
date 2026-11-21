@@ -271,46 +271,97 @@ INLINE int m68ki_bit_count(uint32 arg)
 	return (((arg + (arg>>4))&0x0f0f0f0f) * 0x01010101) >> 24;
 }
 
+/* multiply time, including the 38 cycles of the table row */
 INLINE int m68ki_mulu_cycles(uint32 arg)
 {
 	if (CPU_TYPE_IS_000(CPU_TYPE))
-		return m68ki_bit_count(arg) * 2;
+		return 38 + m68ki_bit_count(arg) * 2;
 	else if (CPU_TYPE_IS_010(CPU_TYPE))
-		return m68ki_bit_count(arg); /* guesswork */
+		return 40; /* M68000UM table 9-6, maximum */
 	else
-		return m68ki_bit_count(arg) / 2; /* guesswork */
+		return 27; /* MC68020UM 8-30, cache case */
 }
 
 INLINE int m68ki_muls_cycles(sint32 arg)
 {
 	if (CPU_TYPE_IS_000(CPU_TYPE))
-		return m68ki_bit_count(arg ^ (arg<<1)) * 2;
+		return 38 + m68ki_bit_count(arg ^ (arg<<1)) * 2;
 	else if (CPU_TYPE_IS_010(CPU_TYPE))
-		return m68ki_bit_count(arg ^ (arg<<1)); /* guesswork */
+		return 42; /* M68000UM table 9-6, maximum */
 	else
-		return m68ki_bit_count(arg ^ (arg<<1)) / 2; /* guesswork */
+		return 27; /* MC68020UM 8-30, cache case */
 }
 
-INLINE int m68ki_divu_cycles(uint32 arg)
+/* number of leading zero bits */
+INLINE int m68ki_div_clz(uint32 v)
 {
-	/* approximation only. Doesn't factor in shorter cycles by carry */
-	if (CPU_TYPE_IS_000(CPU_TYPE))
-		return 128 - m68ki_bit_count(arg) * 2;
-	else if (CPU_TYPE_IS_010(CPU_TYPE))
-		return 96; /* guesswork */
-	else
-		return 32; /* guesswork */
+	int n = 0;
+	if(!(v & 0xFFFF0000)) { n += 16; v <<= 16; }
+	if(!(v & 0xFF000000)) { n += 8;  v <<= 8;  }
+	if(!(v & 0xF0000000)) { n += 4;  v <<= 4;  }
+	if(!(v & 0xC0000000)) { n += 2;  v <<= 2;  }
+	if(!(v & 0x80000000))   n += 1;
+	return n;
 }
 
-INLINE int m68ki_divs_cycles(uint32 scyc, sint32 arg)
+/* penalty pairs of the non-restoring divide loop, two cycles each */
+INLINE uint32 m68ki_div_pairs(uint32 dividend, uint32 divisor)
 {
-	/* approximation only. Doesn't factor in shorter cycles by carry */
+	uint32 r10 = (divisor << 15) - 1;
+	uint32 neg = 0 - (divisor << 16);
+	uint32 r2 = dividend, pairs;
+	int shift, k;
+
+	/* skipped iterations are faster than real ones, two pairs each */
+	k = m68ki_div_clz(dividend | divisor) - m68ki_div_clz(divisor << 16) - 1;
+	if(k < 0)
+		k = 0;
+	pairs = 2 * (uint32)k;
+
+	for(shift = k; shift < 16; shift++)
+	{
+		uint32 x = r2 << shift;
+		uint32 diff = r10 - x;
+		int carry = r10 >= x;
+
+		if(!carry)
+			r2 += neg >> (shift + 1);
+		/* an iteration costs 0, 1 or 2 pairs depending on the borrow and overflow */
+		if(shift != 15 && !(((r10 ^ x) & (diff ^ r10)) >> 31))
+			pairs += carry ? 2 : 1;
+	}
+	return pairs;
+}
+
+/* divide loop time, excluding the opcode's own cycle count */
+INLINE int m68ki_divu_cycles(uint32 dividend, uint32 divisor)
+{
 	if (CPU_TYPE_IS_000(CPU_TYPE))
-		return 128 - m68ki_bit_count(abs(arg)) * 2 + scyc*2 + 8;
+		return 76 + 2 * m68ki_div_pairs(dividend, divisor);
 	else if (CPU_TYPE_IS_010(CPU_TYPE))
-		return 96 + scyc*2 + 8; /* guesswork */
+		return 108; /* M68000UM table 9-6, maximum */
 	else
-		return 32 + scyc   + 4; /* guesswork */
+		return 44; /* MC68020UM 8-30, cache case */
+}
+
+INLINE int m68ki_divs_cycles(uint32 dividend, sint32 divisor)
+{
+	if (CPU_TYPE_IS_000(CPU_TYPE))
+	{
+		uint32 dneg = dividend >> 31;
+		uint32 sneg = (uint32)divisor >> 31;
+		uint32 adend = dneg ? 0 - dividend : dividend;
+		uint32 adiv = sneg ? 0 - (uint32)divisor : (uint32)divisor;
+
+		/* the loop is only entered when the quotient fits */
+		if(adend >= (adiv << 16))
+			return 16 + 2 * dneg;
+		return 90 + 4 * dneg + 2 * (dneg ^ sneg) + 2 * m68ki_div_pairs(adend, adiv);
+	}
+	else if (CPU_TYPE_IS_010(CPU_TYPE))
+		return 122; /* M68000UM table 9-6, maximum */
+	else
+		return 56; /* MC68020UM 8-30, cache case */
 }
 
 /* ======================================================================== */
@@ -747,10 +798,10 @@ moves      8  .     .     0000111000......  A+-DXWL...  . S S S   .  14   5   5
 moves     16  .     .     0000111001......  A+-DXWL...  . S S S   .  14   5   5
 moves     32  .     .     0000111010......  A+-DXWL...  . S S S   .  16   5   5
 move16    32  .     .     1111011000100...  ..........  . . . U   .   .   .   4  TODO: correct timing
-muls      16  .     d     1100...111000...  ..........  U U U U  38  28  20  20  cycles depending on operands
-muls      16  .     .     1100...111......  A+-DXWLdxI  U U U U  38  28  20  20  cycles depending on operands
-mulu      16  .     d     1100...011000...  ..........  U U U U  38  26  20  20  cycles depending on operands
-mulu      16  .     .     1100...011......  A+-DXWLdxI  U U U U  38  26  20  20  cycles depending on operands
+muls      16  .     d     1100...111000...  ..........  U U U U  38  38  38  38  cycles depending on operands
+muls      16  .     .     1100...111......  A+-DXWLdxI  U U U U  38  38  38  38  cycles depending on operands
+mulu      16  .     d     1100...011000...  ..........  U U U U  38  38  38  38  cycles depending on operands
+mulu      16  .     .     1100...011......  A+-DXWLdxI  U U U U  38  38  38  38  cycles depending on operands
 mull      32  .     d     0100110000000...  ..........  . . U U   .   .  43  43
 mull      32  .     .     0100110000......  A+-DXWLdxI  . . U U   .   .  43  43
 nbcd       8  .     d     0100100000000...  ..........  U U U U   6   6   6   6
@@ -3553,10 +3604,14 @@ M68KMAKE_OP(chk, 16, ., d)
 
 	if(src >= 0 && src <= bound)
 	{
+		FLAG_N = NFLAG_CLEAR; /* undocumented: follows the checked value */
 		USE_CYCLES(6);
 		return;
 	}
 	FLAG_N = (src < 0)<<7;
+	/* cyclone charges one more pair while the shifted difference stays non-negative */
+	if(src < 0 && (((bound - src) & 0x8000) == 0))
+		USE_CYCLES(2);
 	m68ki_exception_trap(EXCEPTION_CHK);
 }
 
@@ -3572,10 +3627,14 @@ M68KMAKE_OP(chk, 16, ., .)
 
 	if(src >= 0 && src <= bound)
 	{
+		FLAG_N = NFLAG_CLEAR; /* undocumented: follows the checked value */
 		USE_CYCLES(6);
 		return;
 	}
 	FLAG_N = (src < 0)<<7;
+	/* cyclone charges one more pair while the shifted difference stays non-negative */
+	if(src < 0 && (((bound - src) & 0x8000) == 0))
+		USE_CYCLES(2);
 	m68ki_exception_trap(EXCEPTION_CHK);
 }
 
@@ -4566,21 +4625,26 @@ M68KMAKE_OP(divs, 16, ., d)
 			FLAG_V = VFLAG_CLEAR;
 			FLAG_C = CFLAG_CLEAR;
 			*r_dst = 0;
-			USE_CYCLES(m68ki_divs_cycles(2, 0));
+			USE_CYCLES(2); /* 18 cycles in total */
 			return;
 		}
 
-		if(abs(dst) >= abs(src<<16))
+		/* compare magnitudes, |src| = 0x8000 must not overflow the shift */
+		if((uint32)(dst < 0 ? -(uint32)dst : (uint32)dst) >= ((uint32)(src < 0 ? -src : src) << 16))
 		{
+			/* overflow leaves N and V set and clears Z and C */
+			FLAG_N = NFLAG_SET;
+			FLAG_Z = ZFLAG_CLEAR;
 			FLAG_V = VFLAG_SET;
-			USE_CYCLES(2*(dst < 0));
+			FLAG_C = CFLAG_CLEAR;
+			USE_CYCLES(2*(dst < 0)); /* 16 cycles in total */
 			return;
 		}
 
 		quotient = dst / src;
 		remainder = dst % src;
 
-		cycles = m68ki_divs_cycles(2*(dst < 0) + (quotient < 0), quotient);
+		cycles = m68ki_divs_cycles(dst, src) - 16;
 		if(quotient == MAKE_INT_16(quotient))
 		{
 			FLAG_Z = quotient;
@@ -4591,12 +4655,16 @@ M68KMAKE_OP(divs, 16, ., d)
 			USE_CYCLES(cycles);
 			return;
 		}
+		/* overflow leaves N and V set and clears Z and C */
+		FLAG_N = NFLAG_SET;
+		FLAG_Z = ZFLAG_CLEAR;
 		FLAG_V = VFLAG_SET;
+		FLAG_C = CFLAG_CLEAR;
 		USE_CYCLES(cycles);
 		return;
 	}
 	m68ki_exception_trap(EXCEPTION_ZERO_DIVIDE);
-	ADD_CYCLES(12);
+	ADD_CYCLES(-12); /* 38 cycles in total */
 }
 
 
@@ -4618,21 +4686,26 @@ M68KMAKE_OP(divs, 16, ., .)
 			FLAG_V = VFLAG_CLEAR;
 			FLAG_C = CFLAG_CLEAR;
 			*r_dst = 0;
-			USE_CYCLES(m68ki_divs_cycles(2, 0));
+			USE_CYCLES(2); /* 18 cycles in total */
 			return;
 		}
 
-		if(abs(dst) >= abs(src<<16))
+		/* compare magnitudes, |src| = 0x8000 must not overflow the shift */
+		if((uint32)(dst < 0 ? -(uint32)dst : (uint32)dst) >= ((uint32)(src < 0 ? -src : src) << 16))
 		{
+			/* overflow leaves N and V set and clears Z and C */
+			FLAG_N = NFLAG_SET;
+			FLAG_Z = ZFLAG_CLEAR;
 			FLAG_V = VFLAG_SET;
-			USE_CYCLES(2*(dst < 0));
+			FLAG_C = CFLAG_CLEAR;
+			USE_CYCLES(2*(dst < 0)); /* 16 cycles in total */
 			return;
 		}
 
 		quotient = dst / src;
 		remainder = dst % src;
 
-		cycles = m68ki_divs_cycles(2*(dst < 0) + (quotient < 0), quotient);
+		cycles = m68ki_divs_cycles(dst, src) - 16;
 		if(quotient == MAKE_INT_16(quotient))
 		{
 			FLAG_Z = quotient;
@@ -4643,12 +4716,16 @@ M68KMAKE_OP(divs, 16, ., .)
 			USE_CYCLES(cycles);
 			return;
 		}
+		/* overflow leaves N and V set and clears Z and C */
+		FLAG_N = NFLAG_SET;
+		FLAG_Z = ZFLAG_CLEAR;
 		FLAG_V = VFLAG_SET;
+		FLAG_C = CFLAG_CLEAR;
 		USE_CYCLES(cycles);
 		return;
 	}
 	m68ki_exception_trap(EXCEPTION_ZERO_DIVIDE);
-	ADD_CYCLES(12);
+	ADD_CYCLES(-12); /* 38 cycles in total */
 }
 
 
@@ -4668,15 +4745,20 @@ M68KMAKE_OP(divu, 16, ., d)
 			FLAG_N = NFLAG_16(quotient);
 			FLAG_V = VFLAG_CLEAR;
 			FLAG_C = CFLAG_CLEAR;
+			/* charge before the dividend is overwritten, the row base is added afterwards */
+			USE_CYCLES(m68ki_divu_cycles(*r_dst, src) - 10);
 			*r_dst = MASK_OUT_ABOVE_32(MASK_OUT_ABOVE_16(quotient) | (remainder << 16));
-			USE_CYCLES(m68ki_divu_cycles(quotient));
 			return;
 		}
+		/* overflow leaves N and V set and clears Z and C */
+		FLAG_N = NFLAG_SET;
+		FLAG_Z = ZFLAG_CLEAR;
 		FLAG_V = VFLAG_SET;
+		FLAG_C = CFLAG_CLEAR;
 		return;
 	}
 	m68ki_exception_trap(EXCEPTION_ZERO_DIVIDE);
-	ADD_CYCLES(6);
+	ADD_CYCLES(-6); /* 38 cycles in total */
 }
 
 
@@ -4696,15 +4778,20 @@ M68KMAKE_OP(divu, 16, ., .)
 			FLAG_N = NFLAG_16(quotient);
 			FLAG_V = VFLAG_CLEAR;
 			FLAG_C = CFLAG_CLEAR;
+			/* charge before the dividend is overwritten, the row base is added afterwards */
+			USE_CYCLES(m68ki_divu_cycles(*r_dst, src) - 10);
 			*r_dst = MASK_OUT_ABOVE_32(MASK_OUT_ABOVE_16(quotient) | (remainder << 16));
-			USE_CYCLES(m68ki_divu_cycles(quotient));
 			return;
 		}
+		/* overflow leaves N and V set and clears Z and C */
+		FLAG_N = NFLAG_SET;
+		FLAG_Z = ZFLAG_CLEAR;
 		FLAG_V = VFLAG_SET;
+		FLAG_C = CFLAG_CLEAR;
 		return;
 	}
 	m68ki_exception_trap(EXCEPTION_ZERO_DIVIDE);
-	ADD_CYCLES(6);
+	ADD_CYCLES(-6); /* 38 cycles in total */
 }
 
 
@@ -5407,8 +5494,9 @@ M68KMAKE_OP(lea, 32, ., .)
 
 M68KMAKE_OP(link, 16, ., a7)
 {
-	REG_A[7] -= 4;
-	m68ki_write_32(REG_A[7], REG_A[7]);
+	uint old = REG_A[7];
+	REG_A[7] = MASK_OUT_ABOVE_32(old - 4);
+	m68ki_write_32(REG_A[7], old);
 	REG_A[7] = MASK_OUT_ABOVE_32(REG_A[7] + MAKE_INT_16(OPER_I_16()));
 }
 
@@ -7601,7 +7689,7 @@ M68KMAKE_OP(muls, 16, ., d)
 	uint res = MASK_OUT_ABOVE_32(x * MAKE_INT_16(MASK_OUT_ABOVE_16(*r_dst)));
 
 	*r_dst = res;
-	USE_CYCLES(m68ki_muls_cycles(x));
+	USE_CYCLES(m68ki_muls_cycles(x) - 38);
 
 	FLAG_Z = res;
 	FLAG_N = NFLAG_32(res);
@@ -7617,7 +7705,7 @@ M68KMAKE_OP(muls, 16, ., .)
 	uint res = MASK_OUT_ABOVE_32(x * MAKE_INT_16(MASK_OUT_ABOVE_16(*r_dst)));
 
 	*r_dst = res;
-	USE_CYCLES(m68ki_muls_cycles(x));
+	USE_CYCLES(m68ki_muls_cycles(x) - 38);
 
 	FLAG_Z = res;
 	FLAG_N = NFLAG_32(res);
@@ -7633,7 +7721,7 @@ M68KMAKE_OP(mulu, 16, ., d)
 	uint res = x * MASK_OUT_ABOVE_16(*r_dst);
 
 	*r_dst = res;
-	USE_CYCLES(m68ki_mulu_cycles(x));
+	USE_CYCLES(m68ki_mulu_cycles(x) - 38);
 
 	FLAG_Z = res;
 	FLAG_N = NFLAG_32(res);
@@ -7649,7 +7737,7 @@ M68KMAKE_OP(mulu, 16, ., .)
 	uint res = x * MASK_OUT_ABOVE_16(*r_dst);
 
 	*r_dst = res;
-	USE_CYCLES(m68ki_mulu_cycles(x));
+	USE_CYCLES(m68ki_mulu_cycles(x) - 38);
 
 	FLAG_Z = res;
 	FLAG_N = NFLAG_32(res);
@@ -9678,7 +9766,8 @@ M68KMAKE_OP(stop, 0, ., .)
 		m68ki_trace_t0();			   /* auto-disable (see m68kcpu.h) */
 		CPU_STOPPED |= STOP_LEVEL_STOP;
 		m68ki_set_sr(new_sr);
-		m68ki_remaining_cycles = 0;
+		/* STOP costs 4 cycles in total; the base is charged after the handler */
+		m68ki_remaining_cycles = CYC_INSTRUCTION[REG_IR] - 3;
 		return;
 	}
 	m68ki_exception_privilege_violation();
@@ -10331,6 +10420,7 @@ M68KMAKE_OP(tas, 8, ., .)
 M68KMAKE_OP(trap, 0, ., .)
 {
 	/* Trap#n stacks exception frame type 0 */
+	USE_CYCLES(-CYC_INSTRUCTION[REG_IR]); /* the base is charged after the handler */
 	m68ki_exception_trapN(EXCEPTION_TRAP_BASE + (REG_IR & 0xf));	/* HJB 990403 */
 }
 
@@ -10450,6 +10540,7 @@ M68KMAKE_OP(trapv, 0, ., .)
 	{
 		return;
 	}
+	USE_CYCLES(-CYC_INSTRUCTION[REG_IR]); /* the base is charged after the handler */
 	m68ki_exception_trap(EXCEPTION_TRAPV);  /* HJB 990403 */
 }
 

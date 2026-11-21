@@ -203,6 +203,16 @@ void *plat_mem_get_for_drc(size_t size)
 	return NULL;
 }
 
+int plat_drc_jit_set_exec(void *ptr, size_t size)
+{
+	return plat_mem_set_exec(ptr, size);
+}
+
+void plat_drc_jit_protect(int writable)
+{
+	(void)writable;
+}
+
 int plat_parse_arg(int argc, char *argv[], int *x)
 {
 	return 1;

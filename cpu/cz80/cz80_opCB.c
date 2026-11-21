@@ -294,9 +294,11 @@ switch (Opcode)
 	OPCB(0x6e): // BIT  5,(HL)
 	OPCB(0x76): // BIT  6,(HL)
 	OPCB(0x7e): // BIT  7,(HL)
-		src = READ_MEM8(zHL);
-		zF = (zF & CF) | HF | SZ_BIT[src & (1 << ((Opcode >> 3) & 7))];
-		zF = (zF & ~(XF | YF)) | (0xc0 & (XF | YF)); // TODO ZEXALL hack, need WZ...
+		adr = zHL;
+		src = READ_MEM8(adr);
+		zF = (zF & CF) | HF |
+			 (SZ_BIT[src & (1 << ((Opcode >> 3) & 7))] & ~(YF | XF)) |
+			 ((adr >> 8) & (YF | XF));
 		RET(12)
 
 /*-----------------------------------------

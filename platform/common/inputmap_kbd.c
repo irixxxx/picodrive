@@ -20,6 +20,11 @@ const struct in_default_bind _in_sdl_defbinds[] = {
 	{ SDLK_d,      IN_BINDTYPE_PLAYER12, GBTN_Z },
 	{ SDLK_RETURN, IN_BINDTYPE_PLAYER12, GBTN_START },
 	{ SDLK_f,      IN_BINDTYPE_PLAYER12, GBTN_MODE },
+	{ SDLK_q,      IN_BINDTYPE_PLAYER12, GBTN_A_ },
+	{ SDLK_w,      IN_BINDTYPE_PLAYER12, GBTN_B_ },
+	{ SDLK_WORLD_81,IN_BINDTYPE_PLAYER12, GBTN_A },
+	{ SDLK_WORLD_83,IN_BINDTYPE_PLAYER12, GBTN_B },
+	{ SDLK_WORLD_82,IN_BINDTYPE_PLAYER12, GBTN_START },
 	{ SDLK_ESCAPE, IN_BINDTYPE_EMU, PEVB_MENU },
 	{ SDLK_TAB,    IN_BINDTYPE_EMU, PEVB_RESET },
 	{ SDLK_F1,     IN_BINDTYPE_EMU, PEVB_STATE_SAVE },
@@ -159,6 +164,19 @@ const struct menu_keymap _in_sdl_joy_map[] = {
 };
 const int in_sdl_joy_map_sz = sizeof(_in_sdl_joy_map) / sizeof(_in_sdl_joy_map[0]);
 const struct menu_keymap *in_sdl_joy_map = _in_sdl_joy_map;
+
+/* mouse buttons/wheel as menu keys (SDL mouse button numbers + 80) */
+const struct menu_keymap _in_sdl_mouse_map[] = {
+	{ SDLK_WORLD_81, PBTN_MOK   },	/* left button */
+	{ SDLK_WORLD_82, PBTN_MA2   },	/* middle button */
+	{ SDLK_WORLD_83, PBTN_MBACK },	/* right button */
+	{ SDLK_WORLD_84, PBTN_UP    },	/* wheel up */
+	{ SDLK_WORLD_85, PBTN_DOWN  },	/* wheel down */
+	{ SDLK_WORLD_86, PBTN_MA3   },	/* x1 button */
+	{ SDLK_WORLD_87, PBTN_MA3   },	/* x2 button */
+};
+const int in_sdl_mouse_map_sz = sizeof(_in_sdl_mouse_map) / sizeof(_in_sdl_mouse_map[0]);
+const struct menu_keymap *in_sdl_mouse_map = _in_sdl_mouse_map;
 
 const char * const *in_sdl_key_names = NULL;
 

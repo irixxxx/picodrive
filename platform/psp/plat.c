@@ -250,6 +250,16 @@ int plat_mem_set_exec(void *ptr, size_t size)
 	return 0;
 }
 
+int plat_drc_jit_set_exec(void *ptr, size_t size)
+{
+	return plat_mem_set_exec(ptr, size);
+}
+
+void plat_drc_jit_protect(int writable)
+{
+	(void)writable;
+}
+
 /* get current CPU clock */
 static int plat_cpu_clock_get(void)
 {

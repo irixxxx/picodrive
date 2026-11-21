@@ -311,6 +311,8 @@ static int PicoFrameHints(void)
     }
   }
 
+  SyncCPUs(Pico.t.m68c_aim);
+
   // === VBLANK last line ===
   pv->status &= ~(SR_VB | PVS_VB2);
   pv->status |= ((pv->reg[1] >> 3) ^ SR_VB) & SR_VB; // forced blanking

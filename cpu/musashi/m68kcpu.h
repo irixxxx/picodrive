@@ -806,7 +806,7 @@ typedef unsigned int uint;
 #define USE_CYCLES(A)    m68ki_remaining_cycles -= (A)
 #define SET_CYCLES(A)    m68ki_remaining_cycles = A
 #define GET_CYCLES()     m68ki_remaining_cycles
-#define USE_ALL_CYCLES() m68ki_remaining_cycles = 0
+#define USE_ALL_CYCLES() m68ki_remaining_cycles = (m68ki_initial_cycles > CYC_INSTRUCTION[REG_IR]) ? CYC_INSTRUCTION[REG_IR] : m68ki_initial_cycles
 
 
 

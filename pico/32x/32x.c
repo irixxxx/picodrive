@@ -250,67 +250,61 @@ void PicoReset32x(void)
 
 static void Pico32xRenderSync(int lines)
 {
-  if (Pico32xDrawMode != PDM32X_OFF && !PicoIn.skipFrame) {
-    int offs;
+  int offs;
 
-    pprof_start(draw);
+  pprof_start(draw);
 
-    offs = 8;
-    if (Pico.video.reg[1] & 8)
-      offs = 0;
+  offs = (240 - rendlines) >> 1;
 
-    if ((Pico32x.vdp_regs[0] & P32XV_Mx) != 0 && // 32x not blanking
-        (!(Pico.video.debug_p & PVD_KILL_32X)))
-    {
-      int md_bg = Pico.video.reg[7] & 0x3f;
+  if ((Pico32x.vdp_regs[0] & P32XV_Mx) != 0 && // 32x not blanking
+      (!(Pico.video.debug_p & PVD_KILL_32X)))
+  {
+    int md_bg = Pico.video.reg[7] & 0x3f;
 
-      // we draw lines up to the sync point (not line-by-line)
-      PicoDraw32xLayer(offs, lines-Pico32x.sync_line, md_bg);
-    }
-    else if (Pico32xDrawMode == PDM32X_BOTH)
-      PicoDraw32xLayerMdOnly(offs, lines-Pico32x.sync_line);
-
-    pprof_end(draw);
+    // we draw lines up to the sync point (not line-by-line)
+    PicoDraw32xLayer(offs, lines-Pico32x.sync_line + 1, md_bg);
   }
+  else
+    PicoDraw32xLayerMdOnly(offs, lines-Pico32x.sync_line + 1);
+
+  pprof_end(draw);
 }
 
 void Pico32xDrawSync(SH2 *sh2)
 {
   // the fast renderer isn't operating on a line-by-line base
-  if (sh2 && !(PicoIn.opt & POPT_ALT_RENDERER)) {
+  if (sh2 && !(PicoIn.opt & POPT_ALT_RENDERER) && !PicoIn.skipFrame) {
     unsigned int cycle = (sh2 ? sh2_cycles_done_m68k(sh2) : SekCyclesDone());
     int line = DIVQ32(cycle - Pico.t.m68c_frame_start, 488.5);
 
-    if (Pico32x.sync_line < line && line < (Pico.video.reg[1] & 8 ? 240 : 224)) {
+    cycle = cycle - Pico.t.m68c_frame_start - (int)(488.5*2)*line/2;
+    if (cycle < 50) line--;
+
+    if (line >= rendlines) line = rendlines-1;
+    if (Pico32x.sync_line <= line) {
       // make sure the MD image is also sync'ed to this line for merging
       PicoDrawSync(line, 0, 0);
 
-      // pfff... need to save and restore some persistent data for MD renderer
-      void *dest = Pico.est.DrawLineDest;
-      int incr = Pico.est.DrawLineDestIncr;
-      Pico32xRenderSync(line);
-      Pico.est.DrawLineDest = dest;
-      Pico.est.DrawLineDestIncr = incr;
+      if (Pico32xDrawMode != PDM32X_OFF) {
+        // pfff... need to save and restore some persistent data for MD renderer
+        void *dest = Pico.est.DrawLineDest;
+        int incr = Pico.est.DrawLineDestIncr;
+        Pico32xRenderSync(line);
+        Pico.est.DrawLineDest = dest;
+        Pico.est.DrawLineDestIncr = incr;
+      }
     }
 
-    // remember line we sync'ed to
-    Pico32x.sync_line = line;
+    // remember next line to draw
+    Pico32x.sync_line = line+1;
   }
 }
 
 static void p32x_render_frame(void)
 {
-  if (Pico32xDrawMode != PDM32X_OFF && !PicoIn.skipFrame) {
-    int lines;
-
-    pprof_start(draw);
-
-    lines = 224;
-    if (Pico.video.reg[1] & 8)
-      lines = 240;
-
-    Pico32xRenderSync(lines);
-  }
+  if (Pico32xDrawMode != PDM32X_OFF && !PicoIn.skipFrame)
+    Pico32xRenderSync(rendlines-1);
+  Pico32x.sync_line = rendlines;
 }
 
 static void p32x_start_blank(void)
@@ -404,15 +398,28 @@ static event_cb *p32x_event_cbs[P32X_EVENT_COUNT] = {
 // schedule event at some time 'after', in m68k clocks
 void p32x_event_schedule(unsigned int now, enum p32x_event event, int after)
 {
-  unsigned int when;
+  unsigned int when, prev;
+  int i;
 
   when = (now + after) | 1;
 
   elprintf(EL_32X, "32x: new event #%u %u->%u", event, now, when);
+  prev = p32x_event_times[event];
   p32x_event_times[event] = when;
 
-  if (event_time_next == 0 || CYCLES_GT(event_time_next, when))
-    event_time_next = when;
+  // event_time_next must name the earliest pending event; if this slot is
+  // the one it named, that time is gone and the next one must be derived
+  // again, else a stale time is kept in some cases (a pending event moved
+  // later, e.g. when a timer is reprogrammed)
+  if (event_time_next != 0 && event_time_next != prev &&
+      !CYCLES_GT(event_time_next, when))
+    return;
+
+  event_time_next = 0;
+  for (i = 0; i < P32X_EVENT_COUNT; i++)
+    if (p32x_event_times[i] && (!event_time_next ||
+        CYCLES_GT(event_time_next, p32x_event_times[i])))
+      event_time_next = p32x_event_times[i];
 }
 
 void p32x_event_schedule_sh2(SH2 *sh2, enum p32x_event event, int after)
@@ -505,7 +512,7 @@ void p32x_sync_other_sh2(SH2 *sh2, unsigned int m68k_target)
   }
 
   m68k_cycles = m68k_target - osh2->m68krcycles_done;
-  if (m68k_cycles < 200)
+  if (m68k_cycles < 46) // Brutal
     return;
 
   if (osh2->state & SH2_IDLE_STATES) {
@@ -530,7 +537,7 @@ void p32x_sync_other_sh2(SH2 *sh2, unsigned int m68k_target)
 }
 
 #define STEP_LS 24
-#define STEP_N 192 // NFL; TODO at least a scanline (489) for good performance?
+#define STEP_N 164 // NFL, Xmen; TODO at least a scanline (489) for good perf?
 
 #define sync_sh2s_normal p32x_sync_sh2s
 //#define sync_sh2s_lockstep p32x_sync_sh2s
@@ -655,6 +662,12 @@ void sync_sh2s_lockstep(unsigned int m68k_target)
 
 void PicoFrame32x(void)
 {
+  int offs = (240-rendlines)>>1;
+
+  // drop poll detection state at the frame boundary, so that a state saved
+  // here reloads and runs exactly like an uninterrupted run (netplay)
+  p32x_clear_poll_state();
+
   if (PicoIn.AHW & PAHW_MCD)
     pcd_prepare_frame();
 
@@ -662,6 +675,7 @@ void PicoFrame32x(void)
   Pico32x.sync_line = 0;
   if (Pico32xDrawMode != PDM32X_BOTH)
     Pico.est.rendstatus |= PDRAW_SYNC_NEEDED;
+  DrawLineDest32x = DrawLineDestBase32x + offs * DrawLineDestIncrement32x;
   PicoFrameHints();
 
   p32x_timer_do(&msh2, Pico.t.m68c_aim);
@@ -702,10 +716,9 @@ void Pico32xStateLoaded(int is_early)
   p32x_pwm_state_loaded();
   p32x_run_events(Pico.t.m68c_aim);
 
-  // TODO wakeup CPUs for now. poll detection stuff must go to the save state!
-  p32x_m68k_poll_event(0, -1);
-  p32x_sh2_poll_event(msh2.poll_addr, &msh2, SH2_IDLE_STATES, msh2.m68krcycles_done);
-  p32x_sh2_poll_event(ssh2.poll_addr, &ssh2, SH2_IDLE_STATES, ssh2.m68krcycles_done);
+  // the SH2s may have been saved while polling, restart them from a known
+  // state, same as is done at every frame start
+  p32x_clear_poll_state();
 }
 
 void Pico32xPrepare(void)

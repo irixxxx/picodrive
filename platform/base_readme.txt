@@ -100,8 +100,8 @@ toggle for which is mapped to the START pad button. Pen positioning is done
 through the D-pad if the screen has been switched to either pages or pad, or by
 mouse if physical mouse support is activated.
 
-
 #ifdef GENERIC
+
 How to use the mouse
 --------------------
 
@@ -158,7 +158,32 @@ The physical mouse buttons are mapped as follows:
 The pad button mappings may also be used to access other buttons.
 
 
+How to use the XE-1AP controller
+--------------------------------
+
+The XE-1AP was originally released in 1989 by Micomsoft for the Sega Mega Drive.
+The controller features a left analogue stick for directional control, rotatable
+right throttle stick, shoulder buttons A, B, C, D, and face buttons A', B', E1,
+E2, Start and Select.
+
+To use the XE-1AP in PicoDrive, select `XE-1AP` as input device in the controls
+menu. Stick settings allow for enabling an automatic centre for returning the
+emulated stick to its central position after a period of inactivity.
+
+The analogue stick is mapped to the host mouse cursor, and the throttle stick is
+mapped to the mouse wheel. Physical mouse buttons are mapped as follows:
+
+| Physical Mouse | XE-1AP |
+|:--------------:|:------:|
+|  Left Button   |   A    |
+|  Middle Button |   B    |
+|  Right Button  | START  |
+
+Additional buttons (C, D, E1, E2, A', B') may be configured via the pad button
+mappings.
+
 #endif
+
 How to use keyboard input
 -------------------------
 
@@ -286,9 +311,16 @@ Allows to enable confirmation on saving (to prevent savestate overwrites), on
 loading (to prevent destroying current game progress), and on both or none, when
 using shortcut buttons (not menu) for saving/loading.
 
+@@1. "Autoload newest savestate"
+When loading a ROM, PicoDrive will automatically load the newest available
+savestate along with it.
+
 @@1. "Don't save last used ROM"
 This will disable writing last used ROM to config on exit (what might cause SD
 card corruption according to DaveC).
+
+@@1. "File selector sort order"
+Selects whether files in the ROM selector are sorted case insensitive or not.
 
 
 Display options
@@ -312,6 +344,10 @@ How many frames to skip rendering before displaying another.
 How many frames to skip rendering at most if Frameskip is "Auto".
 
 #ifdef GENERIC
+@@2. "Fullscreen mode"
+When enabled, the emulator runs in fullscreen mode using the available screen
+resolution. When disabled, the emulator runs in a window.
+
 @@2. "Horizontal scaling"
 This allows to resize the displayed image. "OFF" is unscaled, "software" uses
 a smoothing filter to scale the image. "hardware" uses a hardware scaler for
@@ -460,13 +496,14 @@ for some games.
 This enables emulation of six-channel FM sound synthesizer chip, which was used
 to produce sound effects and music.
 
+@@4. "FM chip"
+Selects which FM chip type is emulated. Older Mega Drive models used the YM2612,
+while later models used the YM3438. The YM2612 has DAC noise, which produces
+peculiar audio effects intentionally used by some games.
+
 @@4. "FM filter"
 This filter makes the sound output more accurate, but it is slower, especially
 for lower sound rates.
-
-@@4. "FM DAC noise"
-Makes the sound output more like a first model Mega Drive/Genesis if enabled.
-Later models had an improved FM chip without the DAC noise.
 
 
 Sega/Mega CD add-on
@@ -549,6 +586,11 @@ problems in some rare cases. Try disabling this if your game has problems.
 @@8. "Emulate Game Gear LCD"
 Disabling this option displays the full Game Gear VDP image with the normally
 invisible borders.
+
+@@8. "32X H32 centering"
+When enabled in 32X H32 layer mode, horizontal image centering is based on the
+32X graphics rather than the Mega Drive graphics. This may improve the look of
+certain games.
 
 @@8. "Enable dynarecs"
 This enables dynamic recompilation for SH2 and SVP CPU code, which is improving

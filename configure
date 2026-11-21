@@ -137,7 +137,9 @@ set_platform()
     # dynamic linking slows Wiz 1-10%, and libm on F100 isn't compatible
     LDFLAGS="$LDFLAGS -static"
     # unified binary for all of them. picodrive detects device type for itself.
-    CFLAGS="$CFLAGS -D__GP2X__"
+    # glibc hides C99 declarations (round, ftello, ...) under gnu89;
+    # select the GNU feature set explicitly.
+    CFLAGS="$CFLAGS -D__GP2X__ -D_GNU_SOURCE"
     # add -mfpu=fpa to select correct parameter passing for -msoft-float :-/
     MFLAGS="-mcpu=arm920t -mfloat-abi=soft -mfpu=fpa"
     platform="gp2x"

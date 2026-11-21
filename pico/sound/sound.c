@@ -31,6 +31,7 @@ s16 cdda_out_buffer[2*1152];
 // FM resampling polyphase FIR
 static resampler_t *ym2612_resampler;
 static resampler_t *ym2413_resampler;
+static int ym2413_out_rate;
 static int (*PsndFMUpdate)(s32 *buffer, int length, int stereo, int is_buf_empty);
 
 PICO_INTERNAL void PsndInit(void)
@@ -90,6 +91,22 @@ static int YM2413UpdateFIR(s32 *buffer, int length, int stereo, int is_buf_empty
   return 0;
 }
 
+#ifdef __GP2X__
+/* 940-backed YM2413 render */
+static void YM2413Update_940(s32 *buffer, int length, int stereo)
+{
+  (void)stereo; /* resampler asks for mono */
+  YM2413Render_940(buffer, length);
+}
+
+static int YM2413UpdateFIR_940(s32 *buffer, int length, int stereo, int is_buf_empty)
+{
+  if (!is_buf_empty) memset(buffer, 0, (length << stereo) * sizeof(*buffer));
+  resampler_update(ym2413_resampler, buffer, length, YM2413Update_940);
+  return 0;
+}
+#endif
+
 // FIR setup, looks for a close enough rational number matching the ratio
 static resampler_t *YMFM_setup_FIR(int inrate, int outrate, int stereo)
 {
@@ -99,13 +116,13 @@ static resampler_t *YMFM_setup_FIR(int inrate, int outrate, int stereo)
 
   // compute filter ratio with largest multiplier for smallest error
   for (mul = minmult; mul <= maxmult; mul++) {
-    div = (inrate*mul + outrate/2) / outrate;
+    div = DIV_ROUND(inrate*mul, outrate);
     diff = outrate*div/mul - inrate;
     if (abs(diff) < abs(mindiff)) {
       mindiff = diff;
       Pico.snd.fm_fir_mul = mul;
       Pico.snd.fm_fir_div = div;
-      if (abs(mindiff)*1000 <= inrate) break; // below error limit
+      if (abs(mindiff)*2500 <= inrate) break; // below 0.04% error limit
     }
   }
   printf("FM polyphase FIR ratio=%d/%d error=%.3f%%\n",
@@ -137,6 +154,14 @@ void PsndRerate(int preserve_state)
   int ym2612_rate = YM2612_NATIVE_RATE();
   int ym2612_init = !preserve_state;
   int state_size = 4096;
+  int ym2612_on_940 = 0;
+
+#ifdef __GP2X__
+  /* if the option was turned off, take the chip back before reinit */
+  if (!(PicoIn.opt & POPT_EXT_FM))
+    ExtFmRelease_940();
+  ym2612_on_940 = (PicoIn.opt & POPT_EXT_FM) && !(PicoIn.AHW & PAHW_SMS);
+#endif
 
   // don't init YM2612 if preserve_state and no parameter changes
   ym2612_init |= ymclock != ym2612_clock || ymopts != (PicoIn.opt & (POPT_DIS_FM_SSGEG|POPT_FM_YM2612));
@@ -145,7 +170,7 @@ void PsndRerate(int preserve_state)
   ymrate = (PicoIn.opt & POPT_EN_FM_FILTER ? ym2612_rate : PicoIn.sndRate);
   ymopts = PicoIn.opt & (POPT_DIS_FM_SSGEG|POPT_FM_YM2612);
 
-  if (preserve_state && ym2612_init) {
+  if (preserve_state && ym2612_init && !ym2612_on_940) {
     state = malloc(state_size);
     if (state)
       state_size = YM2612PicoStateSave3(state, state_size);
@@ -157,25 +182,50 @@ void PsndRerate(int preserve_state)
       OPLL_reset(opll);
     resampler_free(ym2413_resampler);
     ym2413_resampler = YMFM_setup_FIR(ym2413_rate, PicoIn.sndRate, 0);
+    ym2413_out_rate = PicoIn.sndRate;
   }
   if (PicoIn.AHW & PAHW_SMS) {
+#ifdef __GP2X__
+    if ((PicoIn.opt & POPT_EXT_FM)) {
+      /* failed init stays silent until restart or option-off */
+      YM2413Init_940(sms_clock, ym2413_rate, preserve_state);
+    }
+#endif
+    /* both cores render at the chip's native rate and are resampled here */
+    if (!ym2413_resampler || ym2413_out_rate != PicoIn.sndRate) {
+      resampler_free(ym2413_resampler);
+      ym2413_resampler = YMFM_setup_FIR(ym2413_rate, PicoIn.sndRate, 0);
+      ym2413_out_rate = PicoIn.sndRate;
+    }
+#ifdef __GP2X__
+    PsndFMUpdate = (PicoIn.opt & POPT_EXT_FM) ? YM2413UpdateFIR_940 : YM2413UpdateFIR;
+#else
     PsndFMUpdate = YM2413UpdateFIR;
-  } else if ((PicoIn.opt & POPT_EN_FM_FILTER) && ym2612_rate != PicoIn.sndRate) {
-    // polyphase FIR resampler, resampling directly from native to output rate
-    if (ym2612_init)
-      YM2612Init(ym2612_clock, ym2612_rate,
-        ((PicoIn.opt&POPT_DIS_FM_SSGEG) ? 0 : ST_SSG) |
-        ((PicoIn.opt&POPT_FM_YM2612)    ? ST_DAC : 0));
-    resampler_free(ym2612_resampler);
-    ym2612_resampler = YMFM_setup_FIR(ym2612_rate, PicoIn.sndRate,
-        PicoIn.opt & POPT_EN_STEREO);
-    PsndFMUpdate = YM2612UpdateFIR;
+#endif
   } else {
+    int use_fir = (PicoIn.opt & POPT_EN_FM_FILTER) && ym2612_rate != PicoIn.sndRate;
+    int fm_rate = use_fir ? ym2612_rate : PicoIn.sndRate;
+    int fm_flags = ((PicoIn.opt&POPT_DIS_FM_SSGEG) ? 0 : ST_SSG) |
+                   ((PicoIn.opt&POPT_FM_YM2612)    ? ST_DAC : 0);
+
+#ifdef __GP2X__
+    /* cache unchanged setup, reload after a crash, take over local state */
+    if ((PicoIn.opt & POPT_EXT_FM))
+      YM2612Init_940(ym2612_clock, fm_rate, fm_flags);
+    else
+#endif
     if (ym2612_init)
-      YM2612Init(ym2612_clock, PicoIn.sndRate,
-        ((PicoIn.opt&POPT_DIS_FM_SSGEG) ? 0 : ST_SSG) |
-        ((PicoIn.opt&POPT_FM_YM2612)    ? ST_DAC : 0));
-    PsndFMUpdate = YM2612UpdateONE;
+      YM2612Init_(ym2612_clock, fm_rate, fm_flags);
+
+    if (use_fir) {
+      // polyphase FIR resampler, resampling directly from native to output rate
+      resampler_free(ym2612_resampler);
+      ym2612_resampler = YMFM_setup_FIR(ym2612_rate, PicoIn.sndRate,
+          PicoIn.opt & POPT_EN_STEREO);
+      PsndFMUpdate = YM2612UpdateFIR;
+    } else {
+      PsndFMUpdate = YM2612UpdateONE;
+    }
   }
 
   if (state) {
@@ -327,6 +377,7 @@ PICO_INTERNAL void PsndDoSMSFM(int cyc_to)
 
   if (Pico.m.hardware & PMS_HW_FMUSED) {
     buf += pos;
+    /* VGM uses the local YM2413 even when the 940 wrapper is selected */
     YM2413UpdateFIR(buf32, len, 0, 0);
     if (stereo) 
       while (len--) {

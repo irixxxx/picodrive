@@ -1015,11 +1015,22 @@ static void emith_ldst_offs(int sz, int rd, int rn, int o9, int ld, int mode)
 
 #define emith_jump(target) do {\
 	u32 disp_ = (u8 *)target - (u8 *)tcache_ptr; \
-	EMIT(A64_B(disp_ & 0x0fffffff)); \
+	if (disp_ + 0x08000000u < 0x10000000u) /* fits into imm26 */ \
+		EMIT(A64_B(disp_ & 0x0fffffff)); \
+	else { \
+		/* same as above, tcache may be far from the code */ \
+		int _t = rcache_get_tmp(); \
+		emith_move_r_ptr_imm(_t, (uptr)target); \
+		EMIT(A64_BR(_t)); \
+		rcache_free_tmp(_t); \
+	} \
 } while (0)
 
-#define emith_jump_patchable(target) \
-	emith_jump(target)
+#define emith_jump_patchable(target) do { \
+	u32 disp_ = (u8 *)target - (u8 *)tcache_ptr; \
+	/* must stay 4 bytes, this insn gets patched later */ \
+	EMIT(A64_B(disp_ & 0x0fffffff)); \
+} while (0)
 
 #define emith_jump_cond(cond, target) do { \
 	u32 disp_ = (u8 *)target - (u8 *)tcache_ptr; \
@@ -1065,7 +1076,16 @@ static void emith_ldst_offs(int sz, int rd, int rn, int o9, int ld, int mode)
 
 #define emith_call(target) do { \
 	u32 disp_ = (u8 *)target - (u8 *)tcache_ptr; \
-	EMIT(A64_BL(disp_ & 0x0fffffff)); \
+	if (disp_ + 0x08000000u < 0x10000000u) /* fits into imm26 */ \
+		EMIT(A64_BL(disp_ & 0x0fffffff)); \
+	else { \
+		/* tcache can be far away from the code, e.g. on apple silicon \
+		 * where it has to be mmaped with MAP_JIT */ \
+		int _t = rcache_get_tmp(); \
+		emith_move_r_ptr_imm(_t, (uptr)target); \
+		EMIT(A64_BLR(_t)); \
+		rcache_free_tmp(_t); \
+	} \
 } while (0)
 #define emith_call_cond(cond, target) \
 	emith_call(target)

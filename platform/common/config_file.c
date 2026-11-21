@@ -105,12 +105,14 @@ static void keys_write(FILE *fn, int dev_id, const int *binds, const int *kbd_bi
 		}
 	}
 
-	for (k = 0; k < key_count; k++) {
-		const char *name = in_get_key_name(dev_id, k);
-		if (strcmp(name, "#") == 0) name = "\\x23"; // replace comment sign
-		if (strcmp(name, "=") == 0) name = "\\x3d"; // replace assignment sign
-		if (kbd_binds[k])
-			fprintf(fn, "bind %s = key%02x" NL, name, kbd_binds[k]);
+	if (kbd_binds) {
+		for (k = 0; k < key_count; k++) {
+			const char *name = in_get_key_name(dev_id, k);
+			if (strcmp(name, "#") == 0) name = "\\x23"; // replace comment sign
+			if (strcmp(name, "=") == 0) name = "\\x3d"; // replace assignment sign
+			if (kbd_binds[k])
+				fprintf(fn, "bind %s = key%02x" NL, name, kbd_binds[k]);
+		}
 	}
 }
 
@@ -118,7 +120,7 @@ int config_write(const char *fname)
 {
 	FILE *fn = NULL;
 	menu_entry *me;
-	int t;
+	int t, k;
 	char line[640];
 
 	fn = fopen(fname, "w");
@@ -168,10 +170,11 @@ write_line:
 	}
 
 	/* input: save binds */
-	for (t = 0; t < IN_MAX_DEVS; t++)
+	for (t = 0, k = 1; t < IN_MAX_DEVS; t++)
 	{
 		const int *binds = in_get_dev_binds(t);
 		const char *name = in_get_dev_name(t, 0, 0);
+		const int *kbd = NULL;
 		int count = 0;
 
 		if (binds == NULL || name == NULL)
@@ -180,7 +183,11 @@ write_line:
 		fprintf(fn, "binddev = %s" NL, name);
 
 		in_get_config(t, IN_CFG_BIND_COUNT, &count);
-		keys_write(fn, t, binds, in_get_dev_kbd_binds(t));
+		if (k) { // make sure keyboard data is only saved once
+			kbd = in_get_dev_kbd_binds(t);
+			k &= !kbd;
+		}
+		keys_write(fn, t, binds, kbd);
 	}
 
 	fprintf(fn, "Sound Volume = %i" NL, currentConfig.volume);
@@ -361,14 +368,6 @@ static int custom_read(menu_entry *me, const char *var, const char *val)
 			Pico32xSetClocks(0, currentConfig.ssh2_khz * 1000);
 			return 1;
 
-		case MA_OPT2_GAMMA:
-			currentConfig.gamma = atoi(val);
-			return 1;
-
-		case MA_OPT2_MAX_FRAMESKIP:
-			currentConfig.max_skip = atoi(val);
-			return 1;
-
 		case MA_OPT_KEYBOARD:
 			currentConfig.keyboard = 0;
 			if (strcasecmp(val, "physical") == 0)
@@ -380,12 +379,12 @@ static int custom_read(menu_entry *me, const char *var, const char *val)
 		case MA_OPT_INPUT_DEV0:
 			for (i = 0; indev_names[i]; i++)
 				if (strcasecmp(val, indev_names[i]) == 0)
-					currentConfig.input_dev0 = i;
+					currentConfig.input_dev[0] = i;
 			return 1;
 		case MA_OPT_INPUT_DEV1:
 			for (i = 0; indev_names[i]; i++)
 				if (strcasecmp(val, indev_names[i]) == 0)
-					currentConfig.input_dev1 = i;
+					currentConfig.input_dev[1] = i;
 			return 1;
 		case MA_OPT2_FM_CHIP:
 			PicoIn.opt &= ~POPT_FM_YM2612;
@@ -521,7 +520,7 @@ static void parse(const char *var, const char *val, int *keys_encountered)
 		if (me->name == NULL || strcasecmp(var, me->name) != 0)
 			continue;
 
-		if (me->beh == MB_OPT_ONOFF) {
+		if (me->beh == MB_OPT_ONOFF || me->beh == MB_OPT_CUSTONOFF) {
 			tmp = strtol(val, &p, 0);
 			if (*p != 0)
 				goto bad_val;
@@ -529,7 +528,7 @@ static void parse(const char *var, const char *val, int *keys_encountered)
 			else     *(int *)me->var &= ~me->mask;
 			return;
 		}
-		else if (me->beh == MB_OPT_RANGE) {
+		else if (me->beh == MB_OPT_RANGE || me->beh == MB_OPT_CUSTRANGE) {
 			tmp = strtol(val, &p, 0);
 			if (*p != 0)
 				goto bad_val;

@@ -15,6 +15,8 @@ void memset32(void *dest_in, int c, int count) { memset(dest_in, c, 4*count); }
 
 void cache_flush_d_inval_i(void *start_addr, void *end_addr) { }
 void *plat_mem_get_for_drc(size_t size) { return NULL; }
+int plat_drc_jit_set_exec(void *ptr, size_t size) { return plat_mem_set_exec(ptr, size); }
+void plat_drc_jit_protect(int writable) { }
 void *p32x_sh2_get_mem_ptr(u32 a, u32 *mask, SH2 *sh2) { return NULL; }
 
 void REGPARM(3) p32x_sh2_write8 (u32 a, u32 d, SH2 *s) { }

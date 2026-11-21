@@ -8,10 +8,6 @@
  */
 
 #include <stdio.h>
-#include <unistd.h>
-#ifndef __MINGW32__
-#include <sys/mman.h> // MAP_JIT
-#endif
 
 #include "../libpicofe/menu.h"
 #include "../libpicofe/plat.h"
@@ -229,9 +225,9 @@ void pemu_finalize_frame(const char *fps, const char *notice)
 	}
 
 	// TODO correct ptr position for hard/soft/no scaling?
-#define is_lightgun(d) (d == PICO_INPUT_LIGHT_GUN || d == PICO_INPUT_JUSTIFIER)
-	if ((currentConfig.EmuOpt & EOPT_GUN_CURSOR) &&
-	    (is_lightgun(currentConfig.input_dev0) || is_lightgun(currentConfig.input_dev1))) {
+#define has_cross(d) (d == PICO_INPUT_LIGHT_GUN || d == PICO_INPUT_JUSTIFIER || d == PICO_INPUT_XE_1AP)
+	if ((currentConfig.EmuOpt & EOPT_CROSSHAIR) &&
+	    (has_cross(currentConfig.input_dev[0]) || has_cross(currentConfig.input_dev[1]))) {
 		pico_inp_mode = 2;
 		pico_pen_x = PicoPicohw.pen_pos[0] = PicoIn.mouseInt[0];
 		pico_pen_y = PicoPicohw.pen_pos[1] = PicoIn.mouseInt[1];
@@ -330,17 +326,9 @@ void plat_status_msg_busy_done(void)
 {
 }
 
-void plat_update_volume(int has_changed, int is_up)
-{
-}
-
 void pemu_sound_start(void)
 {
 	emu_sound_start();
-}
-
-void plat_debug_cat(char *str)
-{
 }
 
 void pemu_forced_frame(int no_scale, int do_emu)
@@ -509,27 +497,4 @@ void pemu_loop_end(void)
 		ghost_buf = NULL;
 	}
 	plat_show_cursor(1);
-}
-
-void plat_wait_till_us(unsigned int us_to)
-{
-	unsigned int now;
-
-	now = plat_get_ticks_us();
-
-	while ((signed int)(us_to - now) > 512)
-	{
-		usleep(1024);
-		now = plat_get_ticks_us();
-	}
-}
-
-void *plat_mem_get_for_drc(size_t size)
-{
-#ifdef MAP_JIT
-	// newer versions of OSX, IOS or TvOS need this
-	return plat_mmap(0, size, 1, 0);
-#else
-	return NULL;
-#endif
 }

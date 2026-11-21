@@ -115,6 +115,9 @@ static int in_ps2_update(void *drv_data, const int *binds, int *result)
 	int i, t;
 	unsigned keys;
 
+	if (!binds)
+		return 0;
+
 	keys = in_ps2_get_bits(pad);
 
 	if (keys & in_ps2_combo_keys[pad]) {

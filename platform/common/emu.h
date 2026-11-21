@@ -36,7 +36,8 @@ extern int g_screen_ppitch; // pitch in pixels
 #define EOPT_EXT_FRMLIMIT (1<<20) // no internal frame limiter (limited by snd, etc)
 #define EOPT_PICO_PEN     (1<<21)
 #define EOPT_MOUSE        (1<<22)
-#define EOPT_GUN_CURSOR   (1<<23)
+#define EOPT_CROSSHAIR    (1<<23)
+
 
 enum {
 	EOPT_SCALE_NONE = 0,
@@ -79,8 +80,7 @@ typedef struct _currentConfig_t {
 	int s_PicoCDBuffers;
 	int s_PicoSndFilterAlpha;
 	int Frameskip;
-	int input_dev0;
-	int input_dev1;
+	int input_dev[2];
 	int confirm_save;
 	int CPUclock;
 	int volume;
@@ -96,11 +96,16 @@ typedef struct _currentConfig_t {
 	int ghosting;
 	int analog_deadzone;
 	int keyboard;
+	int mouse_speed, mouse_wheel;
 	int gunx, guny;
+	int stick_centering; // analog stick emulation
+	int stick_timeout;
+	int stick_rate;
 	int msh2_khz;
 	int ssh2_khz;
 	int overclock_68k;
 	int max_skip;
+	int h32_layer;
 } currentConfig_t;
 
 extern currentConfig_t currentConfig, defaultConfig;

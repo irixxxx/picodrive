@@ -1,17 +1,94 @@
 /* PicoDrive's wrapper for emu2413
  */
 
+#include <stddef.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include "emu2413/emu2413.h"
+#include "ym2413.h"
+
+#ifdef CODE940
+/* The 940 has no usable allocator: serve OPLL_new()'s single calloc()
+ * from .bss and reject the rest. Keep the redirects local to emu2413. */
+static OPLL opll_inst;
+
+void *emu2413_calloc(size_t nmemb, size_t size)
+{
+  if (nmemb * size != sizeof(opll_inst))
+    return NULL;
+
+  memset(&opll_inst, 0, sizeof(opll_inst));
+  return &opll_inst;
+}
+
+/* OPLL_delete() frees the instance, which lives in .bss on the 940 and must
+ * never be handed to the heap's free(). The rate converter's buffers still go
+ * to the real allocator. Defined before the redirect, so the free() below is
+ * the real one. */
+void emu2413_free(void *ptr)
+{
+  if (ptr == &opll_inst)
+    return;
+
+  free(ptr);
+}
+
+#define calloc emu2413_calloc
+#define free emu2413_free
+#endif
+
+/* PicoDrive always renders the chip at its native clk/72 rate and resamples
+ * externally, so advance exactly one native sample per call instead of
+ * running emu2413's fractional rate loop. That loop keeps out_time/inp_step
+ * bookkeeping in the per-sample path and, since rate is a rounded clk/72,
+ * repeats or drops a native sample every few seconds. */
+#define OPLL_calc emu2413_OPLL_calc
 #include "emu2413/emu2413.c"
+#undef OPLL_calc
+#undef calloc /* keep the 940 redirects local to emu2413.c */
+#undef free
+
+int16_t OPLL_calc(OPLL *o)
+{
+  if (o->conv)
+    return emu2413_OPLL_calc(o); /* internal SRC, if ever enabled */
+
+  update_output(o);
+  mix_output(o);
+  return o->mix_out[0];
+}
+
+#if defined(__GP2X__) && !defined(CODE940)
+#include <platform/gp2x/940ctl.h>
+#endif
 
 // the one instance that can be in a Mark III
+#ifdef CODE940
+/* OPLL_new() fills this in; silent before that */
+OPLL *opll = &opll_inst;
+#else
 OPLL *opll = NULL;
+#endif
 
 
 void YM2413_regWrite(unsigned data){
+#if defined(__GP2X__) && !defined(CODE940)
+  if (YM2413_940_is_active()) {
+    YM2413_regWrite_940(data);
+    return;
+  }
+#endif
   OPLL_writeIO(opll,0,data);
 }
 
 void YM2413_dataWrite(unsigned data){
+#if defined(__GP2X__) && !defined(CODE940)
+  if (YM2413_940_is_active()) {
+    YM2413_dataWrite_940(data);
+    return;
+  }
+#endif
   OPLL_writeIO(opll,1,data);
 }
 
@@ -63,6 +140,11 @@ size_t ym2413_pack_state(void *buf_, size_t size)
 	size_t i, b = 0;
 	u8 *buf = buf_;
 
+#if defined(__GP2X__) && !defined(CODE940)
+	if (YM2413_940_is_active())
+		return YM2413PicoStateSave_940(buf_, size);
+#endif
+
 	// regs and adr first, for backwards compatibility
 	save_u32(buf, &b, opll->adr);
 	for (i = 0; i < 0x40; i++)
@@ -82,7 +164,6 @@ size_t ym2413_pack_state(void *buf_, size_t size)
 	save_u32(buf, &b, opll->noise);
 	save_u16(buf, &b, opll->short_noise);
 
-	printf("ym2413 state size: %zu\n", b);
 	assert(b <= size);
 	return b;
 }
@@ -91,6 +172,16 @@ void ym2413_unpack_state(const void *buf_, size_t size)
 {
 	const u8 *buf = buf_;
 	size_t i, b = 0;
+
+	if (size < YM2413_STATE_MIN)
+		return;
+
+#if defined(__GP2X__) && !defined(CODE940)
+	if (YM2413_940_is_active()) {
+		YM2413PicoStateLoad_940(buf_, size);
+		return;
+	}
+#endif
 
 	// registers, write to opll too to take over to internal data structures
 	opll->adr = load_u32(buf, &b);
