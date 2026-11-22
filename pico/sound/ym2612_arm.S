@@ -171,6 +171,7 @@
     subge   r0, r0, #1
     movge   r3, #EG_OFF
     strgeb  r3, [r5,#0x17]       @ state
+    strh    r0, [r5,#0x1a]       @ volume
     ldrh    r3, [r5,#0x18]       @ tl
     b       11f
 

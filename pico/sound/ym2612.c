@@ -554,7 +554,9 @@ static INLINE void set_timers( int v )
 static INLINE void recalc_volout(FM_SLOT *SLOT)
 {
 	INT16 vol_out = SLOT->volume;
-	if ((SLOT->ssg&0x0c) == 0x0c)
+	/* must match update_eg_phase() */
+	if ((SLOT->ssg&0x0c) == 0x0c && SLOT->state > EG_REL &&
+	    (ym2612.OPN.ST.flags & 1))
 		vol_out = (0x200 - vol_out) & MAX_ATT_INDEX;
 	SLOT->vol_out = vol_out + SLOT->tl;
 }
@@ -615,8 +617,7 @@ static INLINE void set_det_mul(FM_CH *CH, FM_SLOT *SLOT, int v)
 static INLINE void set_tl(FM_SLOT *SLOT, int v)
 {
 	SLOT->tl = (v&0x7f)<<(ENV_BITS-7); /* 7bit TL */
-	if (SLOT->state > EG_REL)
-		recalc_volout(SLOT);
+	recalc_volout(SLOT);
 }
 
 /* set attack rate & key scale  */
@@ -1447,6 +1448,22 @@ static INLINE void refresh_fc_eg_chan_sl3(FM_CH *CH2, const FM_3SLOT *SL3, UINT3
 	}
 }
 
+static void refresh_all_channels(void)
+{
+	UINT32 freqbase = ym2612.OPN.ST.freqbase_ui;
+
+	refresh_fc_eg_chan(&ym2612.CH[0], freqbase);
+	refresh_fc_eg_chan(&ym2612.CH[1], freqbase);
+	if (ym2612.OPN.ST.mode & 0xc0)
+		/* 3SLOT MODE */
+		refresh_fc_eg_chan_sl3(&ym2612.CH[2], &ym2612.OPN.SL3, freqbase);
+	else
+		refresh_fc_eg_chan(&ym2612.CH[2], freqbase);
+	refresh_fc_eg_chan(&ym2612.CH[3], freqbase);
+	refresh_fc_eg_chan(&ym2612.CH[4], freqbase);
+	refresh_fc_eg_chan(&ym2612.CH[5], freqbase);
+}
+
 static void reset_channels(FM_CH *CH)
 {
 	int c,s;
@@ -1758,7 +1775,6 @@ static int OPNWriteReg(int r, int v)
 /* Generate samples for YM2612 */
 int YM2612UpdateOne_(s32 *buffer, int length, int stereo, int is_buf_empty)
 {
-	UINT32 freqbase = ym2612.OPN.ST.freqbase_ui;
 	int pan;
 	int active_chs = 0;
 	int flags = stereo ? 1:0;
@@ -1785,16 +1801,7 @@ int YM2612UpdateOne_(s32 *buffer, int length, int stereo, int is_buf_empty)
 	}
 */
 	/* refresh PG and EG */
-	refresh_fc_eg_chan(&ym2612.CH[0], freqbase);
-	refresh_fc_eg_chan(&ym2612.CH[1], freqbase);
-	if( (ym2612.OPN.ST.mode & 0xc0) )
-		/* 3SLOT MODE */
-		refresh_fc_eg_chan_sl3(&ym2612.CH[2], &ym2612.OPN.SL3, freqbase);
-	else
-		refresh_fc_eg_chan(&ym2612.CH[2], freqbase);
-	refresh_fc_eg_chan(&ym2612.CH[3], freqbase);
-	refresh_fc_eg_chan(&ym2612.CH[4], freqbase);
-	refresh_fc_eg_chan(&ym2612.CH[5], freqbase);
+	refresh_all_channels();
 
 	pan = ym2612.OPN.pan;
 
@@ -2457,6 +2464,8 @@ void YM2612PicoStateLoad3(const void *buf_, size_t size)
 				if (ym2612.CH[c].SLOT[s].state != EG_OFF)
 					ym2612.slot_mask |= 1 << (s + c*4);
 	}
+	// refresh now, a register write may precede the next update
+	refresh_all_channels();
 	//printf("ym2612 state size: %zu\n", b);
 	return;
 broken:
