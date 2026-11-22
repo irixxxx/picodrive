@@ -1305,6 +1305,8 @@ void PicoVideoLoad(void *buf, int len)
   if (pv->reg[12]&1)
     SATaddr &= ~0x200, SATmask &= ~0x200; // H40, zero lowest SAT bit
 
+  linedisabled = lineenabled = -1;
+
   vf->fifo_maxslot = 0;
   PicoVideoFIFOMode(pv->reg[1]&0x40, pv->reg[12]&1);
 
