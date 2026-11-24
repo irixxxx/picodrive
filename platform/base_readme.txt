@@ -67,6 +67,9 @@ EU: eu_mcd1_9210.bin, eu_mcd2_9303.bin, eu_mcd2_9306.bin
 JP: jp_mcd1_9112.bin, jp_mcd1_9111.bin
 these files can also be zipped.
 
+For Mega/Sega CD respectively you will need:
+bios_CD_U.bin, bios_CD_E.bin, bios_CD_J.bin
+
 The game must be dumped to CHD, CUE+BIN or CUE+ISO format.
 ISO/CSO+MP3/WAV is also supported, but may cause problems.
 When using CUE/BIN, you must load .cue file from the menu, or else the emu will
